@@ -1,5 +1,7 @@
 # Protein Index
 
+Live dashboard: <https://protein-index.sarthakagrawal927.workers.dev>
+
 A normalized Indian food-product intelligence database with protein discovery,
 source-aware nutrition and ingredients, and evidence-first comparisons.
 
@@ -90,10 +92,10 @@ After resources are bound and the reviewed snapshot has been published:
 
 ```bash
 pnpm release:preflight
-pnpm deploy
+pnpm run deploy
 ```
 
-`pnpm deploy` runs the fleet deploy guard before tests, build, Worker startup
+`pnpm run deploy` runs the fleet deploy guard before tests, build, Worker startup
 profiling, Wrangler dry run, and the strict deployment. Roll back Worker code
 with Wrangler deployment rollback; catalog corrections are republished as new
 evidence-preserving runs instead of deleting the audit trail.

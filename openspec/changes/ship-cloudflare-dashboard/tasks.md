@@ -30,5 +30,5 @@
 - [x] 5.2 Commit and push a clean synced main branch, wait for green CI, and pass the fleet deployment guard.
 - [x] 5.3 Confirm Cloudflare identity, create only missing D1 and private R2 resources, apply remote migrations, and verify bindings.
 - [x] 5.4 Publish the reviewed complete Open Food Facts snapshot to remote D1 and verify ingestion, product, evidence, and coverage counts.
-- [ ] 5.5 Deploy the Worker and verify live root, health, catalog, detail, coverage, SPA fallback, and anonymous mutation denial.
+- [x] 5.5 Deploy the Worker and verify live root, health, catalog, detail, coverage, SPA fallback, and anonymous mutation denial.
 - [ ] 5.6 Verify the live dashboard at desktop and mobile widths in the sanctioned in-app browser, then record the deployment URL and residual evidence limitations.

@@ -364,7 +364,7 @@ export function App() {
   };
 
   const showTrusted = () => updateFilters({ verification: "verified", scope: "protein", sort: "protein_density" });
-  const showDiscovery = () => updateFilters({ verification: "all", scope: "all", sort: "completeness" });
+  const showDiscovery = () => updateFilters({ verification: "all", scope: "protein", sort: "completeness" });
 
   const loadCatalog = () => {
     const controller = new AbortController();
@@ -441,8 +441,8 @@ export function App() {
               <button onClick={() => setTab("coverage")}><span>Source state</span><strong>{coverage?.sources.some((source) => source.sourceComplete) ? "Exhausted" : "Checking"}</strong><small>configured sources only →</small></button>
             </section>
             <section className="trust-switch" aria-label="Comparison trust mode">
-              <div><p className="eyebrow">Choose your evidence boundary</p><strong>{catalog?.trustedDefault ? "Trusted comparisons" : "Discovery catalog"}</strong><span>{catalog?.trustedDefault ? "Only current, verified nutrition can produce rankings." : "All retained foods are visible; community values remain explicitly unverified."}</span></div>
-              <div role="group" aria-label="Evidence boundary"><button className={catalog?.trustedDefault ? "active" : ""} aria-pressed={catalog?.trustedDefault ?? false} onClick={showTrusted}>Trusted</button><button className={catalog && !catalog.trustedDefault ? "active" : ""} aria-pressed={catalog ? !catalog.trustedDefault : false} onClick={showDiscovery}>All evidence</button></div>
+              <div><p className="eyebrow">Choose your evidence boundary</p><strong>{catalog?.trustedDefault ? "Trusted comparisons" : "Discovery catalog"}</strong><span>{catalog?.trustedDefault ? "Only current, verified nutrition can produce rankings." : "Protein candidates stay visible; use Scope to explore every retained food. Community values remain unverified."}</span></div>
+              <div role="group" aria-label="Evidence boundary"><button className={catalog?.trustedDefault ? "active" : ""} aria-pressed={catalog?.trustedDefault ?? false} onClick={showTrusted}>Trusted</button><button className={catalog && !catalog.trustedDefault ? "active" : ""} aria-pressed={catalog ? !catalog.trustedDefault : false} onClick={showDiscovery}>Discovery</button></div>
             </section>
             <section className="filters" aria-label="Catalog filters">
               <label className="search-field"><span>Search the index</span><input type="search" value={filters.q} onChange={(event) => updateFilters({ q: event.target.value })} placeholder="Try Amul, whey, paneer, or a GTIN" /></label>

@@ -48,10 +48,12 @@ ONDC integration; purchasing or checkout.
 - 2026-07-15 — first exhaustive Open Food Facts workflow completed: 4,535,553 rows traversed, 21,188 India-tagged rows found, and 17,732 valid product records staged
 - 2026-07-15 — continuity and exclusion proof completed in GitHub Actions run `29420495106`: 17,732 unchanged staged records plus 3,456 auditable exclusions reconcile all 21,188 India-tagged rows
 - 2026-07-15 — responsive evidence-first dashboard, strict trusted/discovery modes, guarded release preflight, and reviewed-snapshot D1 publication path implemented
+- 2026-07-15 — APAC D1 and private R2 provisioned; 17,732 reviewed source records published into a 169 MB evidence database with 17,628 active products
+- 2026-07-15 — Cloudflare Worker deployed at `https://protein-index.sarthakagrawal927.workers.dev`; live API, SPA fallback, security headers, and mutation denial verified
 
 ## Products
 
-- `protein-index` web application and Worker API — release candidate; Cloudflare deployment in progress
+- `protein-index` web application and Worker API — deployed on Cloudflare at `https://protein-index.sarthakagrawal927.workers.dev`
 - Offline Open Food Facts ingestion and reconciliation CLI — implemented
 - Weekly/manual Open Food Facts source-sync workflow — implemented; first full continuity baseline completed in GitHub Actions run `29419259301`
 
@@ -90,5 +92,6 @@ ONDC integration; purchasing or checkout.
    micronutrients, raw foods, foodservice, prepared dishes, and recipes after the
    protein catalog proves its accuracy and operating model.
 9. Blocked: official DataKart ingestion requires a commercial agreement and private API documentation.
-10. In progress: provision the authorized minimal Cloudflare resources, publish
-    the reviewed snapshot, deploy the Worker, and record live verification.
+10. Complete sanctioned desktop/mobile visual verification when the in-app
+    browser target becomes available; live API and responsive implementation
+    checks are complete.
