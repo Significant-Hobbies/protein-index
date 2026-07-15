@@ -10,7 +10,7 @@ function errorBody(code: string, message: string, details?: Record<string, unkno
 }
 
 app.get("/api/health", async (c) => {
-  const result = await c.env.DB.prepare("SELECT COUNT(*) AS products FROM products").first<{ products: number }>();
+  const result = await c.env.DB.prepare("SELECT COUNT(*) AS products FROM products WHERE is_active = 1").first<{ products: number }>();
   return c.json({ status: "ok", products: result?.products ?? 0, environment: "local-first" });
 });
 
@@ -46,7 +46,7 @@ app.post("/api/reviews/:id/resolve", async (c) => {
     return c.json(errorBody("validation_error", "Expected a JSON object"), 400);
   }
   const input = body as Record<string, unknown>;
-  const decisions: ReviewDecision[] = ["verify_nutrition", "reject_nutrition", "dismiss"];
+  const decisions: ReviewDecision[] = ["verify_nutrition", "reject_nutrition", "dismiss", "match", "create_new", "no_match"];
   if (typeof input.decision !== "string" || !decisions.includes(input.decision as ReviewDecision)) {
     return c.json(errorBody("validation_error", "Invalid review decision"), 400);
   }
@@ -67,10 +67,15 @@ app.post("/api/reviews/:id/resolve", async (c) => {
   if (input.decision === "verify_nutrition" && evidenceUrl === null) {
     return c.json(errorBody("validation_error", "Verification requires a current label or authoritative-source evidence URL"), 400);
   }
-  const result = await resolveReview(c.env.DB, c.req.param("id"), input.decision as ReviewDecision, input.rationale.trim(), evidenceUrl);
+  const candidateProductId = input.candidateProductId === undefined || input.candidateProductId === null || input.candidateProductId === ""
+    ? null
+    : typeof input.candidateProductId === "string" ? input.candidateProductId : undefined;
+  if (candidateProductId === undefined) return c.json(errorBody("validation_error", "Candidate product ID must be a string"), 400);
+  const result = await resolveReview(c.env.DB, c.req.param("id"), input.decision as ReviewDecision, input.rationale.trim(), evidenceUrl, candidateProductId);
   if (result === "not_found") return c.json(errorBody("not_found", "Review item not found"), 404);
   if (result === "conflict") return c.json(errorBody("conflict", "Review item was already resolved"), 409);
   if (result === "invalid_decision") return c.json(errorBody("validation_error", "Decision is not valid for this review type"), 400);
+  if (result === "invalid_candidate") return c.json(errorBody("validation_error", "Candidate is not valid for this review item"), 400);
   return c.json({ status: "resolved", id: c.req.param("id"), decision: input.decision });
 });
 

@@ -48,7 +48,8 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
       SUM(CASE WHEN p.nutritionally_protein_dense = 1 THEN 1 ELSE 0 END) AS nutritionally_protein_dense
       FROM products p
       LEFT JOIN nutrition_facts n ON n.product_id = p.id
-      LEFT JOIN ingredient_statements i ON i.product_id = p.id`),
+      LEFT JOIN ingredient_statements i ON i.product_id = p.id
+      WHERE p.is_active = 1`),
     db.prepare(`SELECT s.id, s.name, s.kind, r.status, r.completed_at, r.records_read,
       r.india_records, r.source_complete, r.manifest_json
       FROM sources s LEFT JOIN ingestion_runs r ON r.id = (

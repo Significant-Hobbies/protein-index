@@ -1,4 +1,4 @@
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import type { CatalogResponse, CoverageResponse, ProductDetailResponse, ReviewResponse } from "../shared/api";
 
@@ -7,6 +7,23 @@ const worker = exports.default;
 async function json<T>(response: Response): Promise<T> {
   expect(response.headers.get("content-type")).toContain("application/json");
   return response.json() as Promise<T>;
+}
+
+async function replaySeed(): Promise<void> {
+  for (let index = 0; index < env.TEST_SEED_QUERIES.length; index += 50) {
+    await env.DB.batch(env.TEST_SEED_QUERIES.slice(index, index + 50).map((query) => env.DB.prepare(query)));
+  }
+}
+
+async function identityReview(sourceRecordId: string): Promise<ReviewResponse["items"][number]> {
+  const source = await env.DB.prepare("SELECT id FROM source_records WHERE source_record_id = ?")
+    .bind(sourceRecordId).first<{ id: string }>();
+  if (!source) throw new Error(`Expected source record ${sourceRecordId}`);
+  const response = await worker.fetch("http://localhost/api/reviews?status=open");
+  const reviews = await json<ReviewResponse>(response);
+  const review = reviews.items.find((item) => item.type === "identity" && item.sourceRecordId === source.id);
+  if (!review?.productId) throw new Error("Expected an identity review with an incoming product");
+  return review;
 }
 
 describe("Worker catalog API", () => {
@@ -62,7 +79,7 @@ describe("Worker catalog API", () => {
     const listResponse = await worker.fetch("http://localhost/api/reviews?status=open");
     expect(listResponse.status).toBe(200);
     const reviews = await json<ReviewResponse>(listResponse);
-    const review = reviews.items[0];
+    const review = reviews.items.find((item) => item.type === "coverage_gap");
     expect(review).toBeDefined();
     if (!review) throw new Error("Expected an open review fixture");
 
@@ -95,5 +112,93 @@ describe("Worker catalog API", () => {
       decisionEvidenceUrl: "https://example.invalid/label-proof",
       decidedBy: "local_operator",
     });
+  });
+
+  it("persists a manual identity match and reuses it on replay", async () => {
+    const review = await identityReview("fixture-ambiguous-whey-listing");
+    expect(review.candidates).toHaveLength(1);
+    const candidate = review.candidates[0];
+    if (!candidate) throw new Error("Expected an identity candidate");
+    expect(candidate).toMatchObject({ brand: "Atlas Test Foods", name: "High Protein Whey Blend", netQuantityGrams: 1000 });
+
+    const invalidCandidate = await worker.fetch(`http://localhost/api/reviews/${review.id}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "match", rationale: "Wrong candidate proof", candidateProductId: "not-a-candidate" }),
+    });
+    expect(invalidCandidate.status).toBe(400);
+
+    const resolved = await worker.fetch(`http://localhost/api/reviews/${review.id}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "match", rationale: "Same label identity; missing retailer pack metadata", candidateProductId: candidate.id }),
+    });
+    expect(resolved.status).toBe(200);
+
+    await replaySeed();
+
+    const source = await env.DB.prepare(`SELECT product_id, resolution_rule FROM source_records
+      WHERE source_id = 'label_fixture' AND source_record_id = 'fixture-ambiguous-whey-listing'`).first<{ product_id: string | null; resolution_rule: string }>();
+    expect(source).toEqual({ product_id: candidate.id, resolution_rule: "manual_match" });
+    const decision = await env.DB.prepare("SELECT decision, target_product_id, active FROM identity_decisions WHERE source_record_key = ?")
+      .bind("fixture-ambiguous-whey-listing").first<{ decision: string; target_product_id: string; active: number }>();
+    expect(decision).toEqual({ decision: "match", target_product_id: candidate.id, active: 1 });
+    const incoming = await env.DB.prepare("SELECT is_active FROM products WHERE id = ?").bind(review.productId).first<{ is_active: number }>();
+    expect(incoming?.is_active).toBe(0);
+    const openIdentity = await env.DB.prepare("SELECT COUNT(*) AS count FROM review_items WHERE type = 'identity' AND status = 'open' AND source_record_id = ?")
+      .bind(review.sourceRecordId).first<{ count: number }>();
+    expect(openIdentity?.count).toBe(0);
+    const activeProducts = await env.DB.prepare("SELECT COUNT(*) AS count FROM products WHERE is_active = 1").first<{ count: number }>();
+    expect(activeProducts?.count).toBe(5);
+    const candidateDetail = await worker.fetch(`http://localhost/api/products/${candidate.id}`);
+    const detail = await json<ProductDetailResponse>(candidateDetail);
+    expect(detail.sourceRecords.some((record) => record.sourceRecordId === "fixture-ambiguous-whey-listing" && record.resolutionRule === "manual_match")).toBe(true);
+    expect(detail.gtin).toBe("08900000000012");
+    expect(detail.netQuantityGrams).toBe(1000);
+  });
+
+  it("persists a create-new identity decision across replay", async () => {
+    const review = await identityReview("fixture-distinct-whey-listing");
+    const resolved = await worker.fetch(`http://localhost/api/reviews/${review.id}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "create_new", rationale: "Packaging evidence establishes a distinct product" }),
+    });
+    expect(resolved.status).toBe(200);
+
+    await replaySeed();
+
+    const source = await env.DB.prepare("SELECT product_id, resolution_rule FROM source_records WHERE source_record_id = ?")
+      .bind("fixture-distinct-whey-listing").first<{ product_id: string; resolution_rule: string }>();
+    expect(source).toEqual({ product_id: review.productId, resolution_rule: "manual_create_new" });
+    const decision = await env.DB.prepare("SELECT decision, target_product_id FROM identity_decisions WHERE source_record_key = ?")
+      .bind("fixture-distinct-whey-listing").first<{ decision: string; target_product_id: string }>();
+    expect(decision).toEqual({ decision: "create_new", target_product_id: review.productId });
+    const incoming = await env.DB.prepare("SELECT is_active FROM products WHERE id = ?").bind(review.productId).first<{ is_active: number }>();
+    expect(incoming?.is_active).toBe(1);
+  });
+
+  it("persists a keep-unmatched identity decision across replay", async () => {
+    const review = await identityReview("fixture-unmatched-whey-listing");
+    const resolved = await worker.fetch(`http://localhost/api/reviews/${review.id}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "no_match", rationale: "Evidence is insufficient to publish or merge this listing" }),
+    });
+    expect(resolved.status).toBe(200);
+
+    await replaySeed();
+
+    const source = await env.DB.prepare("SELECT product_id, resolution_rule FROM source_records WHERE source_record_id = ?")
+      .bind("fixture-unmatched-whey-listing").first<{ product_id: string | null; resolution_rule: string }>();
+    expect(source).toEqual({ product_id: null, resolution_rule: "manual_no_match" });
+    const decision = await env.DB.prepare("SELECT decision, target_product_id FROM identity_decisions WHERE source_record_key = ?")
+      .bind("fixture-unmatched-whey-listing").first<{ decision: string; target_product_id: string | null }>();
+    expect(decision).toEqual({ decision: "no_match", target_product_id: null });
+    const incoming = await env.DB.prepare("SELECT is_active FROM products WHERE id = ?").bind(review.productId).first<{ is_active: number }>();
+    expect(incoming?.is_active).toBe(0);
+    const stillLinked = await env.DB.prepare("SELECT COUNT(*) AS count FROM source_records WHERE product_id = ?")
+      .bind(review.productId).first<{ count: number }>();
+    expect(stillLinked?.count).toBe(0);
   });
 });

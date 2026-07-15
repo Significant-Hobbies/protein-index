@@ -91,6 +91,15 @@ export interface ReviewItem {
   brand: string | null;
   sourceRecordId: string | null;
   candidateProductIds: string[];
+  candidates: Array<{
+    id: string;
+    gtin: string | null;
+    brand: string;
+    name: string;
+    flavour: string | null;
+    netQuantityGrams: number | null;
+    category: ProductCategory;
+  }>;
   evidence: unknown;
   createdAt: string;
   decision: string | null;

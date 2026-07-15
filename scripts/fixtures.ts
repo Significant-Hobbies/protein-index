@@ -16,12 +16,12 @@ import type {
 
 interface FixtureRecord {
   sourceRecordId: string;
-  gtin: string;
+  gtin: string | null;
   brand: string;
   name: string;
-  flavour: string;
+  flavour: string | null;
   category: ProductCategory;
-  netQuantityGrams: number;
+  netQuantityGrams: number | null;
   servingSizeGrams: number;
   nutritionStatus: EvidenceStatus;
   nutrition: NutritionPer100g;
@@ -31,6 +31,7 @@ interface FixtureRecord {
   sellingPrice: number;
   mrp: number;
   rating: { stars: number; ratingCount: number; reviewCount: number };
+  identityReviewFixture?: boolean;
 }
 
 function isFixtureRecord(value: unknown): value is FixtureRecord {
@@ -38,7 +39,7 @@ function isFixtureRecord(value: unknown): value is FixtureRecord {
   const candidate = value as Record<string, unknown>;
   return (
     typeof candidate.sourceRecordId === "string" &&
-    typeof candidate.gtin === "string" &&
+    (typeof candidate.gtin === "string" || (candidate.gtin === null && candidate.identityReviewFixture === true)) &&
     typeof candidate.brand === "string" &&
     typeof candidate.name === "string" &&
     typeof candidate.category === "string" &&
@@ -60,7 +61,7 @@ export async function buildFixtureStage(outputDirectory: string): Promise<{
   const observedAt = "2026-07-15T00:00:00.000Z";
   const staged: StagedProduct[] = parsed.map((fixture) => {
     const gtin = normalizeGtin(fixture.gtin);
-    if (!gtin) throw new Error(`Fixture has invalid GTIN: ${fixture.gtin}`);
+    if (!gtin && !fixture.identityReviewFixture) throw new Error(`Fixture has invalid GTIN: ${fixture.gtin}`);
     const nutrition = {
       per100g: fixture.nutrition,
       servingSizeGrams: fixture.servingSizeGrams,
@@ -92,7 +93,7 @@ export async function buildFixtureStage(outputDirectory: string): Promise<{
       nutrition,
       ingredients,
       evidence: sourcePath,
-      offer: fixture.sellingPrice,
+      offer: fixture.identityReviewFixture ? null : fixture.sellingPrice,
     });
     const rawEvidence = { ...fixture, fixtureOnly: true };
     return {
@@ -118,7 +119,7 @@ export async function buildFixtureStage(outputDirectory: string): Promise<{
       imageUrl: null,
       nutritionImageUrl: null,
       ingredientImageUrl: null,
-      offers: [{
+      offers: fixture.identityReviewFixture ? [] : [{
         retailer: "fixture_retailer",
         retailerListingId: fixture.sourceRecordId,
         pincode: "560001",
@@ -129,7 +130,7 @@ export async function buildFixtureStage(outputDirectory: string): Promise<{
         url: "https://example.invalid/fixture-only",
         observedAt,
       }],
-      ratings: [{
+      ratings: fixture.identityReviewFixture ? [] : [{
         retailer: "fixture_retailer",
         retailerListingId: fixture.sourceRecordId,
         stars: fixture.rating.stars,

@@ -10,6 +10,7 @@ interface ReviewRow {
   brand: string | null;
   source_record_id: string | null;
   candidate_product_ids_json: string;
+  candidates_json: string;
   evidence_json: string;
   created_at: string;
   decision: string | null;
@@ -28,7 +29,17 @@ export async function listReviews(db: D1Database, status: string, limit: number)
   const batch = await db.batch([
     db.prepare(`SELECT r.id, r.type, r.priority, r.status, r.product_id, p.name AS product_name, p.brand,
       r.source_record_id, r.candidate_product_ids_json, r.evidence_json, r.created_at, r.decision, r.decision_rationale,
-      r.decision_evidence_url, r.decided_by
+      r.decision_evidence_url, r.decided_by,
+      COALESCE((SELECT json_group_array(json_object(
+        'id', candidate.id,
+        'gtin', candidate.gtin,
+        'brand', candidate.brand,
+        'name', candidate.name,
+        'flavour', candidate.flavour,
+        'netQuantityGrams', candidate.net_quantity_grams,
+        'category', candidate.category
+      )) FROM json_each(r.candidate_product_ids_json) listed
+      JOIN products candidate ON candidate.id = listed.value), '[]') AS candidates_json
       FROM review_items r LEFT JOIN products p ON p.id = r.product_id
       WHERE r.status = ? ORDER BY r.priority DESC, r.created_at LIMIT ?`).bind(status, limit),
     db.prepare("SELECT status, COUNT(*) AS count FROM review_items GROUP BY status"),
@@ -46,6 +57,7 @@ export async function listReviews(db: D1Database, status: string, limit: number)
     brand: row.brand,
     sourceRecordId: row.source_record_id,
     candidateProductIds: parsed(row.candidate_product_ids_json) as string[] ?? [],
+    candidates: parsed(row.candidates_json) as ReviewItem["candidates"] ?? [],
     evidence: parsed(row.evidence_json),
     createdAt: row.created_at,
     decision: row.decision,
@@ -58,7 +70,7 @@ export async function listReviews(db: D1Database, status: string, limit: number)
   return { items, counts };
 }
 
-export type ReviewDecision = "verify_nutrition" | "reject_nutrition" | "dismiss";
+export type ReviewDecision = "verify_nutrition" | "reject_nutrition" | "dismiss" | "match" | "create_new" | "no_match";
 
 export async function resolveReview(
   db: D1Database,
@@ -66,34 +78,125 @@ export async function resolveReview(
   decision: ReviewDecision,
   rationale: string,
   evidenceUrl: string | null,
-): Promise<"resolved" | "not_found" | "conflict" | "invalid_decision"> {
-  const review = await db.prepare("SELECT id, status, product_id, type FROM review_items WHERE id = ?").bind(id).first<{
+  candidateProductId: string | null,
+): Promise<"resolved" | "not_found" | "conflict" | "invalid_decision" | "invalid_candidate"> {
+  const review = await db.prepare(`SELECT r.id, r.status, r.product_id, r.type, r.candidate_product_ids_json,
+    r.source_record_id, s.source_id, s.source_record_id AS source_record_key, s.identity_hash
+    FROM review_items r LEFT JOIN source_records s ON s.id = r.source_record_id WHERE r.id = ?`).bind(id).first<{
     id: string;
     status: string;
     product_id: string | null;
     type: string;
+    candidate_product_ids_json: string;
+    source_record_id: string | null;
+    source_id: string | null;
+    source_record_key: string | null;
+    identity_hash: string | null;
   }>();
   if (!review) return "not_found";
   if (review.status !== "open") return "conflict";
   const nutritionReview = ["nutrition_validation", "nutrition_conflict", "coverage_gap"].includes(review.type);
   if (["verify_nutrition", "reject_nutrition"].includes(decision) && !nutritionReview) return "invalid_decision";
+  const identityReview = review.type === "identity";
+  if (["match", "create_new", "no_match"].includes(decision) && !identityReview) return "invalid_decision";
+  if (identityReview && !["match", "create_new", "no_match", "dismiss"].includes(decision)) return "invalid_decision";
+  const candidateIds = parsed(review.candidate_product_ids_json);
+  if (decision === "match" && (
+    !candidateProductId ||
+    !Array.isArray(candidateIds) ||
+    !candidateIds.includes(candidateProductId)
+  )) return "invalid_candidate";
+  if (decision !== "match" && candidateProductId !== null) return "invalid_candidate";
+  if (identityReview && decision !== "dismiss" && (
+    !review.product_id ||
+    !review.source_record_id ||
+    !review.source_id ||
+    !review.source_record_key ||
+    !review.identity_hash
+  )) return "invalid_decision";
   const status = decision === "dismiss" ? "dismissed" : "resolved";
+  const decidedAt = new Date().toISOString();
   const statements = [
     db.prepare("UPDATE review_items SET status = ?, decision = ?, decision_rationale = ?, decision_evidence_url = ?, decided_by = 'local_operator', resolved_at = ? WHERE id = ? AND status = 'open'")
-      .bind(status, decision, rationale, evidenceUrl, new Date().toISOString(), id),
+      .bind(status, decision, rationale, evidenceUrl, decidedAt, id),
   ];
   if (review.product_id && decision === "verify_nutrition") {
     statements.push(db.prepare("UPDATE nutrition_facts SET status = 'verified', confidence = 'high', label_verified_at = ?, updated_at = ? WHERE product_id = ?")
-      .bind(new Date().toISOString(), new Date().toISOString(), review.product_id));
+      .bind(decidedAt, decidedAt, review.product_id));
   }
   if (review.product_id && decision === "reject_nutrition") {
     statements.push(db.prepare(`UPDATE nutrition_facts SET status = 'missing', confidence = 'low',
       calories = NULL, protein_grams = NULL, carbohydrate_grams = NULL, sugar_grams = NULL,
       fat_grams = NULL, saturated_fat_grams = NULL, fibre_grams = NULL, sodium_mg = NULL,
       label_verified_at = NULL, updated_at = ? WHERE product_id = ?`)
-      .bind(new Date().toISOString(), review.product_id));
+      .bind(decidedAt, review.product_id));
     statements.push(db.prepare("UPDATE field_observations SET selected = 0 WHERE product_id = ? AND field_path LIKE 'nutrition.%'")
       .bind(review.product_id));
+  }
+  if (identityReview && decision !== "dismiss" && review.product_id && review.source_record_id && review.source_id && review.source_record_key && review.identity_hash) {
+    const targetProductId = decision === "match" ? candidateProductId : decision === "create_new" ? review.product_id : null;
+    statements.push(db.prepare(`INSERT INTO identity_decisions
+      (id, source_id, source_record_key, source_record_id, identity_hash, decision, target_product_id, rationale, decided_by, decided_at, active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'local_operator', ?, 1)
+      ON CONFLICT(source_id, source_record_key, identity_hash) DO UPDATE SET
+        source_record_id = excluded.source_record_id, decision = excluded.decision,
+        target_product_id = excluded.target_product_id, rationale = excluded.rationale,
+        decided_by = excluded.decided_by, decided_at = excluded.decided_at, active = 1`)
+      .bind(`idn_${id}`, review.source_id, review.source_record_key, review.source_record_id, review.identity_hash, decision, targetProductId, rationale, decidedAt));
+    statements.push(db.prepare("UPDATE source_records SET product_id = ?, resolution_rule = ? WHERE id = ?")
+      .bind(targetProductId, `manual_${decision}`, review.source_record_id));
+    if (decision === "match" && targetProductId) {
+      statements.push(db.prepare(`INSERT INTO nutrition_facts
+        (product_id, source_record_id, status, confidence, authority, basis, preparation_state,
+          calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams,
+          fibre_grams, sodium_mg, label_verified_at, observed_at, updated_at)
+        SELECT ?, source_record_id, status, confidence, authority, basis, preparation_state,
+          calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams,
+          fibre_grams, sodium_mg, label_verified_at, observed_at, ?
+        FROM nutrition_facts WHERE product_id = ?
+        ON CONFLICT(product_id) DO UPDATE SET
+          source_record_id = excluded.source_record_id, status = excluded.status, confidence = excluded.confidence,
+          authority = excluded.authority, basis = excluded.basis, preparation_state = excluded.preparation_state,
+          calories = excluded.calories, protein_grams = excluded.protein_grams,
+          carbohydrate_grams = excluded.carbohydrate_grams, sugar_grams = excluded.sugar_grams,
+          fat_grams = excluded.fat_grams, saturated_fat_grams = excluded.saturated_fat_grams,
+          fibre_grams = excluded.fibre_grams, sodium_mg = excluded.sodium_mg,
+          label_verified_at = excluded.label_verified_at, observed_at = excluded.observed_at,
+          updated_at = excluded.updated_at
+        WHERE excluded.authority > nutrition_facts.authority OR
+          (excluded.authority = nutrition_facts.authority AND excluded.observed_at > nutrition_facts.observed_at)`)
+        .bind(targetProductId, decidedAt, review.product_id));
+      statements.push(db.prepare(`INSERT INTO ingredient_statements
+        (product_id, source_record_id, raw_text, language, status, confidence, authority, observed_at, updated_at)
+        SELECT ?, source_record_id, raw_text, language, status, confidence, authority, observed_at, ?
+        FROM ingredient_statements WHERE product_id = ?
+        ON CONFLICT(product_id) DO UPDATE SET
+          source_record_id = excluded.source_record_id, raw_text = excluded.raw_text, language = excluded.language,
+          status = excluded.status, confidence = excluded.confidence, authority = excluded.authority,
+          observed_at = excluded.observed_at, updated_at = excluded.updated_at
+        WHERE excluded.authority > ingredient_statements.authority OR
+          (excluded.authority = ingredient_statements.authority AND excluded.observed_at > ingredient_statements.observed_at)`)
+        .bind(targetProductId, decidedAt, review.product_id));
+      for (const table of ["nutrient_values", "product_ingredients", "product_allergens", "product_additives", "field_observations", "offers", "ratings"] as const) {
+        statements.push(db.prepare(`UPDATE ${table} SET product_id = ? WHERE source_record_id = ?`).bind(targetProductId, review.source_record_id));
+      }
+      statements.push(db.prepare("DELETE FROM nutrition_facts WHERE product_id = ?").bind(review.product_id));
+      statements.push(db.prepare("DELETE FROM ingredient_statements WHERE product_id = ?").bind(review.product_id));
+      statements.push(db.prepare("UPDATE review_items SET product_id = ? WHERE product_id = ? AND id <> ? AND status = 'open'")
+        .bind(targetProductId, review.product_id, id));
+      statements.push(db.prepare(`UPDATE field_observations SET selected = CASE WHEN id = (
+        SELECT chosen.id FROM field_observations chosen
+        WHERE chosen.product_id = ? AND chosen.field_path = field_observations.field_path
+        ORDER BY chosen.authority DESC, chosen.observed_at DESC, chosen.id LIMIT 1
+      ) THEN 1 ELSE 0 END WHERE product_id = ?`).bind(targetProductId, targetProductId));
+      statements.push(db.prepare("UPDATE products SET is_active = 1 WHERE id = ?").bind(targetProductId));
+      statements.push(db.prepare("UPDATE products SET is_active = 0 WHERE id = ? AND NOT EXISTS (SELECT 1 FROM source_records WHERE product_id = ?)")
+        .bind(review.product_id, review.product_id));
+    } else if (decision === "create_new") {
+      statements.push(db.prepare("UPDATE products SET is_active = 1 WHERE id = ?").bind(review.product_id));
+    } else {
+      statements.push(db.prepare("UPDATE products SET is_active = 0 WHERE id = ?").bind(review.product_id));
+    }
   }
   await db.batch(statements);
   return "resolved";

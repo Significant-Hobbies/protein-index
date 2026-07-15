@@ -212,11 +212,12 @@ function ProductDrawer({ detail, loading, error, onClose }: {
   );
 }
 
-function Reviews({ data, loading, error, onResolve }: {
+function Reviews({ data, loading, error, onResolve, onOpenProduct }: {
   data: ReviewResponse | null;
   loading: boolean;
   error: string | null;
-  onResolve: (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null) => Promise<void>;
+  onResolve: (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null) => Promise<void>;
+  onOpenProduct: (id: string) => void;
 }) {
   const [rationales, setRationales] = useState<Record<string, string>>({});
   const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
@@ -231,11 +232,27 @@ function Reviews({ data, loading, error, onResolve }: {
         <article className="review-card" key={item.id}>
           <header><span className="priority">P{item.priority}</span><div><h3>{item.productName ?? "Unmatched source record"}</h3><p>{item.brand ?? item.sourceRecordId} · {item.type.replaceAll("_", " ")}</p></div></header>
           <pre>{JSON.stringify(item.evidence, null, 2)}</pre>
+          {item.type === "identity" && (
+            <div className="identity-review">
+              <div className="section-title"><h4>Candidate products</h4>{item.productId && <button className="text-button" onClick={() => onOpenProduct(item.productId!)}>Inspect incoming record</button>}</div>
+              {item.candidates.map((candidate) => (
+                <div className="candidate-row" key={candidate.id}>
+                  <button className="candidate-detail" onClick={() => onOpenProduct(candidate.id)}>
+                    <strong>{candidate.name}</strong>
+                    <span>{candidate.brand}{candidate.flavour ? ` · ${candidate.flavour}` : ""}</span>
+                    <small>GTIN {candidate.gtin ?? "missing"} · {candidate.netQuantityGrams ? `${formatNumber(candidate.netQuantityGrams, 0)} g` : "pack missing"}</small>
+                  </button>
+                  <button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "match", rationales[item.id] ?? "", null, candidate.id).finally(() => setWorking(null)); }}>Match</button>
+                </div>
+              ))}
+            </div>
+          )}
           <label>Decision rationale<textarea value={rationales[item.id] ?? ""} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="What evidence supports this decision?" /></label>
-          <label>Label or authoritative evidence URL<input type="url" value={evidenceUrls[item.id] ?? ""} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>
+          {item.type !== "identity" && <label>Label or authoritative evidence URL<input type="url" value={evidenceUrls[item.id] ?? ""} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>}
           <div className="review-actions">
-            {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_nutrition", rationales[item.id] ?? "", evidenceUrls[item.id] || null).finally(() => setWorking(null)); }}>Verify nutrition</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_nutrition", rationales[item.id] ?? "", evidenceUrls[item.id] || null).finally(() => setWorking(null)); }}>Reject candidate</button></> : null}
-            <button className="ghost" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "dismiss", rationales[item.id] ?? "", evidenceUrls[item.id] || null).finally(() => setWorking(null)); }}>Dismiss</button>
+            {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_nutrition", rationales[item.id] ?? "", evidenceUrls[item.id] || null, null).finally(() => setWorking(null)); }}>Verify nutrition</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_nutrition", rationales[item.id] ?? "", evidenceUrls[item.id] || null, null).finally(() => setWorking(null)); }}>Reject candidate</button></> : null}
+            {item.type === "identity" && <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "create_new", rationales[item.id] ?? "", null, null).finally(() => setWorking(null)); }}>Create distinct product</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "no_match", rationales[item.id] ?? "", null, null).finally(() => setWorking(null)); }}>Keep unmatched</button></>}
+            <button className="ghost" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "dismiss", rationales[item.id] ?? "", evidenceUrls[item.id] || null, null).finally(() => setWorking(null)); }}>Dismiss</button>
           </div>
         </article>
       ))}
@@ -320,10 +337,10 @@ export function App() {
 
   useEffect(() => { if (tab === "reviews") loadReviews(); }, [tab]);
 
-  const resolve = async (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null) => {
+  const resolve = async (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null) => {
     if (rationale.trim().length < 3) { setReviewState((state) => ({ ...state, error: "Add a rationale of at least 3 characters." })); return; }
     if (decision === "verify_nutrition" && !evidenceUrl) { setReviewState((state) => ({ ...state, error: "Verification requires a current label or authoritative-source URL." })); return; }
-    await api.resolveReview(item.id, decision, rationale, evidenceUrl);
+    await api.resolveReview(item.id, decision, rationale, evidenceUrl, candidateProductId);
     loadReviews();
     loadCatalog();
     loadCoverage();
@@ -361,7 +378,7 @@ export function App() {
             {catalog && !catalogState.loading && <CatalogTable data={catalog} onOpen={setSelectedId} />}
           </>
         )}
-        {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h2>Evidence review queue</h2><p>Resolve conflicts without discarding the original source record.</p></section><Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} /></>}
+        {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h2>Evidence review queue</h2><p>Resolve conflicts without discarding the original source record.</p></section><Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} /></>}
         {tab === "coverage" && <><section className="page-head"><p className="eyebrow">No fake completeness claims</p><h2>Coverage ledger</h2><p>Exhaustion is proved per configured source, with disconnected sources left visible.</p></section><Coverage data={coverage} loading={coverageState.loading} error={coverageState.error} /></>}
       </main>
       {selectedId && <ProductDrawer detail={detail} loading={detailState.loading} error={detailState.error} onClose={() => setSelectedId(null)} />}

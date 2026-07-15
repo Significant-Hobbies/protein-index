@@ -161,7 +161,7 @@ const SELECT_PRODUCT = `
   )`;
 
 function filtersFor(input: SearchInput): { sql: string; bindings: Array<string | number> } {
-  const clauses: string[] = [];
+  const clauses: string[] = ["p.is_active = 1"];
   const bindings: Array<string | number> = [];
   if (input.q) {
     clauses.push("(p.name_normalized LIKE ? OR p.brand_normalized LIKE ? OR p.gtin LIKE ?)");

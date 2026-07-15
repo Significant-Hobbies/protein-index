@@ -32,14 +32,14 @@
 
 - [x] 5.1 Add health and bounded catalog-search endpoints with classification, verification, category, completeness, sort, and pagination filters.
 - [x] 5.2 Add product-detail endpoint with provenance, metrics, source-specific offers/ratings, and unavailable reasons.
-- [ ] 5.3 Add review-queue list and durable resolution endpoints with structured validation, conflict, not-found, and internal errors.
+- [x] 5.3 Add review-queue list and durable resolution endpoints with structured validation, conflict, not-found, and internal errors.
 - [x] 5.4 Add focused Worker API tests against the local D1-compatible test path.
 
 ## 6. Operator and search experience
 
 - [x] 6.1 Build a dense accessible catalog page with trusted defaults, search/filter controls, evidence badges, and comparable metric columns.
 - [x] 6.2 Build product detail that explains classification, nutrition verification, metric inputs, completeness, offers, ratings, and provenance.
-- [ ] 6.3 Build review queue and resolution controls that preserve evidence and clearly distinguish ambiguous identity from nutrition conflict.
+- [x] 6.3 Build review queue and resolution controls that preserve evidence and clearly distinguish ambiguous identity from nutrition conflict.
 - [x] 6.4 Add responsive empty, loading, error, missing, unverified, verified, and conflict states.
 
 ## 7. Scheduled official-source path

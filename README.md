@@ -17,8 +17,9 @@ pnpm data:seed
 pnpm dev
 ```
 
-The seed is intentionally synthetic and provides verified, unverified, missing,
-and conflict states without presenting test products as real market data.
+The seed is intentionally synthetic. It provides verified and conflict states,
+plus ambiguous identity records for exercising match, create-new, and
+keep-unmatched decisions without presenting test products as real market data.
 
 Run the complete local check with:
 

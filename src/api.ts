@@ -28,9 +28,9 @@ export const api = {
     request<ProductDetailResponse>(`/api/products/${encodeURIComponent(id)}`, { signal }),
   reviews: () => request<ReviewResponse>("/api/reviews?status=open&limit=100"),
   coverage: () => request<CoverageResponse>("/api/coverage"),
-  resolveReview: (id: string, decision: string, rationale: string, evidenceUrl: string | null) =>
+  resolveReview: (id: string, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null) =>
     request<{ status: string }>(`/api/reviews/${encodeURIComponent(id)}/resolve`, {
       method: "POST",
-      body: JSON.stringify({ decision, rationale, evidenceUrl }),
+      body: JSON.stringify({ decision, rationale, evidenceUrl, candidateProductId }),
     }),
 };

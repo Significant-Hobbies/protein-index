@@ -42,7 +42,8 @@ ONDC integration; purchasing or checkout.
 
 - 2026-07-15 — private repository created; core MVP specification and implementation started
 - 2026-07-15 — local catalog, D1 ingestion, Worker API, operator UI, source-complete Open Food Facts adapter, and scheduled sync workflow implemented
-- 2026-07-15 — 18 domain/ingestion tests and 4 Worker+D1 integration tests passing; live three-record India sample staged without inventing missing nutrition
+- 2026-07-15 — durable match/create-new/keep-unmatched identity decisions implemented and proven across import replay
+- 2026-07-15 — 19 domain/ingestion tests and 7 Worker+D1 integration tests passing; live three-record India sample staged without inventing missing nutrition
 
 ## Products
 
@@ -60,23 +61,23 @@ ONDC integration; purchasing or checkout.
 - Streaming all-India Open Food Facts TSV/JSONL staging without protein prefiltering
 - Run manifests, exact snapshot deltas, continuity guardrails, and configured-source coverage ledger
 - Local fixture seed with idempotent reconciliation and authority precedence
+- Durable identity decisions keyed to normalized identity evidence, with automatic invalidation when that evidence changes
 - Bounded Worker catalog/detail/coverage/review API with structured errors
-- Dense responsive catalog, evidence detail, coverage ledger, and nutrition review UI
+- Dense responsive catalog, evidence detail, coverage ledger, and separate nutrition/identity review controls
 - Verification decisions require a current label or authoritative-source evidence URL
 
 ## Todo / Planned / Deferred / Blocked
 
-1. Complete durable match/create-new/no-match entity decisions and prove the ambiguous-variant UI flow.
-2. Run and inspect the first full scheduled source-sync workflow and manually verify the first 500
+1. Run and inspect the first full scheduled source-sync workflow and manually verify the first 500
    high-demand Indian products.
-3. Complete desktop/mobile browser verification; the in-app browser was unavailable during the implementation run.
-4. Apply for GS1 India DataKart access and map its commercial/licensing constraints.
-5. Validate Amazon and Flipkart affiliate integrations against current India terms.
-6. Evaluate one quick-commerce provider using a coverage, freshness, legality, and cost scorecard.
-7. Add label-image OCR extraction with anomaly validation and human review.
-8. Deferred: ONDC offer ingestion until the core catalog and retailer reconciliation are stable.
-9. Deferred: expand the generic nutrient/product-kind model into full macros,
+2. Complete desktop/mobile browser verification; the in-app browser was unavailable during the implementation run.
+3. Apply for GS1 India DataKart access and map its commercial/licensing constraints.
+4. Validate Amazon and Flipkart affiliate integrations against current India terms.
+5. Evaluate one quick-commerce provider using a coverage, freshness, legality, and cost scorecard.
+6. Add label-image OCR extraction with anomaly validation and human review.
+7. Deferred: ONDC offer ingestion until the core catalog and retailer reconciliation are stable.
+8. Deferred: expand the generic nutrient/product-kind model into full macros,
    micronutrients, raw foods, foodservice, prepared dishes, and recipes after the
    protein catalog proves its accuracy and operating model.
-10. Blocked: official DataKart ingestion requires a commercial agreement and private API documentation.
-11. Blocked: production deployment requires explicit approval plus provisioned D1 and R2 resources.
+9. Blocked: official DataKart ingestion requires a commercial agreement and private API documentation.
+10. Blocked: production deployment requires explicit approval plus provisioned D1 and R2 resources.

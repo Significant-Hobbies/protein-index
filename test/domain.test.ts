@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { identityEvidenceHash } from "../scripts/reconcile";
 import { classifyProtein } from "../shared/classification";
 import { resolveIdentity } from "../shared/entity-resolution";
 import { hasValidGtinCheckDigit, normalizeGtin, normalizeText, parseQuantity } from "../shared/gtin";
@@ -29,6 +30,13 @@ const verifiedNutrition: NutritionEvidence = {
 };
 
 describe("GTIN and identity normalization", () => {
+  it("invalidates durable decisions only when normalized identity evidence changes", () => {
+    const identity = { gtin: null, brand: "Atlas Test Foods", name: "High Protein Whey Blend", flavour: null, netQuantityGrams: null };
+    expect(identityEvidenceHash(identity)).toBe(identityEvidenceHash({ ...identity, brand: "  ATLAS test foods " }));
+    expect(identityEvidenceHash(identity)).not.toBe(identityEvidenceHash({ ...identity, netQuantityGrams: 500 }));
+    expect(identityEvidenceHash(identity)).not.toBe(identityEvidenceHash({ ...identity, name: "High Protein Whey Isolate" }));
+  });
+
   it("validates and normalizes supported GTIN representations", () => {
     expect(hasValidGtinCheckDigit("8900000000012")).toBe(true);
     expect(normalizeGtin("8900-0000-0001-2")).toBe("08900000000012");

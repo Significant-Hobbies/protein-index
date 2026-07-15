@@ -125,6 +125,14 @@ td > small, .product-link span, .source-row span, .mini-table small { display: b
 .priority { display: grid; place-items: center; width: 40px; height: 40px; background: var(--red-soft); color: var(--red); border-radius: 9px; font-size: 11px; font-weight: 900; }
 .review-card pre { max-height: 180px; overflow: auto; padding: 10px; background: #1c2420; color: #dceee3; border-radius: 8px; font-size: 11px; white-space: pre-wrap; }
 .review-card label { display: block; margin-top: 12px; }
+.identity-review { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #f4f2e9; }
+.identity-review h4 { margin: 0; font-size: 12px; }
+.text-button { padding: 0; border: 0; background: transparent; color: var(--green); font-size: 11px; font-weight: 800; text-decoration: underline; text-underline-offset: 3px; }
+.candidate-row { display: grid; grid-template-columns: 1fr auto; gap: 9px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.candidate-row > button:last-child { min-height: 38px; padding: 8px 12px; border: 0; border-radius: 8px; background: var(--green); color: white; font-weight: 800; }
+.candidate-detail { padding: 0; border: 0; background: transparent; color: var(--ink); text-align: left; }
+.candidate-detail strong, .candidate-detail span, .candidate-detail small { display: block; }
+.candidate-detail span, .candidate-detail small { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .review-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .review-actions button { min-height: 40px; border: 0; padding: 9px 12px; border-radius: 8px; background: var(--green); color: white; font-weight: 700; font-size: 12px; }
 .review-actions button.secondary { background: var(--amber); }.review-actions button.ghost { background: #e8e7df; color: var(--ink); }.review-actions button:disabled { opacity: .5; }
