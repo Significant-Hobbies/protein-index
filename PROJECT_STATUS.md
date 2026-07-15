@@ -64,9 +64,11 @@ must pass desktop/mobile verification.
 - 2026-07-16 — review decisions now apply the exact validated label candidate atomically, retain field-level provenance and terminal evidence, and reject malformed candidates without overwriting independently sourced nutrition
 - 2026-07-16 — resumable Robotoff extraction and weekly GitHub automation implemented for every source product with a nutrition-label image; a five-barcode live sample reconciled all outcomes and rejected a physically impossible partial-macro prediction
 - 2026-07-16 — evidence review release `8c5963a2-66f9-4e44-9ef8-2b647136ed0c` deployed after green CI and guarded preflight; live health, default protein-density order, incomplete completion gate, production mutation denial, and provider-neutral consumer copy verified
-- 2026-07-16 — first full 5,998-label Robotoff extraction started in GitHub Actions run `29442748643`; publication and verification remain review-gated
+- 2026-07-16 — first full nutrition-label Robotoff extraction completed in GitHub Actions run `29442748643`: all 5,944 eligible GTINs reached terminal outcomes with 1,374 candidate, 806 no-prediction, 3,764 rejected, and zero failed outcomes
 - 2026-07-16 — durable nutrition decisions, canonical candidate hashing, exact replay, deterministic review bundles, and protected commit-pinned D1 publication implemented; 43 unit/domain tests and 15 Worker+D1 tests pass
 - 2026-07-16 — first real label candidate reviewed against its 3024×4032 package image and rejected because three declared values were not represented; the checksummed bundle contains zero verification decisions and does not inflate coverage
+- 2026-07-16 — all 17,615 nutrition image-level source records published to the production evidence ledger as review-only data, creating 1,556 open candidates while verified nutrition and ingredients correctly remained zero
+- 2026-07-16 — review-only ingredient extraction, exact reviewer transcription, durable replay/drift invalidation, checksum bundles, protected publication, and responsive evidence UI implemented; 57 unit/domain tests and 22 Worker+D1 tests pass
 
 ## Products
 
@@ -120,6 +122,12 @@ must pass desktop/mobile verification.
   ledger hash, with pre-write source checks and exact post-write fact/outcome checks
 - Separate protected publication for source-complete Robotoff candidate artifacts;
   model output enters the review queue and never becomes verified nutrition by itself
+- Ingredient-label extraction retains exact model, image, text, language,
+  bounding-box, parsed-tree, and count evidence without auto-verification
+- Reviewer-confirmed ingredient transcription atomically rebuilds normalized
+  ingredient rows and exact provenance, while source drift revokes verified trust
+- Nutrition and ingredient decisions share a checksum-validated, commit-pinned,
+  idempotent publication and postcondition path
 
 ## Todo / Planned / Deferred / Blocked
 
@@ -130,7 +138,8 @@ must pass desktop/mobile verification.
 3. Apply for GS1 India DataKart access and map its commercial/licensing constraints.
 4. Validate Amazon and Flipkart affiliate integrations against current India terms.
 5. Evaluate one quick-commerce provider using a coverage, freshness, legality, and cost scorecard.
-6. Add ingredient-label OCR extraction with anomaly validation and human review.
+6. Complete and validate the exhaustive ingredient-image extraction now running
+   in GitHub Actions run `29450296658`, then publish only its review-gated source records.
 7. Deferred: ONDC offer ingestion until the core catalog and retailer reconciliation are stable.
 8. Deferred: expand the generic nutrient/product-kind model into full macros,
    micronutrients, raw foods, foodservice, prepared dishes, and recipes after the
@@ -145,8 +154,8 @@ must pass desktop/mobile verification.
 12. Blocked: verified completeness cannot be achieved from Open Food Facts alone;
     current labels, brand-owner feeds, DataKart access, or manual verification are
     required for every remaining product.
-13. Finish and checksum the in-progress 5,998-label extraction, inspect its exact
-    outcome distribution, and publish only the review-gated source records.
+13. Review the 1,556 open nutrition candidates against current package images;
+    extraction confidence alone must never increase verified coverage.
 14. Publish a reviewed real decision bundle only after its exact source record is
     present remotely; verify the live coverage delta and retain workflow diagnostics.
 15. Deploy the new label-review UI only after rendered desktop/mobile visual and

@@ -34,6 +34,6 @@
 
 ## 6. Quality and release gate
 
-- [ ] 6.1 Run domain, ingestion, Worker+D1, typecheck, build, OpenSpec, migration, Worker startup, and deploy dry-run checks.
+- [x] 6.1 Run domain, ingestion, Worker+D1, typecheck, build, OpenSpec, migration, Worker startup, and deploy dry-run checks.
 - [ ] 6.2 Perform rendered desktop/mobile visual and accessibility review of ingredient evidence and completion states with the in-app browser.
 - [ ] 6.3 Update `PROJECT_STATUS.md`, pass all release gates, deploy the reviewed dashboard, and audit that the overall completion gate remains red until all active products have terminal verified evidence.
