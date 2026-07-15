@@ -63,6 +63,8 @@ must pass desktop/mobile verification.
 - 2026-07-16 — live ranking audit caught contradictory community energy values; protein-energy and severe full-macro conflicts are now withheld from metrics and future ingestion marks them as conflicts
 - 2026-07-16 — review decisions now apply the exact validated label candidate atomically, retain field-level provenance and terminal evidence, and reject malformed candidates without overwriting independently sourced nutrition
 - 2026-07-16 — resumable Robotoff extraction and weekly GitHub automation implemented for every source product with a nutrition-label image; a five-barcode live sample reconciled all outcomes and rejected a physically impossible partial-macro prediction
+- 2026-07-16 — evidence review release `8c5963a2-66f9-4e44-9ef8-2b647136ed0c` deployed after green CI and guarded preflight; live health, default protein-density order, incomplete completion gate, production mutation denial, and provider-neutral consumer copy verified
+- 2026-07-16 — first full 5,998-label Robotoff extraction started in GitHub Actions run `29442748643`; publication and verification remain review-gated
 
 ## Products
 
