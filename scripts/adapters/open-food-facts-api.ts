@@ -85,6 +85,12 @@ interface StoredBatchResponse {
   requestSchema: string;
   fetchedAt: string;
   response: ApiSearchResponse;
+  failedCodes?: string[];
+}
+
+interface ResilientBatchResponse {
+  response: ApiSearchResponse;
+  failedCodes: string[];
 }
 
 class SplitBatchError extends Error {}
@@ -99,6 +105,7 @@ export interface OpenFoodFactsApiEnrichmentOptions {
   minimumIntervalMs?: number;
   retryBaseMs?: number;
   maximumAttempts?: number;
+  minimumSplitBatchSize?: number;
   fetcher?: FetchLike;
   userAgent?: string;
 }
@@ -243,20 +250,33 @@ async function fetchBatchResilient(input: {
   retryBaseMs: number;
   beforeAttempt: () => Promise<void>;
   onSplit: () => void;
-}): Promise<ApiSearchResponse> {
+  minimumSplitBatchSize: number;
+}): Promise<ResilientBatchResponse> {
   try {
-    return await fetchBatch(input);
+    return { response: await fetchBatch(input), failedCodes: [] };
   } catch (error) {
-    if (input.codes.length <= 1) throw error;
+    if (input.codes.length <= input.minimumSplitBatchSize) return { response: { count: 0, products: [] }, failedCodes: input.codes };
     input.onSplit();
     const middle = Math.ceil(input.codes.length / 2);
     const left = await fetchBatchResilient({ ...input, codes: input.codes.slice(0, middle) });
     const right = await fetchBatchResilient({ ...input, codes: input.codes.slice(middle) });
     return {
-      count: (left.products?.length ?? 0) + (right.products?.length ?? 0),
-      products: [...(left.products ?? []), ...(right.products ?? [])],
+      response: {
+        count: (left.response.products?.length ?? 0) + (right.response.products?.length ?? 0),
+        products: [...(left.response.products ?? []), ...(right.response.products ?? [])],
+      },
+      failedCodes: [...left.failedCodes, ...right.failedCodes],
     };
   }
+}
+
+function mergeResponses(existing: ApiSearchResponse, incoming: ApiSearchResponse): ApiSearchResponse {
+  const products = new Map<string, Record<string, unknown>>();
+  for (const product of [...(existing.products ?? []), ...(incoming.products ?? [])]) {
+    const code = typeof product.code === "string" ? product.code : typeof product.code === "number" ? String(product.code) : null;
+    if (code) products.set(keyForCode(code), product);
+  }
+  return { count: products.size, products: [...products.values()] };
 }
 
 function enrichmentReasons(original: SourceSummary, product: StagedProduct): string[] {
@@ -275,9 +295,13 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
   const minimumIntervalMs = options.minimumIntervalMs ?? 6_500;
   const retryBaseMs = options.retryBaseMs ?? 2_000;
   const maximumAttempts = options.maximumAttempts ?? 5;
+  const minimumSplitBatchSize = options.minimumSplitBatchSize ?? Math.min(25, batchSize);
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 100) throw new Error("API enrichment batch size must be between 1 and 100.");
   if (!Number.isFinite(minimumIntervalMs) || minimumIntervalMs < 0) throw new Error("API enrichment interval must be non-negative.");
   if (!Number.isInteger(maximumAttempts) || maximumAttempts < 1 || maximumAttempts > 8) throw new Error("API enrichment attempts must be between 1 and 8.");
+  if (!Number.isInteger(minimumSplitBatchSize) || minimumSplitBatchSize < 1 || minimumSplitBatchSize > batchSize) {
+    throw new Error("API enrichment minimum split batch size must be between 1 and the batch size.");
+  }
   if (options.mode === "production" && options.limit !== null) throw new Error("Production enrichment cannot use a barcode limit.");
 
   const sourceManifest = JSON.parse(await readFile(options.inputManifest, "utf8")) as SourceManifest;
@@ -328,6 +352,21 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
       afterEnrichment: summaries.filter(({ marketedProtein, hasNutritionPair }) => marketedProtein && hasNutritionPair).length,
     },
   };
+  const fetchCodes = (codes: string[]) => fetchBatchResilient({
+    codes,
+    fetcher: options.fetcher ?? fetch,
+    userAgent: options.userAgent ?? "protein-index/0.1 (+https://github.com/sarthak-fleet/protein-index; nutrition-enrichment)",
+    maximumAttempts,
+    retryBaseMs,
+    minimumSplitBatchSize,
+    beforeAttempt: async () => {
+      if (lastFetchStartedAt !== null) {
+        await sleep(Math.max(0, minimumIntervalMs - (Date.now() - lastFetchStartedAt)));
+      }
+      lastFetchStartedAt = Date.now();
+    },
+    onSplit: () => { fallbackSplits += 1; },
+  });
 
   try {
     for (let offset = 0, batch = 1; offset < summaries.length; offset += batchSize, batch += 1) {
@@ -344,30 +383,31 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
           || !Array.isArray(existing.response.products)) {
           throw new Error(`Resume artifact ${basename(responsePath)} does not match the requested batch.`);
         }
-        stored = existing;
-        resumedBatches += 1;
+        const failedCodes = existing.failedCodes ?? [];
+        if (failedCodes.length === 0) {
+          stored = existing;
+          resumedBatches += 1;
+        } else {
+          const retried = await fetchCodes(failedCodes);
+          stored = {
+            ...existing,
+            fetchedAt: new Date().toISOString(),
+            response: mergeResponses(existing.response, retried.response),
+            failedCodes: retried.failedCodes,
+          };
+          fetchedBatches += 1;
+        }
       } catch (error) {
         if (error instanceof SyntaxError || (error instanceof Error && !error.message.includes("ENOENT"))) throw error;
         try {
-          const response = await fetchBatchResilient({
-            codes: requestedCodes,
-            fetcher: options.fetcher ?? fetch,
-            userAgent: options.userAgent ?? "protein-index/0.1 (+https://github.com/sarthak-fleet/protein-index; nutrition-enrichment)",
-            maximumAttempts,
-            retryBaseMs,
-            beforeAttempt: async () => {
-              if (lastFetchStartedAt !== null) {
-                await sleep(Math.max(0, minimumIntervalMs - (Date.now() - lastFetchStartedAt)));
-              }
-              lastFetchStartedAt = Date.now();
-            },
-            onSplit: () => { fallbackSplits += 1; },
-          });
-          stored = { requestedCodes, requestSchema: OPEN_FOOD_FACTS_API_REQUEST_SCHEMA, fetchedAt: new Date().toISOString(), response };
-          await writeFile(responsePath, `${JSON.stringify(stored)}\n`, "utf8");
-          await unlink(errorPath).catch((unlinkError: NodeJS.ErrnoException) => {
-            if (unlinkError.code !== "ENOENT") throw unlinkError;
-          });
+          const fetched = await fetchCodes(requestedCodes);
+          stored = {
+            requestedCodes,
+            requestSchema: OPEN_FOOD_FACTS_API_REQUEST_SCHEMA,
+            fetchedAt: new Date().toISOString(),
+            response: fetched.response,
+            failedCodes: fetched.failedCodes,
+          };
           fetchedBatches += 1;
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
@@ -382,12 +422,29 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
         }
       }
 
+      await writeFile(responsePath, `${JSON.stringify(stored)}\n`, "utf8");
+      if ((stored.failedCodes?.length ?? 0) > 0) {
+        await writeFile(errorPath, `${JSON.stringify({ requestedCodes: stored.failedCodes, failedAt: new Date().toISOString(), error: "Open Food Facts enrichment failed after retry" }, null, 2)}\n`, "utf8");
+      } else {
+        await unlink(errorPath).catch((unlinkError: NodeJS.ErrnoException) => {
+          if (unlinkError.code !== "ENOENT") throw unlinkError;
+        });
+      }
+
       const returned = new Map<string, Record<string, unknown>>();
       for (const product of stored.response.products ?? []) {
         const code = typeof product.code === "string" ? product.code : typeof product.code === "number" ? String(product.code) : null;
         if (code) returned.set(keyForCode(code), product);
       }
+      const failedKeys = new Set((stored.failedCodes ?? []).map(keyForCode));
       for (const item of selected) {
+        if (failedKeys.has(item.key)) {
+          const outcome: EnrichmentOutcome = { requestedCode: item.requestedCode, returnedCode: null, status: "failed", reasons: ["api_failed_after_retry"], batch };
+          outcomes.failed += 1;
+          await writeLine(outcomeOutput, outcome);
+          await writeLine(exclusionOutput, outcome);
+          continue;
+        }
         const record = returned.get(item.key);
         if (!record) {
           const outcome: EnrichmentOutcome = { requestedCode: item.requestedCode, returnedCode: null, status: "not_found", reasons: ["api_omitted_requested_code"], batch };

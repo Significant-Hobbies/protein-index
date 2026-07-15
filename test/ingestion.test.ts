@@ -349,7 +349,7 @@ describe("Open Food Facts rich API enrichment", () => {
       },
     })).rejects.toThrow("incomplete");
     expect(firstRunRequests).toBe(2);
-    expect(await readFile(join(outputDirectory, "responses/batch-00002.json.error.json"), "utf8")).toContain("retryable HTTP 503");
+    expect(await readFile(join(outputDirectory, "responses/batch-00002.json.error.json"), "utf8")).toContain("failed after retry");
 
     let resumedRequests = 0;
     const resumedProduct = { ...indiaProduct, code: "8900000000029", product_name: "Ordinary Oats" };
@@ -391,6 +391,7 @@ describe("Open Food Facts rich API enrichment", () => {
       minimumIntervalMs: 0,
       retryBaseMs: 0,
       maximumAttempts: 5,
+      minimumSplitBatchSize: 1,
       fetcher: async (input) => {
         requests += 1;
         const codes = new URL(input.toString()).searchParams.get("code")?.split(",") ?? [];
@@ -402,6 +403,58 @@ describe("Open Food Facts rich API enrichment", () => {
     expect(result.manifest.sourceComplete).toBe(true);
     const report = JSON.parse(await readFile(result.reportPath, "utf8")) as { accountedBarcodes: number; fallbackSplits: number; outcomes: { failed: number } };
     expect(report).toMatchObject({ accountedBarcodes: 2, fallbackSplits: 1, outcomes: { failed: 0 } });
+  });
+
+  it("preserves successful split siblings and resumes only failed codes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-enrich-partial-split-"));
+    const source = await sourceSnapshot(directory, 2);
+    const outputDirectory = join(directory, "enriched");
+    let firstRequests = 0;
+    await expect(enrichOpenFoodFactsApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      batchSize: 2,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      maximumAttempts: 1,
+      minimumSplitBatchSize: 1,
+      fetcher: async (input) => {
+        firstRequests += 1;
+        const codes = new URL(input.toString()).searchParams.get("code")?.split(",") ?? [];
+        if (codes.length > 1 || codes[0] === "8900000000029") return new Response("busy", { status: 503 });
+        return new Response(JSON.stringify({ products: [indiaProduct] }), { status: 200 });
+      },
+    })).rejects.toThrow("incomplete");
+    expect(firstRequests).toBe(3);
+    const partial = JSON.parse(await readFile(join(outputDirectory, "responses/batch-00001.json"), "utf8")) as {
+      response: { products: Array<{ code: string }> };
+      failedCodes: string[];
+    };
+    expect(partial.response.products.map(({ code }) => code)).toEqual(["8900000000012"]);
+    expect(partial.failedCodes).toEqual(["8900000000029"]);
+
+    let resumedRequests = 0;
+    const resumedProduct = { ...indiaProduct, code: "8900000000029", product_name: "Ordinary Oats" };
+    const resumed = await enrichOpenFoodFactsApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      batchSize: 2,
+      minimumIntervalMs: 0,
+      fetcher: async (input) => {
+        resumedRequests += 1;
+        expect(new URL(input.toString()).searchParams.get("code")).toBe("8900000000029");
+        return new Response(JSON.stringify({ products: [resumedProduct] }), { status: 200 });
+      },
+    });
+    expect(resumedRequests).toBe(1);
+    expect(resumed.outcomes.failed).toBe(0);
+    expect(resumed.manifest.sourceComplete).toBe(true);
   });
 });
 
