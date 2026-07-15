@@ -1,6 +1,7 @@
 import type {
   CatalogResponse,
   CoverageResponse,
+  HealthResponse,
   ProductDetailResponse,
   ReviewResponse,
 } from "../shared/api";
@@ -22,6 +23,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  health: () => request<HealthResponse>("/api/health"),
   catalog: (params: URLSearchParams, signal?: AbortSignal) =>
     request<CatalogResponse>(`/api/products?${params}`, { signal }),
   product: (id: string, signal?: AbortSignal) =>

@@ -18,6 +18,8 @@ export interface ApiErrorBody {
 export interface CatalogProduct {
   id: string;
   gtin: string | null;
+  imageUrl: string | null;
+  nutritionImageUrl: string | null;
   brand: string;
   name: string;
   flavour: string | null;
@@ -117,9 +119,11 @@ export interface CoverageResponse {
   catalog: {
     products: number;
     validGtin: number;
+    missingNutrition: number;
     verifiedNutrition: number;
     unverifiedNutrition: number;
     conflictingNutrition: number;
+    unverifiedIngredients: number;
     verifiedIngredients: number;
     marketedProtein: number;
     nutritionallyProteinDense: number;
@@ -137,6 +141,15 @@ export interface CoverageResponse {
   }>;
   disconnectedSources: string[];
   claim: "configured_sources_only";
+}
+
+export interface HealthResponse {
+  status: "ok";
+  products: number;
+  runtime: "local" | "production";
+  latestPublishedAt: string | null;
+  sourceComplete: boolean | null;
+  mutations: "local_only";
 }
 
 export const unavailableMetric: MetricResult = { value: null, reason: "missing_inputs" };

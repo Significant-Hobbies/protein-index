@@ -32,7 +32,8 @@ ONDC integration; purchasing or checkout.
 - GS1 India DataKart commercial access and API terms for authoritative,
   near-real-time brand-owner catalog data (planned official source)
 - Retailer-authorized APIs or evaluated data providers for current offers and ratings (planned)
-- Cloudflare Workers, D1, and R2 for the hosted application (not provisioned)
+- Cloudflare Workers, D1, and private R2 for the hosted application (deployment
+  authorized; minimal resources are provisioned during the guarded release)
 
 ### Internal
 
@@ -46,10 +47,11 @@ ONDC integration; purchasing or checkout.
 - 2026-07-15 — 20 domain/ingestion tests and 7 Worker+D1 integration tests passing; live three-record India sample staged without inventing missing nutrition
 - 2026-07-15 — first exhaustive Open Food Facts workflow completed: 4,535,553 rows traversed, 21,188 India-tagged rows found, and 17,732 valid product records staged
 - 2026-07-15 — continuity and exclusion proof completed in GitHub Actions run `29420495106`: 17,732 unchanged staged records plus 3,456 auditable exclusions reconcile all 21,188 India-tagged rows
+- 2026-07-15 — responsive evidence-first dashboard, strict trusted/discovery modes, guarded release preflight, and reviewed-snapshot D1 publication path implemented
 
 ## Products
 
-- `protein-index` web application and Worker API — implemented locally, not deployed
+- `protein-index` web application and Worker API — release candidate; Cloudflare deployment in progress
 - Offline Open Food Facts ingestion and reconciliation CLI — implemented
 - Weekly/manual Open Food Facts source-sync workflow — implemented; first full continuity baseline completed in GitHub Actions run `29419259301`
 
@@ -68,6 +70,12 @@ ONDC integration; purchasing or checkout.
 - Bounded Worker catalog/detail/coverage/review API with structured errors
 - Dense responsive catalog, evidence detail, coverage ledger, and separate nutrition/identity review controls
 - Verification decisions require a current label or authoritative-source evidence URL
+- Polished responsive catalog with global coverage summary, product imagery,
+  mobile cards, explicit trusted/discovery modes, and read-only production review
+- Checksummed, source-complete reviewed snapshot publication with explicit remote
+  confirmation and post-import D1 verification
+- Guarded Cloudflare release command with type, test, build, startup, dry-run,
+  clean-main, sync, and CI gates
 
 ## Todo / Planned / Deferred / Blocked
 
@@ -82,4 +90,5 @@ ONDC integration; purchasing or checkout.
    micronutrients, raw foods, foodservice, prepared dishes, and recipes after the
    protein catalog proves its accuracy and operating model.
 9. Blocked: official DataKart ingestion requires a commercial agreement and private API documentation.
-10. Blocked: production deployment requires explicit approval plus provisioned D1 and R2 resources.
+10. In progress: provision the authorized minimal Cloudflare resources, publish
+    the reviewed snapshot, deploy the Worker, and record live verification.

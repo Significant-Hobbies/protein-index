@@ -78,12 +78,13 @@ export async function emitImportSql(input: {
   stagedPath: string;
   manifestPath: string;
   outputPath: string;
+  includeTransaction?: boolean;
 }): Promise<{ products: number; outputPath: string }> {
   const manifest = JSON.parse(await readFile(input.manifestPath, "utf8")) as SourceManifest;
   const runId = stableId("run", `${manifest.source}:${manifest.startedAt}:${manifest.inputHash ?? manifest.input}`);
   const output = createWriteStream(input.outputPath, { encoding: "utf8" });
   await write(output, "PRAGMA foreign_keys = ON;");
-  await write(output, "BEGIN IMMEDIATE;");
+  if (input.includeTransaction !== false) await write(output, "BEGIN IMMEDIATE;");
   await write(
     output,
     `INSERT INTO sources (id, name, kind, identity_authority, nutrition_authority, ingredient_authority, license_url, retention_notes, credential_requirement, created_at) VALUES (${sql(manifest.source)}, ${sql(manifest.source)}, ${sql(manifest.sourceKind)}, ${manifest.sourceAuthority.identity}, ${manifest.sourceAuthority.nutrition}, ${manifest.sourceAuthority.ingredients}, ${sql(manifest.sourceLicenseUrl)}, ${sql(manifest.sourceRetentionNotes)}, NULL, ${sql(manifest.startedAt)}) ON CONFLICT(id) DO UPDATE SET identity_authority = excluded.identity_authority, nutrition_authority = excluded.nutrition_authority, ingredient_authority = excluded.ingredient_authority, license_url = excluded.license_url, retention_notes = excluded.retention_notes;`,
@@ -243,7 +244,7 @@ export async function emitImportSql(input: {
     );
   }
   await write(output, `UPDATE ingestion_runs SET status = 'completed', completed_at = ${sql(manifest.completedAt)} WHERE id = ${sql(runId)};`);
-  await write(output, "COMMIT;");
+  if (input.includeTransaction !== false) await write(output, "COMMIT;");
   await new Promise<void>((resolve, reject) => {
     output.once("error", reject);
     output.end(resolve);

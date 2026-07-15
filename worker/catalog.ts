@@ -5,6 +5,8 @@ import { PRODUCT_CATEGORIES, type EvidenceStatus, type NormalizedIngredient, typ
 interface ProductRow {
   id: string;
   gtin: string | null;
+  image_url: string | null;
+  nutrition_image_url: string | null;
   brand: string;
   name: string;
   flavour: string | null;
@@ -63,9 +65,31 @@ function mapProduct(row: ProductRow): CatalogProduct {
     observedAt: row.nutrition_observed_at,
     labelVerifiedAt: row.label_verified_at,
   };
+  const calculatedMetrics = calculateMetrics({
+    nutrition,
+    netQuantityGrams: row.net_quantity_grams,
+    servingSizeGrams: row.serving_size_grams,
+    sellingPrice: row.selling_price,
+  });
+  const metrics = row.nutrition_status === "verified"
+    ? calculatedMetrics
+    : {
+        proteinPer100Calories: { value: null, reason: "nutrition_not_verified" },
+        proteinCaloriePercentage: { value: null, reason: "nutrition_not_verified" },
+        costPer25gProtein: { value: null, reason: "nutrition_not_verified" },
+        proteinPerInr100: { value: null, reason: "nutrition_not_verified" },
+        caloriesFor25gProtein: { value: null, reason: "nutrition_not_verified" },
+        sugarPer25gProtein: { value: null, reason: "nutrition_not_verified" },
+        saturatedFatPer25gProtein: { value: null, reason: "nutrition_not_verified" },
+        fibrePer100Calories: { value: null, reason: "nutrition_not_verified" },
+        pricePerServing: { value: null, reason: "nutrition_not_verified" },
+        totalProteinInPack: { value: null, reason: "nutrition_not_verified" },
+      };
   return {
     id: row.id,
     gtin: row.gtin,
+    imageUrl: row.image_url,
+    nutritionImageUrl: row.nutrition_image_url,
     brand: row.brand,
     name: row.name,
     flavour: row.flavour,
@@ -89,12 +113,7 @@ function mapProduct(row: ProductRow): CatalogProduct {
           observedAt: row.offer_observed_at,
         }
       : null,
-    metrics: calculateMetrics({
-      nutrition,
-      netQuantityGrams: row.net_quantity_grams,
-      servingSizeGrams: row.serving_size_grams,
-      sellingPrice: row.selling_price,
-    }),
+    metrics,
   };
 }
 
@@ -141,7 +160,7 @@ export function validateSearch(input: URLSearchParams): { value?: SearchInput; e
 }
 
 const SELECT_PRODUCT = `
-  SELECT p.id, p.gtin, p.brand, p.name, p.flavour, p.category,
+  SELECT p.id, p.gtin, p.image_url, p.nutrition_image_url, p.brand, p.name, p.flavour, p.category,
     p.net_quantity_grams, p.serving_size_grams, p.marketed_protein,
     p.marketed_reasons_json, p.nutritionally_protein_dense,
     p.nutrition_reasons_json, p.completeness, p.completeness_missing_json,

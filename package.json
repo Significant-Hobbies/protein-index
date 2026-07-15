@@ -21,7 +21,12 @@
     "data:stage": "tsx scripts/sync.ts stage",
     "data:seed": "tsx scripts/sync.ts seed",
     "data:coverage": "tsx scripts/sync.ts coverage",
-    "check": "pnpm cf-typegen && pnpm typecheck && pnpm test && pnpm build"
+    "data:publish": "tsx scripts/sync.ts publish",
+    "check": "pnpm cf-typegen && pnpm typecheck && pnpm test && pnpm build",
+    "release:startup": "wrangler deploy --dry-run --outfile .data/worker.bundle && wrangler check startup --worker .data/worker.bundle --outfile .data/worker-startup.cpuprofile",
+    "release:dry-run": "wrangler deploy --dry-run --outdir .data/deploy-dry-run",
+    "release:preflight": "pnpm check && pnpm release:startup && pnpm release:dry-run",
+    "deploy": "bash ../fleet-ops/scripts/fleet-deploy-guard.sh protein-index && pnpm release:preflight && wrangler deploy --strict"
   },
   "dependencies": {
     "hono": "^4.12.30",

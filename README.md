@@ -7,6 +7,16 @@ The product record is canonical. Retailer listings are observations attached to
 that record, never the source of identity by themselves. Broad imports ingest
 all India-tagged foods first and classify protein products afterward.
 
+The dashboard has two explicit evidence boundaries:
+
+- **Trusted** shows protein-relevant products with verified nutrition and is
+  the only mode that exposes comparison metrics.
+- **All evidence** exposes the broader discovery catalog while keeping community
+  nutrition and ingredients visibly unverified.
+
+Missing values stay missing. Open Food Facts values are never promoted to
+label-verified facts merely because they parse successfully.
+
 ## Local development
 
 Requirements: Node.js 22+ and pnpm 10.
@@ -44,10 +54,52 @@ downloads the complete official TSV export, identifies this client, reaches
 end-of-file, compares counts and record hashes with the last good run, and
 uploads reviewable artifacts. Every India-tagged source row is represented by
 either a staged product or an auditable exclusion-ledger entry. The workflow
-never writes to production.
+never writes to production by itself.
 
-See [docs/SOURCES.md](docs/SOURCES.md) for trust states, coverage semantics, the
-DataKart integration checklist, and the protected future hosted-apply design.
+## Reviewed catalog publication
 
-Implementation work is tracked in `openspec/changes/build-catalog-core/` and
-durable product status lives in `PROJECT_STATUS.md`.
+Validate and publish an existing source-complete snapshot locally:
+
+```bash
+pnpm data:publish -- --input .data/reviewed-snapshot
+```
+
+Remote publication is intentionally explicit and requires both flags:
+
+```bash
+pnpm data:publish -- \
+  --input .data/reviewed-snapshot \
+  --remote \
+  --confirm-remote
+```
+
+Publication verifies portable checksums, production/end-of-file evidence,
+India-row reconciliation, continuity limits, and non-empty counts before it
+writes. It then applies migrations, performs an idempotent D1 import, and
+queries product, run, and source-record counts. The manual `Publish reviewed
+catalog` GitHub workflow adds a protected environment gate and pins both the
+source workflow run and reviewed input hash.
+
+## Cloudflare release
+
+The production topology is one Worker (`protein-index`), one D1 database
+(`protein-index`), and one private R2 bucket (`protein-index-labels`). The
+public application is read-only until operator authentication exists.
+
+After resources are bound and the reviewed snapshot has been published:
+
+```bash
+pnpm release:preflight
+pnpm deploy
+```
+
+`pnpm deploy` runs the fleet deploy guard before tests, build, Worker startup
+profiling, Wrangler dry run, and the strict deployment. Roll back Worker code
+with Wrangler deployment rollback; catalog corrections are republished as new
+evidence-preserving runs instead of deleting the audit trail.
+
+See [docs/SOURCES.md](docs/SOURCES.md) for trust states, coverage semantics, and
+the DataKart integration checklist.
+
+Implementation work is tracked in `openspec/changes/` and durable product status
+lives in `PROJECT_STATUS.md`.

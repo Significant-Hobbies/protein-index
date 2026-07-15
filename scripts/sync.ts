@@ -7,6 +7,7 @@ import { assertDataKartConfigured, DATAKART_ADAPTER_STATUS } from "./adapters/da
 import { stageOpenFoodFacts } from "./adapters/open-food-facts";
 import { buildFixtureStage } from "./fixtures";
 import { emitImportSql } from "./reconcile";
+import { validatePublicationSnapshot } from "./publication";
 
 function option(name: string): string | null {
   const index = process.argv.indexOf(`--${name}`);
@@ -27,6 +28,20 @@ async function run(command: string, args: string[]): Promise<void> {
     });
     child.once("error", reject);
     child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`${command} exited with ${code ?? "unknown"}: ${stderr.trim()}`)));
+  });
+}
+
+async function runCapture(command: string, args: string[]): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-20_000); });
+    child.once("error", reject);
+    child.once("exit", (code) => code === 0 ? resolve(stdout) : reject(new Error(`${command} exited with ${code ?? "unknown"}: ${stderr.trim()}`)));
   });
 }
 
@@ -116,16 +131,60 @@ async function coverageCommand(): Promise<void> {
   process.stdout.write(`${JSON.stringify({ manifest: JSON.parse(manifest), report: JSON.parse(report) }, null, 2)}\n`);
 }
 
+async function publishCommand(): Promise<void> {
+  const directory = option("input");
+  if (!directory) throw new Error("--input is required for publish.");
+  const remote = hasFlag("remote");
+  if (remote && !hasFlag("confirm-remote")) {
+    throw new Error("Remote publication requires both --remote and --confirm-remote.");
+  }
+  const snapshot = await validatePublicationSnapshot(directory);
+  const importSqlPath = join(directory, "import.sql");
+  const generated = await emitImportSql({
+    stagedPath: snapshot.stagedPath,
+    manifestPath: snapshot.manifestPath,
+    outputPath: importSqlPath,
+    includeTransaction: !remote,
+  });
+  const target = remote ? "--remote" : "--local";
+  await run("pnpm", ["exec", "wrangler", "d1", "migrations", "apply", "protein-index", target]);
+  if (remote) {
+    await run("pnpm", ["exec", "wrangler", "d1", "execute", "protein-index", "--remote", "--yes", "--file", importSqlPath]);
+  } else {
+    const chunks = await splitSqlFile(importSqlPath);
+    for (const chunk of chunks) await run("pnpm", ["exec", "wrangler", "d1", "execute", "protein-index", "--local", "--file", chunk]);
+  }
+  const rawVerification = await runCapture("pnpm", [
+    "exec", "wrangler", "d1", "execute", "protein-index", target, "--json", "--command",
+    "SELECT COUNT(*) AS products FROM products WHERE is_active = 1; SELECT COUNT(*) AS completed_runs FROM ingestion_runs WHERE status = 'completed'; SELECT COUNT(*) AS source_records FROM source_records;",
+  ]);
+  const verification = JSON.parse(rawVerification) as Array<{ success?: boolean; results?: Array<Record<string, number>> }>;
+  const products = verification[0]?.results?.[0]?.products ?? 0;
+  const completedRuns = verification[1]?.results?.[0]?.completed_runs ?? 0;
+  const sourceRecords = verification[2]?.results?.[0]?.source_records ?? 0;
+  if (products <= 0 || completedRuns <= 0 || sourceRecords <= 0) throw new Error("Post-publication D1 verification returned an empty catalog or evidence ledger.");
+  process.stdout.write(`${JSON.stringify({
+    target: remote ? "remote" : "local",
+    snapshot: snapshot.manifest.inputHash,
+    stagedRecords: snapshot.manifest.stagedRecords,
+    generatedProducts: generated.products,
+    products,
+    completedRuns,
+    sourceRecords,
+  }, null, 2)}\n`);
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (command === "stage") return stageCommand();
   if (command === "seed") return seedCommand();
   if (command === "coverage") return coverageCommand();
+  if (command === "publish") return publishCommand();
   if (command === "datakart-status") {
     process.stdout.write(`${JSON.stringify(DATAKART_ADAPTER_STATUS, null, 2)}\n`);
     return;
   }
-  throw new Error("Usage: sync.ts <stage|seed|coverage|datakart-status> [options]");
+  throw new Error("Usage: sync.ts <stage|seed|coverage|publish|datakart-status> [options]");
 }
 
 main().catch((error: unknown) => {

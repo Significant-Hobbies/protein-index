@@ -10,8 +10,22 @@ function errorBody(code: string, message: string, details?: Record<string, unkno
 }
 
 app.get("/api/health", async (c) => {
-  const result = await c.env.DB.prepare("SELECT COUNT(*) AS products FROM products WHERE is_active = 1").first<{ products: number }>();
-  return c.json({ status: "ok", products: result?.products ?? 0, environment: "local-first" });
+  const [productResult, runResult] = await c.env.DB.batch([
+    c.env.DB.prepare("SELECT COUNT(*) AS products FROM products WHERE is_active = 1"),
+    c.env.DB.prepare("SELECT completed_at, source_complete FROM ingestion_runs WHERE status = 'completed' ORDER BY completed_at DESC LIMIT 1"),
+  ]);
+  const products = productResult?.results[0] as { products?: number } | undefined;
+  const run = runResult?.results[0] as { completed_at?: string | null; source_complete?: number | null } | undefined;
+  const hostname = new URL(c.req.url).hostname;
+  const runtime = ["localhost", "127.0.0.1", "::1"].includes(hostname) ? "local" : "production";
+  return c.json({
+    status: "ok",
+    products: products?.products ?? 0,
+    runtime,
+    latestPublishedAt: run?.completed_at ?? null,
+    sourceComplete: run?.source_complete === undefined || run.source_complete === null ? null : run.source_complete === 1,
+    mutations: "local_only",
+  });
 });
 
 app.get("/api/products", async (c) => {

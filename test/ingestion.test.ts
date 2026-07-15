@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { stageOpenFoodFacts } from "../scripts/adapters/open-food-facts";
+import { assertPublicationEvidence } from "../scripts/publication";
+import type { SourceManifest } from "../shared/types";
 
 const indiaProduct = {
   code: "8900000000012",
@@ -29,6 +31,28 @@ const indiaProduct = {
 };
 
 describe("Open Food Facts bulk staging", () => {
+  it("accepts only source-complete, reconciled production snapshots for publication", () => {
+    const manifest = {
+      mode: "production",
+      sourceComplete: true,
+      marketComplete: false,
+      terminalEvidence: "end_of_file",
+      stagedRecords: 17,
+      indiaRecords: 20,
+    } as SourceManifest;
+    const report = {
+      sourceComplete: true,
+      marketComplete: false,
+      exclusions: { records: 3, reconcilesIndiaSlice: true },
+      continuity: { currentStagedRecords: 17, previousStagedRecords: 17, missingSinceRecords: 0, maximumDropRatio: 0.2 },
+    };
+    expect(() => assertPublicationEvidence(manifest, report)).not.toThrow();
+    expect(() => assertPublicationEvidence(manifest, { ...report, exclusions: { records: 2, reconcilesIndiaSlice: true } })).toThrow(
+      "staged plus excluded records",
+    );
+    expect(() => assertPublicationEvidence({ ...manifest, sourceComplete: false }, report)).toThrow("manifest is not source complete");
+  });
+
   it("streams all India-tagged foods without protein prefiltering", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-ingest-"));
     const input = join(directory, "sample.jsonl");

@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import type { CatalogResponse, CoverageResponse, ProductDetailResponse, ReviewResponse } from "../shared/api";
+import type { CatalogResponse, CoverageResponse, HealthResponse, ProductDetailResponse, ReviewResponse } from "../shared/api";
 
 const worker = exports.default;
 
@@ -30,7 +30,13 @@ describe("Worker catalog API", () => {
   it("reports seeded health and configured-source coverage", async () => {
     const healthResponse = await worker.fetch("http://localhost/api/health");
     expect(healthResponse.status).toBe(200);
-    expect(await json<{ status: string; products: number }>(healthResponse)).toMatchObject({ status: "ok", products: 5 });
+    expect(await json<HealthResponse>(healthResponse)).toMatchObject({
+      status: "ok",
+      products: 5,
+      runtime: "local",
+      sourceComplete: true,
+      mutations: "local_only",
+    });
 
     const coverageResponse = await worker.fetch("http://localhost/api/coverage");
     expect(coverageResponse.status).toBe(200);
@@ -39,6 +45,19 @@ describe("Worker catalog API", () => {
     expect(coverage.catalog).toMatchObject({ products: 5, validGtin: 5 });
     expect(coverage.sources[0]).toMatchObject({ id: "label_fixture", sourceComplete: true, marketComplete: false });
     expect(coverage.disconnectedSources).toContain("gs1_india_datakart");
+  });
+
+  it("reports production runtime and rejects anonymous production mutations", async () => {
+    const health = await worker.fetch("https://protein-index.example/api/health");
+    expect(await json<HealthResponse>(health)).toMatchObject({ runtime: "production", mutations: "local_only" });
+
+    const mutation = await worker.fetch("https://protein-index.example/api/reviews/anything/resolve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "dismiss", rationale: "should remain read only" }),
+    });
+    expect(mutation.status).toBe(403);
+    expect(await json<{ error: { code: string } }>(mutation)).toMatchObject({ error: { code: "mutations_disabled" } });
   });
 
   it("uses trusted protein defaults and returns evidence-rich detail", async () => {
@@ -63,6 +82,14 @@ describe("Worker catalog API", () => {
     expect(detail.offers[0]?.retailer).toBe("fixture_retailer");
     expect(detail.ratings[0]?.ratingCount).toBeGreaterThan(0);
     expect(detail.provenance.some((observation) => observation.field.startsWith("nutrition."))).toBe(true);
+
+    await env.DB.prepare("UPDATE nutrition_facts SET status = 'unverified' WHERE product_id = ?").bind(first.id).run();
+    const discoveryResponse = await worker.fetch("http://localhost/api/products?verification=all&scope=all&sort=completeness");
+    const discovery = await json<CatalogResponse>(discoveryResponse);
+    const unverified = discovery.products.find((product) => product.id === first.id);
+    expect(unverified).toBeDefined();
+    expect(unverified?.metrics.proteinPer100Calories).toEqual({ value: null, reason: "nutrition_not_verified" });
+    await env.DB.prepare("UPDATE nutrition_facts SET status = 'verified' WHERE product_id = ?").bind(first.id).run();
   });
 
   it("validates bounded search and missing records", async () => {

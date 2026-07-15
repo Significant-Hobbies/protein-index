@@ -3,6 +3,7 @@ import type {
   CatalogProduct,
   CatalogResponse,
   CoverageResponse,
+  HealthResponse,
   ProductDetailResponse,
   ReviewItem,
   ReviewResponse,
@@ -36,7 +37,19 @@ function MetricValue({ result, prefix = "", suffix = "" }: { result: MetricResul
 }
 
 function StatusBadge({ status }: { status: EvidenceStatus }) {
-  return <span className={`status status-${status}`}>{status}</span>;
+  return <span className={`status status-${status}`}><i aria-hidden="true" />{status}</span>;
+}
+
+function ProductVisual({ product, size = "small" }: { product: Pick<CatalogProduct, "imageUrl" | "brand" | "name">; size?: "small" | "large" }) {
+  const [failed, setFailed] = useState(false);
+  const initials = `${product.brand} ${product.name}`.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]?.toUpperCase()).join("");
+  return (
+    <div className={`product-visual product-visual-${size}`} aria-hidden="true">
+      {product.imageUrl && !failed
+        ? <img src={product.imageUrl} alt="" loading="lazy" onError={() => setFailed(true)} />
+        : <span>{initials || "PI"}</span>}
+    </div>
+  );
 }
 
 function ClassificationBadges({ product }: { product: CatalogProduct }) {
@@ -49,13 +62,27 @@ function ClassificationBadges({ product }: { product: CatalogProduct }) {
   );
 }
 
-function CatalogTable({ data, onOpen }: { data: CatalogResponse; onOpen: (id: string) => void }) {
+function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
+  data: CatalogResponse;
+  onOpen: (id: string) => void;
+  onExplore: () => void;
+  page: number;
+  onPage: (page: number) => void;
+}) {
   if (data.products.length === 0) {
-    return <div className="empty"><strong>No products match.</strong><span>Broaden the evidence or category filters.</span></div>;
+    return (
+      <div className="empty empty-catalog">
+        <span className="empty-mark" aria-hidden="true">0</span>
+        <strong>{data.trustedDefault ? "No label-verified products yet." : "No products match this view."}</strong>
+        <span>{data.trustedDefault ? "The catalog is live, but community nutrition is never promoted into trusted comparisons." : "Try a broader category, scope, or evidence filter."}</span>
+        {data.trustedDefault && <button onClick={onExplore}>Explore the discovery catalog</button>}
+      </div>
+    );
   }
   return (
-    <div className="table-wrap">
-      <table>
+    <>
+      <div className="table-wrap catalog-desktop">
+        <table>
         <thead>
           <tr>
             <th scope="col">Product</th>
@@ -72,11 +99,7 @@ function CatalogTable({ data, onOpen }: { data: CatalogResponse; onOpen: (id: st
           {data.products.map((product) => (
             <tr key={product.id}>
               <td className="product-cell">
-                <button className="product-link" onClick={() => onOpen(product.id)}>
-                  <strong>{product.name}</strong>
-                  <span>{product.brand}{product.flavour ? ` · ${product.flavour}` : ""}</span>
-                </button>
-                <ClassificationBadges product={product} />
+                <div className="product-identity"><ProductVisual product={product} /><div><button className="product-link" onClick={() => onOpen(product.id)}><strong>{product.name}</strong><span>{product.brand}{product.flavour ? ` · ${product.flavour}` : ""}</span></button><ClassificationBadges product={product} /></div></div>
               </td>
               <td><StatusBadge status={product.nutritionStatus} /><small>ingredients: {product.ingredientStatus}</small></td>
               <td><strong>{formatNumber(product.nutrition.proteinGrams)} g</strong><small>per 100 g</small></td>
@@ -88,8 +111,23 @@ function CatalogTable({ data, onOpen }: { data: CatalogResponse; onOpen: (id: st
             </tr>
           ))}
         </tbody>
-      </table>
-    </div>
+        </table>
+      </div>
+      <div className="catalog-mobile" aria-label="Catalog products">
+        {data.products.map((product) => (
+          <article className="product-card" key={product.id}>
+            <button className="product-card-main" onClick={() => onOpen(product.id)}>
+              <ProductVisual product={product} />
+              <span className="product-card-copy"><small>{product.brand}</small><strong>{product.name}</strong><em>{product.flavour ?? product.category.replaceAll("_", " ")}</em></span>
+              <span className="card-arrow" aria-hidden="true">↗</span>
+            </button>
+            <div className="product-card-meta"><StatusBadge status={product.nutritionStatus} /><span>{product.nutrition.proteinGrams === null ? "Protein missing" : `${formatNumber(product.nutrition.proteinGrams)} g protein / 100 g`}</span><span>{product.completeness}% complete</span></div>
+            <ClassificationBadges product={product} />
+          </article>
+        ))}
+      </div>
+      {data.pagination.pages > 1 && <nav className="pagination" aria-label="Catalog pages"><button disabled={page <= 1} onClick={() => onPage(page - 1)}>← Previous</button><span>Page <strong>{page}</strong> of {data.pagination.pages.toLocaleString("en-IN")}</span><button disabled={page >= data.pagination.pages} onClick={() => onPage(page + 1)}>Next →</button></nav>}
+    </>
   );
 }
 
@@ -115,31 +153,44 @@ function ProductDrawer({ detail, loading, error, onClose }: {
   onClose: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLElement>(null);
   useEffect(() => {
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     closeRef.current?.focus();
-    const close = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+      if (event.key !== "Tab" || !drawerRef.current) return;
+      const focusable = [...drawerRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])')];
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
     window.addEventListener("keydown", close);
     return () => {
       window.removeEventListener("keydown", close);
+      document.body.style.overflow = previousOverflow;
       previouslyFocused?.focus();
     };
   }, [onClose]);
 
   return (
     <div className="drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <aside className="drawer" role="dialog" aria-modal="true" aria-label="Product evidence detail">
+      <aside ref={drawerRef} className="drawer" role="dialog" aria-modal="true" aria-label="Product evidence detail">
         <button ref={closeRef} className="close" onClick={onClose} aria-label="Close product detail">×</button>
         {loading && <div className="loading">Loading product evidence…</div>}
         {error && <div className="error-state">{error}</div>}
         {detail && (
           <>
             <header className="detail-head">
-              <p className="eyebrow">{detail.brand} · {detail.category.replaceAll("_", " ")}</p>
-              <h2>{detail.name}</h2>
-              <p>{detail.flavour ?? "No flavour declared"} · GTIN {detail.gtin ?? "unverified"}</p>
-              <ClassificationBadges product={detail} />
+              <ProductVisual product={detail} size="large" />
+              <div><p className="eyebrow">{detail.brand} · {detail.category.replaceAll("_", " ")}</p><h2>{detail.name}</h2><p>{detail.flavour ?? "No flavour declared"} · GTIN {detail.gtin ?? "unverified"}</p><ClassificationBadges product={detail} /></div>
             </header>
+
+            {detail.nutritionStatus !== "verified" && <div className={`evidence-notice evidence-notice-${detail.nutritionStatus}`}><strong>{detail.nutritionStatus === "missing" ? "Nutrition is missing" : detail.nutritionStatus === "conflict" ? "Nutrition sources conflict" : "Community evidence—not label verified"}</strong><span>{detail.nutritionStatus === "unverified" ? "Values are retained for inspection, but comparison metrics stay unavailable until a current label or authoritative source is verified." : "This product is excluded from trusted comparisons until the evidence gap is resolved."}</span></div>}
 
             <section className="trust-panel">
               <div><span>Nutrition</span><StatusBadge status={detail.nutritionStatus} /></div>
@@ -196,6 +247,7 @@ function ProductDrawer({ detail, loading, error, onClose }: {
 
             <section>
               <h3>Selected-field provenance</h3>
+              {detail.completenessMissing.length > 0 && <div className="missing-fields"><strong>Still missing</strong>{detail.completenessMissing.map((item) => <span className="tag" key={item}>{item.replaceAll("_", " ")}</span>)}</div>}
               <div className="provenance">
                 {detail.provenance.map((item, index) => (
                   <details key={`${item.field}-${item.source}-${index}`} open={item.selected}>
@@ -212,12 +264,13 @@ function ProductDrawer({ detail, loading, error, onClose }: {
   );
 }
 
-function Reviews({ data, loading, error, onResolve, onOpenProduct }: {
+function Reviews({ data, loading, error, onResolve, onOpenProduct, readOnly = false }: {
   data: ReviewResponse | null;
   loading: boolean;
   error: string | null;
   onResolve: (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null) => Promise<void>;
   onOpenProduct: (id: string) => void;
+  readOnly?: boolean;
 }) {
   const [rationales, setRationales] = useState<Record<string, string>>({});
   const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
@@ -227,11 +280,12 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct }: {
   if (!data?.items.length) return <div className="empty"><strong>Review queue is clear.</strong><span>New conflicts and evidence gaps will appear here.</span></div>;
   return (
     <div className="review-layout">
+      {readOnly && <div className="read-only-notice"><strong>Public read-only view</strong><span>Evidence can be inspected here. Decisions stay disabled until operator authentication is configured.</span></div>}
       <div className="queue-summary"><strong>{data.counts.open}</strong><span>open</span><strong>{data.counts.resolved}</strong><span>resolved</span></div>
       {data.items.map((item) => (
         <article className="review-card" key={item.id}>
           <header><span className="priority">P{item.priority}</span><div><h3>{item.productName ?? "Unmatched source record"}</h3><p>{item.brand ?? item.sourceRecordId} · {item.type.replaceAll("_", " ")}</p></div></header>
-          <pre>{JSON.stringify(item.evidence, null, 2)}</pre>
+          <details className="raw-evidence"><summary>Inspect raw evidence</summary><pre>{JSON.stringify(item.evidence, null, 2)}</pre></details>
           {item.type === "identity" && (
             <div className="identity-review">
               <div className="section-title"><h4>Candidate products</h4>{item.productId && <button className="text-button" onClick={() => onOpenProduct(item.productId!)}>Inspect incoming record</button>}</div>
@@ -242,18 +296,18 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct }: {
                     <span>{candidate.brand}{candidate.flavour ? ` · ${candidate.flavour}` : ""}</span>
                     <small>GTIN {candidate.gtin ?? "missing"} · {candidate.netQuantityGrams ? `${formatNumber(candidate.netQuantityGrams, 0)} g` : "pack missing"}</small>
                   </button>
-                  <button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "match", rationales[item.id] ?? "", null, candidate.id).finally(() => setWorking(null)); }}>Match</button>
+                  {!readOnly && <button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "match", rationales[item.id] ?? "", null, candidate.id).finally(() => setWorking(null)); }}>Match</button>}
                 </div>
               ))}
             </div>
           )}
-          <label>Decision rationale<textarea value={rationales[item.id] ?? ""} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="What evidence supports this decision?" /></label>
+          {!readOnly && <><label>Decision rationale<textarea value={rationales[item.id] ?? ""} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="What evidence supports this decision?" /></label>
           {item.type !== "identity" && <label>Label or authoritative evidence URL<input type="url" value={evidenceUrls[item.id] ?? ""} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>}
           <div className="review-actions">
             {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_nutrition", rationales[item.id] ?? "", evidenceUrls[item.id] || null, null).finally(() => setWorking(null)); }}>Verify nutrition</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_nutrition", rationales[item.id] ?? "", evidenceUrls[item.id] || null, null).finally(() => setWorking(null)); }}>Reject candidate</button></> : null}
             {item.type === "identity" && <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "create_new", rationales[item.id] ?? "", null, null).finally(() => setWorking(null)); }}>Create distinct product</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "no_match", rationales[item.id] ?? "", null, null).finally(() => setWorking(null)); }}>Keep unmatched</button></>}
             <button className="ghost" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "dismiss", rationales[item.id] ?? "", evidenceUrls[item.id] || null, null).finally(() => setWorking(null)); }}>Dismiss</button>
-          </div>
+          </div></>}
         </article>
       ))}
     </div>
@@ -285,7 +339,9 @@ function Coverage({ data, loading, error }: { data: CoverageResponse | null; loa
 export function App() {
   const [tab, setTab] = useState<Tab>("catalog");
   const [filters, setFilters] = useState(initialFilters);
+  const [page, setPage] = useState(1);
   const deferredQuery = useDeferredValue(filters.q);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [catalogState, setCatalogState] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -295,11 +351,20 @@ export function App() {
   const [reviewState, setReviewState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
   const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
   const [coverageState, setCoverageState] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
+  const isPublic = typeof window !== "undefined" && !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
 
   const params = useMemo(() => {
-    const value = new URLSearchParams({ ...filters, q: deferredQuery, pageSize: "50" });
+    const value = new URLSearchParams({ ...filters, q: deferredQuery, page: String(page), pageSize: "50" });
     return value;
-  }, [filters, deferredQuery]);
+  }, [filters, deferredQuery, page]);
+
+  const updateFilters = (next: Partial<typeof initialFilters>) => {
+    setPage(1);
+    setFilters((current) => ({ ...current, ...next }));
+  };
+
+  const showTrusted = () => updateFilters({ verification: "verified", scope: "protein", sort: "protein_density" });
+  const showDiscovery = () => updateFilters({ verification: "all", scope: "all", sort: "completeness" });
 
   const loadCatalog = () => {
     const controller = new AbortController();
@@ -320,7 +385,10 @@ export function App() {
     api.coverage().then((result) => { setCoverage(result); setCoverageState({ loading: false, error: null }); }).catch((error: unknown) => setCoverageState({ loading: false, error: error instanceof Error ? error.message : String(error) }));
   };
 
-  useEffect(loadCoverage, []);
+  useEffect(() => {
+    loadCoverage();
+    api.health().then(setHealth).catch(() => setHealth(null));
+  }, []);
 
   useEffect(() => {
     if (!selectedId) { setDetail(null); return; }
@@ -351,36 +419,48 @@ export function App() {
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to catalog content</a>
       <header className="topbar">
-        <div className="brand-mark">PI</div>
-        <div><p className="eyebrow">Indian food evidence graph</p><h1>Protein Index</h1></div>
+        <button className="brand-home" onClick={() => setTab("catalog")} aria-label="Open Protein Index catalog"><span className="brand-mark">PI</span><span><small>Indian food evidence</small><strong>Protein Index</strong></span></button>
         <nav aria-label="Primary navigation">
-          {(["catalog", "reviews", "coverage"] as const).map((item) => <button key={item} aria-pressed={tab === item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}{item === "reviews" && reviews?.counts.open ? <b>{reviews.counts.open}</b> : null}</button>)}
+          {(["catalog", "coverage", "reviews"] as const).map((item) => <button key={item} aria-pressed={tab === item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item === "reviews" ? "Evidence queue" : item}{item === "reviews" && reviews?.counts.open ? <b>{reviews.counts.open}</b> : null}</button>)}
         </nav>
-        <div className="source-pill"><i />local evidence mode</div>
+        <div className="source-pill"><i />{health?.runtime === "production" ? "Live on Cloudflare" : "Local evidence mode"}</div>
       </header>
 
       <main id="main-content">
         {tab === "catalog" && (
           <>
             <section className="hero-row">
-              <div><p className="eyebrow">Trust the label, retain the source</p><h2>Compare protein, not marketing.</h2><p>Canonical products with verified nutrition, ingredient evidence, source-specific prices, and explainable metrics.</p></div>
-              <div className="hero-stat"><strong>{catalog?.pagination.total ?? "—"}</strong><span>products in this view</span><small>{catalog?.trustedDefault ? "verified nutrition only" : "expanded evidence view"}</small></div>
+              <div><p className="eyebrow">A living index of Indian food labels</p><h2>What’s in the pack<br /><em>before</em> the promise.</h2><p>Search canonical products, inspect where each value came from, and compare protein only when the nutrition has earned your trust.</p></div>
+              <div className="hero-orbit" aria-hidden="true"><span>{coverage?.catalog.products.toLocaleString("en-IN") ?? "—"}</span><small>foods indexed</small><i /></div>
+            </section>
+            <section className="catalog-overview" aria-label="Catalog overview">
+              <div><span>Catalog</span><strong>{coverage?.catalog.products.toLocaleString("en-IN") ?? "—"}</strong><small>canonical food records</small></div>
+              <div><span>Protein discovery</span><strong>{coverage?.catalog.marketedProtein.toLocaleString("en-IN") ?? "—"}</strong><small>marketed protein products</small></div>
+              <div><span>Nutrition evidence</span><strong>{coverage ? (coverage.catalog.verifiedNutrition + coverage.catalog.unverifiedNutrition).toLocaleString("en-IN") : "—"}</strong><small>{coverage?.catalog.verifiedNutrition.toLocaleString("en-IN") ?? "—"} label verified</small></div>
+              <div><span>Ingredients</span><strong>{coverage ? (coverage.catalog.verifiedIngredients + coverage.catalog.unverifiedIngredients).toLocaleString("en-IN") : "—"}</strong><small>statements captured</small></div>
+              <button onClick={() => setTab("coverage")}><span>Source state</span><strong>{coverage?.sources.some((source) => source.sourceComplete) ? "Exhausted" : "Checking"}</strong><small>configured sources only →</small></button>
+            </section>
+            <section className="trust-switch" aria-label="Comparison trust mode">
+              <div><p className="eyebrow">Choose your evidence boundary</p><strong>{catalog?.trustedDefault ? "Trusted comparisons" : "Discovery catalog"}</strong><span>{catalog?.trustedDefault ? "Only current, verified nutrition can produce rankings." : "All retained foods are visible; community values remain explicitly unverified."}</span></div>
+              <div role="group" aria-label="Evidence boundary"><button className={catalog?.trustedDefault ? "active" : ""} aria-pressed={catalog?.trustedDefault ?? false} onClick={showTrusted}>Trusted</button><button className={catalog && !catalog.trustedDefault ? "active" : ""} aria-pressed={catalog ? !catalog.trustedDefault : false} onClick={showDiscovery}>All evidence</button></div>
             </section>
             <section className="filters" aria-label="Catalog filters">
-              <label className="search-field">Search<input value={filters.q} onChange={(event) => setFilters((current) => ({ ...current, q: event.target.value }))} placeholder="Product, brand, or GTIN" /></label>
-              <label>Category<select value={filters.category} onChange={(event) => setFilters((current) => ({ ...current, category: event.target.value }))}><option value="all">All categories</option><option value="protein_powder">Protein powder</option><option value="protein_bar">Protein bars</option><option value="protein_snack">Protein snacks</option><option value="soy_product">Soy products</option><option value="dairy">Dairy</option><option value="ready_to_drink">Ready to drink</option><option value="breakfast">Breakfast</option><option value="spread">Spreads</option><option value="other">Other food</option></select></label>
-              <label>Evidence<select value={filters.verification} onChange={(event) => setFilters((current) => ({ ...current, verification: event.target.value }))}><option value="verified">Verified nutrition</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
-              <label>Scope<select value={filters.scope} onChange={(event) => setFilters((current) => ({ ...current, scope: event.target.value }))}><option value="protein">Protein cohorts</option><option value="all">All ingested foods</option></select></label>
-              <label>Sort<select value={filters.sort} onChange={(event) => setFilters((current) => ({ ...current, sort: event.target.value }))}><option value="protein_density">Protein density</option><option value="cost">Cost / 25 g</option><option value="completeness">Completeness</option><option value="name">Name</option></select></label>
+              <label className="search-field"><span>Search the index</span><input type="search" value={filters.q} onChange={(event) => updateFilters({ q: event.target.value })} placeholder="Try Amul, whey, paneer, or a GTIN" /></label>
+              <label>Category<select value={filters.category} onChange={(event) => updateFilters({ category: event.target.value })}><option value="all">All categories</option><option value="protein_powder">Protein powder</option><option value="protein_bar">Protein bars</option><option value="protein_snack">Protein snacks</option><option value="soy_product">Soy products</option><option value="dairy">Dairy</option><option value="ready_to_drink">Ready to drink</option><option value="breakfast">Breakfast</option><option value="spread">Spreads</option><option value="other">Other food</option></select></label>
+              <label>Evidence<select value={filters.verification} onChange={(event) => updateFilters({ verification: event.target.value })}><option value="verified">Verified nutrition</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
+              <label>Scope<select value={filters.scope} onChange={(event) => updateFilters({ scope: event.target.value })}><option value="protein">Protein cohorts</option><option value="all">All ingested foods</option></select></label>
+              <label>Sort<select value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}><option value="protein_density">Protein density</option><option value="cost">Cost / 25 g</option><option value="completeness">Completeness</option><option value="name">Name</option></select></label>
             </section>
-            {catalogState.loading && <div className="loading">Querying canonical catalog…</div>}
-            {catalogState.error && <div className="error-state">{catalogState.error}</div>}
-            {catalog && !catalogState.loading && <CatalogTable data={catalog} onOpen={setSelectedId} />}
+            <div className="result-meta"><span>{catalog?.pagination.total.toLocaleString("en-IN") ?? "—"} results</span><small>Missing values stay missing. Unverified values never enter trusted metrics.</small></div>
+            {catalogState.loading && <div className="loading"><span className="loader" />Querying canonical catalog…</div>}
+            {catalogState.error && <div className="error-state"><strong>Catalog unavailable</strong><span>{catalogState.error}</span><button onClick={loadCatalog}>Try again</button></div>}
+            {catalog && !catalogState.loading && !catalogState.error && <CatalogTable data={catalog} onOpen={setSelectedId} onExplore={showDiscovery} page={page} onPage={setPage} />}
           </>
         )}
-        {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h2>Evidence review queue</h2><p>Resolve conflicts without discarding the original source record.</p></section><Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} /></>}
+        {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h2>Evidence review queue</h2><p>{isPublic ? "Inspect unresolved evidence. Production decisions remain read-only until operator authentication is in place." : "Resolve conflicts without discarding the original source record."}</p></section><Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} readOnly={isPublic} /></>}
         {tab === "coverage" && <><section className="page-head"><p className="eyebrow">No fake completeness claims</p><h2>Coverage ledger</h2><p>Exhaustion is proved per configured source, with disconnected sources left visible.</p></section><Coverage data={coverage} loading={coverageState.loading} error={coverageState.error} /></>}
       </main>
+      <footer><span>Protein Index</span><p>Evidence before rankings. Configured-source coverage, never a claim of the whole Indian market.</p><button onClick={() => setTab("coverage")}>Read the coverage ledger</button></footer>
       {selectedId && <ProductDrawer detail={detail} loading={detailState.loading} error={detailState.error} onClose={() => setSelectedId(null)} />}
     </div>
   );

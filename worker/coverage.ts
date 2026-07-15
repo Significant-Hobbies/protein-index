@@ -3,9 +3,11 @@ import type { CoverageResponse } from "../shared/api";
 interface CatalogCountRow {
   products: number;
   valid_gtin: number;
+  missing_nutrition: number;
   verified_nutrition: number;
   unverified_nutrition: number;
   conflicting_nutrition: number;
+  unverified_ingredients: number;
   verified_ingredients: number;
   marketed_protein: number;
   nutritionally_protein_dense: number;
@@ -40,9 +42,11 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
     db.prepare(`SELECT
       COUNT(*) AS products,
       SUM(CASE WHEN p.gtin IS NOT NULL THEN 1 ELSE 0 END) AS valid_gtin,
+      SUM(CASE WHEN n.status IS NULL OR n.status = 'missing' THEN 1 ELSE 0 END) AS missing_nutrition,
       SUM(CASE WHEN n.status = 'verified' THEN 1 ELSE 0 END) AS verified_nutrition,
       SUM(CASE WHEN n.status = 'unverified' THEN 1 ELSE 0 END) AS unverified_nutrition,
       SUM(CASE WHEN n.status = 'conflict' THEN 1 ELSE 0 END) AS conflicting_nutrition,
+      SUM(CASE WHEN i.status = 'unverified' THEN 1 ELSE 0 END) AS unverified_ingredients,
       SUM(CASE WHEN i.status = 'verified' THEN 1 ELSE 0 END) AS verified_ingredients,
       SUM(CASE WHEN p.marketed_protein = 1 THEN 1 ELSE 0 END) AS marketed_protein,
       SUM(CASE WHEN p.nutritionally_protein_dense = 1 THEN 1 ELSE 0 END) AS nutritionally_protein_dense
@@ -64,9 +68,11 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
     catalog: {
       products: counts?.products ?? 0,
       validGtin: counts?.valid_gtin ?? 0,
+      missingNutrition: counts?.missing_nutrition ?? 0,
       verifiedNutrition: counts?.verified_nutrition ?? 0,
       unverifiedNutrition: counts?.unverified_nutrition ?? 0,
       conflictingNutrition: counts?.conflicting_nutrition ?? 0,
+      unverifiedIngredients: counts?.unverified_ingredients ?? 0,
       verifiedIngredients: counts?.verified_ingredients ?? 0,
       marketedProtein: counts?.marketed_protein ?? 0,
       nutritionallyProteinDense: counts?.nutritionally_protein_dense ?? 0,
