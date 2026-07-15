@@ -12,7 +12,7 @@
     {
       "binding": "DB",
       "database_name": "protein-index",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "eb679fb6-19d3-414b-9649-88d8078dd912",
       "migrations_dir": "migrations"
     }
   ],

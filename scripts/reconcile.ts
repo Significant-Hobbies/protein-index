@@ -160,11 +160,22 @@ export async function emitImportSql(input: {
       );
     }
 
-    for (const item of flattenIngredients(product.ingredients.normalized, null, sourceRecordId, productId)) {
+    const flattenedIngredients = flattenIngredients(product.ingredients.normalized, null, sourceRecordId, productId);
+    for (const item of flattenedIngredients) {
+      const percentage = item.ingredient.percentage !== null && item.ingredient.percentage >= 0 && item.ingredient.percentage <= 100
+        ? item.ingredient.percentage
+        : null;
       await write(
         output,
-        `INSERT INTO product_ingredients (id, product_id, source_record_id, parent_id, position, raw_text, normalized_name, percentage, resolved) VALUES (${sql(item.id)}, ${productIdSql}, ${sql(sourceRecordId)}, ${sql(item.parentId)}, ${item.ingredient.position}, ${sql(item.ingredient.raw)}, ${sql(item.ingredient.normalizedName)}, ${sql(item.ingredient.percentage)}, ${sql(item.ingredient.normalizedName !== null)}) ON CONFLICT(id) DO UPDATE SET product_id = excluded.product_id, raw_text = excluded.raw_text, normalized_name = excluded.normalized_name, percentage = excluded.percentage, resolved = excluded.resolved;`,
+        `INSERT INTO product_ingredients (id, product_id, source_record_id, parent_id, position, raw_text, normalized_name, percentage, resolved) VALUES (${sql(item.id)}, ${productIdSql}, ${sql(sourceRecordId)}, ${sql(item.parentId)}, ${item.ingredient.position}, ${sql(item.ingredient.raw)}, ${sql(item.ingredient.normalizedName)}, ${sql(percentage)}, ${sql(item.ingredient.normalizedName !== null)}) ON CONFLICT(id) DO UPDATE SET product_id = excluded.product_id, raw_text = excluded.raw_text, normalized_name = excluded.normalized_name, percentage = excluded.percentage, resolved = excluded.resolved;`,
       );
+      if (item.ingredient.percentage !== percentage) {
+        const reviewId = stableId("rev", `${sourceRecordId}:invalid_ingredient_percentage:${item.id}`);
+        await write(
+          output,
+          `INSERT OR IGNORE INTO review_items (id, type, priority, status, source_record_id, product_id, candidate_product_ids_json, evidence_json, created_at) VALUES (${sql(reviewId)}, 'ingredient_conflict', 50, 'open', ${sql(sourceRecordId)}, ${productIdSql}, '[]', ${json({ code: "invalid_ingredient_percentage", raw: item.ingredient.raw, percentage: item.ingredient.percentage })}, ${sql(now)});`,
+        );
+      }
     }
     for (const allergen of product.ingredients.allergens) {
       await write(
@@ -214,7 +225,7 @@ export async function emitImportSql(input: {
     }
 
     for (const issue of product.validationIssues) {
-      const type = issue.code === "invalid_gtin" ? "invalid_gtin" : "nutrition_validation";
+      const type = issue.code === "invalid_gtin" ? "invalid_gtin" : issue.code.startsWith("invalid_ingredient") ? "ingredient_conflict" : "nutrition_validation";
       const reviewId = stableId("rev", `${sourceRecordId}:${issue.code}:${issue.field}`);
       await write(
         output,
@@ -231,7 +242,7 @@ export async function emitImportSql(input: {
     products += 1;
   }
   for (const review of pendingIdentityReviews) {
-    const candidateFilter = `p.is_active = 1 AND p.id <> ${sql(review.proposedProductId)} AND (p.gtin IS NOT NULL OR p.net_quantity_grams IS NOT NULL OR p.flavour_normalized IS NOT NULL) AND p.brand_normalized = ${sql(review.brand)} AND (p.name_normalized = ${sql(review.name)} OR p.name_normalized LIKE ${sql(`${review.name} %`)} OR ${sql(review.name)} LIKE p.name_normalized || ' %')`;
+    const candidateFilter = `p.is_active = 1 AND p.id <> ${sql(review.proposedProductId)} AND (p.gtin IS NOT NULL OR p.net_quantity_grams IS NOT NULL OR p.flavour_normalized IS NOT NULL) AND p.brand_normalized = ${sql(review.brand)} AND (p.name_normalized = ${sql(review.name)} OR substr(p.name_normalized, 1, ${review.name.length + 1}) = ${sql(`${review.name} `)} OR substr(${sql(review.name)}, 1, length(p.name_normalized) + 1) = p.name_normalized || ' ')`;
     const candidateRows = `SELECT p.id AS candidate_id, CASE WHEN p.name_normalized = ${sql(review.name)} THEN 92 ELSE 78 END AS score FROM products p WHERE ${candidateFilter} ORDER BY score DESC, p.id LIMIT 8`;
     const decisionAbsent = `NOT EXISTS (SELECT 1 FROM identity_decisions d WHERE d.source_id = ${sql(review.source)} AND d.source_record_key = ${sql(review.sourceRecordKey)} AND d.identity_hash = ${sql(review.identityHash)} AND d.active = 1)`;
     await write(

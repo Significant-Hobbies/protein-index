@@ -8,7 +8,7 @@ import { once } from "node:events";
 import { createGunzip } from "node:zlib";
 import { classifyProtein } from "../../shared/classification";
 import { normalizeGtin, normalizeText, parseQuantity } from "../../shared/gtin";
-import { parseAdditives, parseAllergens, parseIngredients } from "../../shared/ingredients";
+import { invalidIngredientPercentages, parseAdditives, parseAllergens, parseIngredients } from "../../shared/ingredients";
 import { calculateCompleteness } from "../../shared/metrics";
 import { emptyNutrition, finiteNumber, validateNutrition } from "../../shared/nutrition";
 import type {
@@ -173,6 +173,15 @@ function normalizedRecord(record: RawRecord): { staged: StagedProduct | null; is
 
   const observedAt = observationTime(record);
   const ingredientRaw = stringValue(record.ingredients_text);
+  const invalidPercentages = invalidIngredientPercentages(ingredientRaw);
+  if (invalidPercentages.length > 0) {
+    issues.push({
+      code: "invalid_ingredient_percentage",
+      message: `Ingredient percentage exceeds 100%: ${[...new Set(invalidPercentages)].join(", ")}`,
+      severity: "warning",
+      field: "ingredients",
+    });
+  }
   const evidence = compactEvidence(record);
   const contentHash = createHash("sha256").update(JSON.stringify(evidence)).digest("hex");
   const nutrition = {

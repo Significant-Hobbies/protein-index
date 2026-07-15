@@ -3,7 +3,7 @@ import { identityEvidenceHash } from "../scripts/reconcile";
 import { classifyProtein } from "../shared/classification";
 import { resolveIdentity } from "../shared/entity-resolution";
 import { hasValidGtinCheckDigit, normalizeGtin, normalizeText, parseQuantity } from "../shared/gtin";
-import { parseAdditives, parseAllergens, parseIngredients } from "../shared/ingredients";
+import { invalidIngredientPercentages, parseAdditives, parseAllergens, parseIngredients } from "../shared/ingredients";
 import { calculateCompleteness, calculateMetrics } from "../shared/metrics";
 import { emptyNutrition, nextEvidenceStatus, normalizePerServing, validateNutrition } from "../shared/nutrition";
 import type { NutritionEvidence } from "../shared/types";
@@ -125,6 +125,13 @@ describe("ingredient intelligence", () => {
     expect(parsed.map(({ normalizedName }) => normalizedName)).toEqual(["whey blend", "cocoa", "flavour"]);
     expect(parsed[0]?.percentage).toBe(70);
     expect(parsed[0]?.children.map(({ normalizedName }) => normalizedName)).toEqual(["concentrate", "isolate"]);
+  });
+
+  it("keeps impossible percentages in raw evidence but not normalized values", () => {
+    const parsed = parseIngredients("Milk solids, raising agents (500%)");
+    expect(parsed[1]?.percentage).toBeNull();
+    expect(parsed[1]?.children[0]?.raw).toBe("500%");
+    expect(invalidIngredientPercentages("Milk solids, raising agents (500%)")).toEqual([500]);
   });
 
   it("keeps contains, may-contain, and source tags distinct", () => {

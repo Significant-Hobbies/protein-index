@@ -20,18 +20,26 @@ function splitTopLevel(value: string): string[] {
 
 function parseOne(raw: string, position: number): NormalizedIngredient {
   const percentageMatch = raw.match(/(\d+(?:\.\d+)?)\s*%/);
+  const parsedPercentage = percentageMatch?.[1] ? Number(percentageMatch[1]) : null;
   const nestedMatch = raw.match(/^([^([]+)[([](.+)[)\]]$/);
   const nameRaw = (nestedMatch?.[1] ?? raw).replace(/\d+(?:\.\d+)?\s*%/g, "").trim();
   const normalizedName = normalizeText(nameRaw) || null;
   return {
     raw,
     normalizedName,
-    percentage: percentageMatch?.[1] ? Number(percentageMatch[1]) : null,
+    percentage: parsedPercentage !== null && parsedPercentage >= 0 && parsedPercentage <= 100 ? parsedPercentage : null,
     position,
     children: nestedMatch?.[2]
       ? splitTopLevel(nestedMatch[2]).map((child, childIndex) => parseOne(child, childIndex))
       : [],
   };
+}
+
+export function invalidIngredientPercentages(raw: string | null | undefined): number[] {
+  if (!raw) return [];
+  return [...raw.matchAll(/(\d+(?:\.\d+)?)\s*%/g)]
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value) && (value < 0 || value > 100));
 }
 
 export function parseIngredients(raw: string | null | undefined): NormalizedIngredient[] {
