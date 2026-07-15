@@ -160,12 +160,15 @@ jobs:
           node --input-type=module <<'NODE'
           import { readFile } from 'node:fs/promises';
           const manifest = JSON.parse(await readFile('.data/current/manifest.json', 'utf8'));
+          const report = JSON.parse(await readFile('.data/current/report.json', 'utf8'));
           const failures = [];
           if (manifest.mode !== 'production') failures.push('mode is not production');
           if (manifest.sourceComplete !== true) failures.push('sourceComplete is not true');
           if (manifest.terminalEvidence !== 'end_of_file') failures.push('terminalEvidence is not end_of_file');
           if (manifest.inputHash !== process.env.SOURCE_HASH) failures.push('manifest input hash differs from downloaded export');
           if (manifest.stagedRecords <= 0 || manifest.indiaRecords <= 0) failures.push('snapshot is empty');
+          if (report.exclusions?.reconcilesIndiaSlice !== true) failures.push('India record accounting does not reconcile');
+          if (report.exclusions?.records !== manifest.indiaRecords - manifest.stagedRecords) failures.push('exclusion ledger count differs from manifest');
           if (failures.length) throw new Error(failures.join('; '));
           NODE
         env:
@@ -181,6 +184,7 @@ jobs:
             manifest.json \
             report.json \
             source-index.jsonl \
+            exclusions.jsonl \
             staged-products.jsonl \
             > checksums.sha256
 
@@ -210,6 +214,7 @@ jobs:
             .data/current/manifest.json
             .data/current/report.json
             .data/current/source-index.jsonl
+            .data/current/exclusions.jsonl
             .data/current/staged-products.jsonl
             .data/current/checksums.sha256
 

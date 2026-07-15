@@ -27,6 +27,7 @@
 - [x] 4.4 Implement idempotent reconciliation into local D1 with run accounting, source evidence, confidence precedence, and review-item creation.
 - [x] 4.5 Add CLI commands for bounded fixture/sample sync, validation-only runs, staged output, and local apply.
 - [x] 4.6 Add end-of-source coverage accounting, source-completeness proof, gap reporting, and no-cap production traversal.
+- [ ] 4.7 Emit an auditable per-record exclusion ledger and prove that every India-tagged row is staged or explicitly excluded.
 
 ## 5. Worker API
 

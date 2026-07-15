@@ -111,7 +111,10 @@ context rather than a proxy for nutritional quality.
 Production source traversal has no product-count cap. Each snapshot records
 source-advertised totals when available, records read, India records retained,
 invalid records, duplicates, new/changed/unchanged records, final cursor/end-of-
-stream evidence, and known exclusions. A run is `source_complete` only after it
+stream evidence, and known exclusions. India-tagged rows rejected for missing
+minimum identity or duplicate source IDs are written to a per-record exclusion
+ledger with reason codes and evidence hashes; its count must reconcile with the
+staged India slice. A run is `source_complete` only after it
 reaches the source's terminal cursor or end of export. `source_complete` never
 means the Indian market is complete; the coverage report names sources not
 connected, country-tag limitations, stale brands, and evidence gaps. Limits are

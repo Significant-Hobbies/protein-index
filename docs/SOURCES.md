@@ -18,7 +18,15 @@ Every successful production run records:
 - total rows read and India-tagged, staged, invalid, and duplicate counts;
 - exact new, changed, unchanged, and missing-since-prior record counts;
 - missing nutrition/ingredient coverage and validation issue counts;
-- a compact `source-index.jsonl` used to compare the next run.
+- a compact `source-index.jsonl` used to compare the next run;
+- an `exclusions.jsonl` ledger containing the source row, available identity,
+  reason codes, and evidence hash for every India-tagged row not staged because
+  of missing minimum identity or a duplicate source record ID.
+
+The workflow verifies that staged records plus exclusion-ledger records equal
+the complete India-tagged slice. Artifact checksums use portable relative paths
+and can be checked from the extracted snapshot directory with
+`sha256sum --check checksums.sha256`.
 
 The workflow fails before publishing artifacts as a new continuity baseline if
 the snapshot is empty, capped, incomplete, corrupt, or more than 20% below the

@@ -61,6 +61,7 @@ ONDC integration; purchasing or checkout.
 - Protein cohorts, explainable classification, protein/value metrics, and completeness gaps
 - Streaming all-India Open Food Facts TSV/JSONL staging without protein prefiltering
 - Run manifests, exact snapshot deltas, continuity guardrails, and configured-source coverage ledger
+- Per-record exclusion ledger that reconciles every India-tagged source row to a staged product or explicit reason
 - Local fixture seed with idempotent reconciliation and authority precedence
 - Durable identity decisions keyed to normalized identity evidence, with automatic invalidation when that evidence changes
 - Bounded Worker catalog/detail/coverage/review API with structured errors

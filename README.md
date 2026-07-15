@@ -42,7 +42,9 @@ pnpm data:stage -- \
 Production mode rejects every record cap. The weekly/manual GitHub workflow
 downloads the complete official TSV export, identifies this client, reaches
 end-of-file, compares counts and record hashes with the last good run, and
-uploads reviewable artifacts. It never writes to production.
+uploads reviewable artifacts. Every India-tagged source row is represented by
+either a staged product or an auditable exclusion-ledger entry. The workflow
+never writes to production.
 
 See [docs/SOURCES.md](docs/SOURCES.md) for trust states, coverage semantics, the
 DataKart integration checklist, and the protected future hosted-apply design.

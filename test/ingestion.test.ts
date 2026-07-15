@@ -49,6 +49,29 @@ describe("Open Food Facts bulk staging", () => {
     expect(staged[0]?.nutrients.some(({ code }) => code === "calcium")).toBe(true);
   });
 
+  it("writes an auditable exclusion ledger that reconciles the India slice", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-exclusions-"));
+    const input = join(directory, "sample.jsonl");
+    await writeFile(input, [
+      JSON.stringify(indiaProduct),
+      JSON.stringify({ ...indiaProduct, code: "", product_name: "Missing code" }),
+      JSON.stringify({ ...indiaProduct, code: "8900000000012", product_name: "Duplicate record" }),
+    ].join("\n"), "utf8");
+    const result = await stageOpenFoodFacts({ input, outputDirectory: join(directory, "out"), mode: "sample", limit: null });
+    const exclusions = (await readFile(result.exclusionsPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as {
+      sourceRow: number;
+      sourceRecordId: string | null;
+      reasonCodes: string[];
+      evidenceHash: string;
+    });
+    const report = JSON.parse(await readFile(result.reportPath, "utf8")) as { exclusions: { records: number; reconcilesIndiaSlice: boolean } };
+    expect(exclusions).toHaveLength(2);
+    expect(exclusions.map(({ reasonCodes }) => reasonCodes[0])).toEqual(["missing_identity", "duplicate_source_record_id"]);
+    expect(exclusions.every(({ sourceRow, evidenceHash }) => sourceRow > 0 && evidenceHash.length === 64)).toBe(true);
+    expect(report.exclusions).toEqual({ records: 2, path: "exclusions.jsonl", reconcilesIndiaSlice: true });
+    expect(result.manifest).toMatchObject({ indiaRecords: 3, stagedRecords: 1, invalidRecords: 1, duplicateRecords: 1 });
+  });
+
   it("fails closed for capped production traversal", async () => {
     await expect(stageOpenFoodFacts({ input: "unused", outputDirectory: "unused", mode: "production", limit: 10 })).rejects.toThrow(
       "Production source traversal cannot use a record limit",

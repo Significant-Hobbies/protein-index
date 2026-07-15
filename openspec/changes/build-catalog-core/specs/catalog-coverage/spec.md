@@ -18,6 +18,10 @@ known exclusions, input bytes/hash, and terminal-cursor evidence.
 - **WHEN** the adapter reaches a valid end of export and counts reconcile
 - **THEN** the snapshot is marked source-complete with its accounting evidence
 
+#### Scenario: An India-tagged source row cannot become a staged product
+- **WHEN** a row lacks minimum identity or duplicates another source record ID
+- **THEN** the artifact records its source row, available identity, reason, and evidence hash in an exclusion ledger whose count reconciles with the staged India slice
+
 #### Scenario: Stream terminates early
 - **WHEN** download or parsing stops before terminal evidence
 - **THEN** the snapshot is incomplete and cannot replace the last complete snapshot
@@ -39,4 +43,3 @@ source presence and SHALL support prioritization by product demand.
 #### Scenario: Product has identity but no accurate nutrition
 - **WHEN** a canonical product lacks verified nutrition
 - **THEN** it appears in the nutrition verification gap count and review queue without being removed from discovery
-

@@ -42,6 +42,7 @@ export interface StageResult {
   manifestPath: string;
   reportPath: string;
   indexPath: string;
+  exclusionsPath: string;
 }
 
 type RawRecord = Record<string, unknown>;
@@ -271,6 +272,26 @@ interface SourceIndexRecord {
   contentHash: string;
 }
 
+interface ExcludedSourceRecord {
+  sourceRow: number;
+  sourceRecordId: string | null;
+  productName: string | null;
+  brand: string | null;
+  reasonCodes: string[];
+  evidenceHash: string;
+}
+
+function excludedSourceRecord(record: RawRecord, sourceRow: number, issues: ValidationIssue[]): ExcludedSourceRecord {
+  return {
+    sourceRow,
+    sourceRecordId: stringValue(record.code),
+    productName: stringValue(record.product_name) ?? stringValue(record.generic_name),
+    brand: stringValue(record.brands),
+    reasonCodes: issues.map((issue) => issue.code),
+    evidenceHash: createHash("sha256").update(JSON.stringify(compactEvidence(record))).digest("hex"),
+  };
+}
+
 async function readPreviousIndex(path?: string): Promise<Map<string, string> | null> {
   if (!path) return null;
   const index = new Map<string, string>();
@@ -331,8 +352,10 @@ export async function stageOpenFoodFacts(options: OpenFoodFactsStageOptions): Pr
   const manifestPath = join(options.outputDirectory, "manifest.json");
   const reportPath = join(options.outputDirectory, "report.json");
   const indexPath = join(options.outputDirectory, "source-index.jsonl");
+  const exclusionsPath = join(options.outputDirectory, "exclusions.jsonl");
   const output = createWriteStream(stagedPath, { encoding: "utf8" });
   const indexOutput = createWriteStream(indexPath, { encoding: "utf8" });
+  const exclusionsOutput = createWriteStream(exclusionsPath, { encoding: "utf8" });
   const previousIndex = await readPreviousIndex(options.previousIndexPath);
   const previousManifest = options.previousManifestPath
     ? JSON.parse(await readFile(options.previousManifestPath, "utf8")) as SourceManifest
@@ -364,6 +387,7 @@ export async function stageOpenFoodFacts(options: OpenFoodFactsStageOptions): Pr
   let stagedRecords = 0;
   let invalidRecords = 0;
   let duplicateRecords = 0;
+  let exclusionRecords = 0;
   let reachedLimit = false;
   const sourceRecordIds = new Set<string>();
   const issueCounts: Record<string, number> = {};
@@ -401,10 +425,19 @@ export async function stageOpenFoodFacts(options: OpenFoodFactsStageOptions): Pr
       for (const issue of normalized.issues) issueCounts[issue.code] = (issueCounts[issue.code] ?? 0) + 1;
       if (!normalized.staged) {
         invalidRecords += 1;
+        exclusionRecords += 1;
+        await writeLine(exclusionsOutput, JSON.stringify(excludedSourceRecord(record, recordsRead, normalized.issues)));
         continue;
       }
       if (sourceRecordIds.has(normalized.staged.sourceRecordId)) {
         duplicateRecords += 1;
+        exclusionRecords += 1;
+        await writeLine(exclusionsOutput, JSON.stringify(excludedSourceRecord(record, recordsRead, [{
+          code: "duplicate_source_record_id",
+          message: "Source record ID occurs more than once in the India slice",
+          severity: "error",
+          field: "identity",
+        }])));
         continue;
       }
       sourceRecordIds.add(normalized.staged.sourceRecordId);
@@ -447,6 +480,10 @@ export async function stageOpenFoodFacts(options: OpenFoodFactsStageOptions): Pr
       indexOutput.once("error", reject);
       indexOutput.end(resolve);
     });
+    await new Promise<void>((resolve, reject) => {
+      exclusionsOutput.once("error", reject);
+      exclusionsOutput.end(resolve);
+    });
   }
 
   if (indiaRecords === 0 || stagedRecords === 0) {
@@ -454,6 +491,10 @@ export async function stageOpenFoodFacts(options: OpenFoodFactsStageOptions): Pr
   }
   const completedAt = new Date().toISOString();
   const sourceComplete = !reachedLimit;
+  const indiaSliceReconciles = indiaRecords === stagedRecords + exclusionRecords;
+  if (!indiaSliceReconciles) {
+    throw new Error(`India source accounting does not reconcile: ${indiaRecords} read, ${stagedRecords} staged, ${exclusionRecords} excluded.`);
+  }
   const manifest: SourceManifest = {
     schemaVersion: 1,
     source: "open_food_facts",
@@ -504,6 +545,11 @@ export async function stageOpenFoodFacts(options: OpenFoodFactsStageOptions): Pr
       unchangedRecords,
       missingSinceRecords: manifest.missingSinceRecords,
     },
+    exclusions: {
+      records: exclusionRecords,
+      path: basename(exclusionsPath),
+      reconcilesIndiaSlice: indiaSliceReconciles,
+    },
     issueCounts,
     classificationCounts,
     coverageGaps: {
@@ -517,5 +563,5 @@ export async function stageOpenFoodFacts(options: OpenFoodFactsStageOptions): Pr
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   assertContinuity({ current: manifest, previous: previousManifest, previousIndexSize: previousIndex?.size ?? null, maximumDropRatio });
-  return { manifest, stagedPath, manifestPath, reportPath, indexPath };
+  return { manifest, stagedPath, manifestPath, reportPath, indexPath, exclusionsPath };
 }
