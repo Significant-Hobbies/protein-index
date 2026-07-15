@@ -85,7 +85,12 @@ export function validateNutrition(nutrition: NutritionPer100g): ValidationIssue[
       const estimated = protein * 4 + carbohydrate * 4 + fat * 9;
       const delta = Math.abs(estimated - nutrition.calories) / nutrition.calories;
       if (delta > 0.25) {
-        issues.push({ code: "calorie_macro_mismatch", message: "Declared calories materially disagree with core macros", severity: "warning", field: "calories" });
+        issues.push({
+          code: "calorie_macro_mismatch",
+          message: "Declared calories materially disagree with core macros",
+          severity: delta > 0.5 ? "error" : "warning",
+          field: "calories",
+        });
       }
     }
   }

@@ -103,14 +103,14 @@ describe("Worker catalog API", () => {
     const trusted = await json<CatalogResponse>(trustedResponse);
     expect(trusted.trustedDefault).toBe(true);
     expect(trusted.products.some((product) => product.id === first.id)).toBe(false);
-    await env.DB.prepare("UPDATE nutrition_facts SET status = 'unverified', calories = 0.25, protein_grams = 10.8 WHERE product_id = ?").bind(first.id).run();
+    await env.DB.prepare("UPDATE nutrition_facts SET status = 'unverified', calories = 33, protein_grams = 8.59, carbohydrate_grams = 28.1, fat_grams = 1.2 WHERE product_id = ?").bind(first.id).run();
     const invalidNutritionResponse = await worker.fetch("http://localhost/api/products");
     const invalidNutritionCatalog = await json<CatalogResponse>(invalidNutritionResponse);
     const invalidNutrition = invalidNutritionCatalog.products.find((product) => product.id === first.id);
     expect(invalidNutrition?.metrics.proteinPer100Calories).toEqual({ value: null, reason: "nutrition_validation_error" });
     expect(invalidNutritionCatalog.products[0]?.id).not.toBe(first.id);
-    await env.DB.prepare("UPDATE nutrition_facts SET status = 'verified', calories = ?, protein_grams = ? WHERE product_id = ?")
-      .bind(first.nutrition.calories, first.nutrition.proteinGrams, first.id).run();
+    await env.DB.prepare("UPDATE nutrition_facts SET status = 'verified', calories = ?, protein_grams = ?, carbohydrate_grams = ?, fat_grams = ? WHERE product_id = ?")
+      .bind(first.nutrition.calories, first.nutrition.proteinGrams, first.nutrition.carbohydrateGrams, first.nutrition.fatGrams, first.id).run();
   });
 
   it("validates bounded search and missing records", async () => {

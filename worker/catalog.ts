@@ -210,7 +210,7 @@ function filtersFor(input: SearchInput): { sql: string; bindings: Array<string |
 export async function searchProducts(db: D1Database, input: SearchInput): Promise<CatalogResponse> {
   const filters = filtersFor(input);
   const order = {
-    protein_density: "CASE WHEN n.status IN ('verified', 'unverified') AND n.calories > 0 AND n.protein_grams >= 0 AND n.protein_grams * 4.0 <= n.calories * 1.1 THEN n.protein_grams * 100.0 / n.calories END DESC, p.name_normalized",
+    protein_density: "CASE WHEN n.status IN ('verified', 'unverified') AND n.calories > 0 AND n.protein_grams >= 0 AND n.protein_grams * 4.0 <= n.calories * 1.1 AND (n.carbohydrate_grams IS NULL OR n.fat_grams IS NULL OR ABS((n.protein_grams * 4.0 + n.carbohydrate_grams * 4.0 + n.fat_grams * 9.0) - n.calories) <= n.calories * 0.5) THEN n.protein_grams * 100.0 / n.calories END DESC, p.name_normalized",
     cost: "CASE WHEN n.status IN ('verified', 'unverified') AND n.protein_grams > 0 AND p.net_quantity_grams > 0 THEN o.selling_price * 2500.0 / (p.net_quantity_grams * n.protein_grams) END ASC NULLS LAST, p.name_normalized",
     completeness: "p.completeness DESC, p.name_normalized",
     name: "p.name_normalized, p.brand_normalized",
