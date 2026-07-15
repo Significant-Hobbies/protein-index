@@ -1,7 +1,11 @@
 import type { ReviewItem, ReviewResponse } from "../shared/api";
-import { normalizeGtin } from "../shared/gtin";
-import { hasNutritionErrors, validateNutrition } from "../shared/nutrition";
-import type { NutritionPer100g } from "../shared/types";
+import {
+  canonicalJson,
+  nutritionCandidateFromEvidence,
+  nutritionCandidateHash,
+  validateEvidenceDecision,
+  type EvidenceDecisionInput,
+} from "../shared/evidence-decisions";
 
 interface ReviewRow {
   id: string;
@@ -28,18 +32,6 @@ function parsed(value: string): unknown {
   try { return JSON.parse(value); } catch { return null; }
 }
 
-interface RobotoffCandidate {
-  predictionId: string;
-  barcode: string;
-  imageId: string;
-  imageUrl: string;
-  modelName: string;
-  modelVersion: string;
-  observedAt: string;
-  minimumConfidence: number;
-  nutritionPer100g: NutritionPer100g;
-}
-
 const NUTRITION_FIELDS = [
   ["calories", "calories", "kcal"],
   ["proteinGrams", "protein_grams", "g"],
@@ -50,64 +42,6 @@ const NUTRITION_FIELDS = [
   ["fibreGrams", "fibre_grams", "g"],
   ["sodiumMg", "sodium_mg", "mg"],
 ] as const;
-
-function record(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-function validHttpsUrl(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  try { return new URL(value).protocol === "https:"; } catch { return false; }
-}
-
-function nutritionValue(value: unknown): number | null {
-  return value === null || (typeof value === "number" && Number.isFinite(value)) ? value : Number.NaN;
-}
-
-function robotoffCandidate(evidenceJson: string, productGtin: string | null): RobotoffCandidate | null {
-  const evidence = record(parsed(evidenceJson));
-  if (evidence?.code !== "robotoff_nutrition_candidate") return null;
-  const candidate = record(record(evidence.details)?.candidate);
-  const nutrition = record(candidate?.nutritionPer100g);
-  if (!candidate || !nutrition) return null;
-  const normalized: NutritionPer100g = {
-    calories: nutritionValue(nutrition.calories),
-    proteinGrams: nutritionValue(nutrition.proteinGrams),
-    carbohydrateGrams: nutritionValue(nutrition.carbohydrateGrams),
-    sugarGrams: nutritionValue(nutrition.sugarGrams),
-    fatGrams: nutritionValue(nutrition.fatGrams),
-    saturatedFatGrams: nutritionValue(nutrition.saturatedFatGrams),
-    fibreGrams: nutritionValue(nutrition.fibreGrams),
-    sodiumMg: nutritionValue(nutrition.sodiumMg),
-  };
-  const observedAt = typeof candidate.observedAt === "string" ? new Date(candidate.observedAt) : new Date(Number.NaN);
-  const barcode = typeof candidate.barcode === "string" ? normalizeGtin(candidate.barcode) : null;
-  if (
-    typeof candidate.predictionId !== "string" || !candidate.predictionId ||
-    typeof candidate.imageId !== "string" || !candidate.imageId ||
-    !validHttpsUrl(candidate.imageUrl) ||
-    typeof candidate.modelName !== "string" || !candidate.modelName.startsWith("nutrition_extractor") ||
-    typeof candidate.modelVersion !== "string" || !candidate.modelVersion ||
-    !Number.isFinite(observedAt.valueOf()) ||
-    typeof candidate.minimumConfidence !== "number" || candidate.minimumConfidence < 0.85 || candidate.minimumConfidence > 1 ||
-    !barcode || barcode !== productGtin ||
-    normalized.calories === null || normalized.proteinGrams === null ||
-    hasNutritionErrors(validateNutrition(normalized))
-  ) return null;
-  return {
-    predictionId: candidate.predictionId,
-    barcode,
-    imageId: candidate.imageId,
-    imageUrl: candidate.imageUrl,
-    modelName: candidate.modelName,
-    modelVersion: candidate.modelVersion,
-    observedAt: observedAt.toISOString(),
-    minimumConfidence: candidate.minimumConfidence,
-    nutritionPer100g: normalized,
-  };
-}
 
 export async function listReviews(db: D1Database, status: string, limit: number): Promise<ReviewResponse> {
   const batch = await db.batch([
@@ -165,7 +99,8 @@ export async function resolveReview(
   candidateProductId: string | null,
 ): Promise<"resolved" | "not_found" | "conflict" | "invalid_decision" | "invalid_candidate"> {
   const review = await db.prepare(`SELECT r.id, r.status, r.product_id, r.type, r.candidate_product_ids_json,
-    r.source_record_id, r.evidence_json, s.source_id, s.source_record_id AS source_record_key, s.identity_hash,
+    r.source_record_id, r.evidence_json, s.source_id, s.source_record_id AS source_record_key,
+    s.content_hash AS source_content_hash, s.identity_hash,
     p.gtin AS product_gtin, nf.product_id AS nutrition_product_id
     FROM review_items r
     LEFT JOIN source_records s ON s.id = r.source_record_id
@@ -181,6 +116,7 @@ export async function resolveReview(
     evidence_json: string;
     source_id: string | null;
     source_record_key: string | null;
+    source_content_hash: string | null;
     identity_hash: string | null;
     product_gtin: string | null;
     nutrition_product_id: string | null;
@@ -207,16 +143,61 @@ export async function resolveReview(
     !review.identity_hash
   )) return "invalid_decision";
   const candidate = review.source_id === "open_food_facts_robotoff"
-    ? robotoffCandidate(review.evidence_json, review.product_gtin)
+    ? nutritionCandidateFromEvidence(parsed(review.evidence_json), review.product_gtin)
     : null;
-  if (decision === "verify_nutrition" && review.source_id === "open_food_facts_robotoff" && !candidate) return "invalid_candidate";
+  if (["verify_nutrition", "reject_nutrition"].includes(decision) && review.source_id === "open_food_facts_robotoff" && !candidate) return "invalid_candidate";
   if (decision === "verify_nutrition" && !candidate && !review.nutrition_product_id) return "invalid_decision";
   const status = decision === "dismiss" ? "dismissed" : "resolved";
   const decidedAt = new Date().toISOString();
+  let evidenceDecision: EvidenceDecisionInput | null = null;
+  if (
+    candidate && review.source_id && review.source_record_key && review.source_record_id &&
+    review.source_content_hash && review.product_id && ["verify_nutrition", "reject_nutrition"].includes(decision)
+  ) {
+    const candidateHash = await nutritionCandidateHash(candidate);
+    evidenceDecision = {
+      id: `evd_${id}`,
+      sourceId: review.source_id,
+      sourceRecordKey: review.source_record_key,
+      sourceRecordId: review.source_record_id,
+      sourceContentHash: review.source_content_hash,
+      productId: review.product_id,
+      candidateHash,
+      fieldFamily: "nutrition",
+      decision: decision === "verify_nutrition" ? "verify" : "reject",
+      payload: candidate,
+      evidenceUrl: evidenceUrl ?? candidate.imageUrl,
+      rationale,
+      decidedBy: "local_operator",
+      decidedAt,
+    };
+    if ((await validateEvidenceDecision(evidenceDecision)).length > 0) return "invalid_candidate";
+    const conflicting = await db.prepare(`SELECT id FROM evidence_decisions
+      WHERE id = ? OR (
+        source_id = ? AND source_record_key = ? AND candidate_hash = ? AND field_family = 'nutrition' AND active = 1
+      ) LIMIT 1`)
+      .bind(evidenceDecision.id, evidenceDecision.sourceId, evidenceDecision.sourceRecordKey, evidenceDecision.candidateHash)
+      .first<{ id: string }>();
+    if (conflicting) return "conflict";
+  }
   const statements = [
     db.prepare("UPDATE review_items SET status = ?, decision = ?, decision_rationale = ?, decision_evidence_url = ?, decided_by = 'local_operator', resolved_at = ? WHERE id = ? AND status = 'open'")
       .bind(status, decision, rationale, evidenceUrl, decidedAt, id),
   ];
+  if (evidenceDecision) {
+    statements.push(db.prepare(`INSERT INTO evidence_decisions
+      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+        decided_by, decided_at, active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'nutrition', ?, ?, ?, ?, ?, ?, 1)`)
+      .bind(
+        evidenceDecision.id, evidenceDecision.sourceId, evidenceDecision.sourceRecordKey,
+        evidenceDecision.sourceRecordId, evidenceDecision.sourceContentHash, evidenceDecision.productId,
+        evidenceDecision.candidateHash, evidenceDecision.decision, canonicalJson(evidenceDecision.payload),
+        evidenceDecision.evidenceUrl, evidenceDecision.rationale, evidenceDecision.decidedBy,
+        evidenceDecision.decidedAt,
+      ));
+  }
   if (review.product_id && review.source_record_id && decision === "verify_nutrition" && candidate) {
     const nutrition = candidate.nutritionPer100g;
     statements.push(db.prepare(`INSERT INTO nutrition_facts

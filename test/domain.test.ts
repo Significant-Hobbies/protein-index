@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { initialFilters, metricEvidenceLabel, reviewNutritionCandidate } from "../src/App";
+import {
+  canonicalJson,
+  nutritionCandidateFromEvidence,
+  nutritionCandidateHash,
+  validateEvidenceDecision,
+} from "../shared/evidence-decisions";
 import { identityEvidenceHash } from "../scripts/reconcile";
 import { classifyProtein } from "../shared/classification";
 import { resolveIdentity } from "../shared/entity-resolution";
@@ -130,6 +136,52 @@ describe("metrics and completeness", () => {
     });
     expect(reviewNutritionCandidate({ code: "robotoff_nutrition_candidate", details: { candidate: { imageUrl: "javascript:alert(1)" } } })).toBeNull();
     expect(reviewNutritionCandidate({ code: "robotoff_image_conflict" })).toBeNull();
+  });
+
+  it("hashes the exact canonical candidate and rejects decision drift", async () => {
+    const evidence = {
+      code: "robotoff_nutrition_candidate",
+      details: { candidate: {
+        predictionId: "prediction-1",
+        barcode: "8900000000012",
+        imageId: "image-1",
+        imageUrl: "https://images.openfoodfacts.org/label.jpg",
+        modelName: "nutrition_extractor",
+        modelVersion: "nutrition_extractor-2.0",
+        observedAt: "2026-07-15T00:00:00.000Z",
+        basis: "per_100g",
+        minimumConfidence: 0.94,
+        nutritionPer100g: {
+          calories: 400, proteinGrams: 40, carbohydrateGrams: 30, sugarGrams: 5,
+          fatGrams: 10, saturatedFatGrams: 3, fibreGrams: 4, sodiumMg: 250,
+        },
+      } },
+    };
+    const candidate = nutritionCandidateFromEvidence(evidence, "08900000000012");
+    expect(candidate).not.toBeNull();
+    if (!candidate) throw new Error("Expected a candidate");
+    const candidateHash = await nutritionCandidateHash(candidate);
+    expect(candidateHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(canonicalJson({ z: 1, a: { y: 2, x: 3 } })).toBe('{"a":{"x":3,"y":2},"z":1}');
+    const decision = {
+      id: "evd_test",
+      sourceId: "open_food_facts_robotoff",
+      sourceRecordKey: "08900000000012:prediction-1",
+      sourceRecordId: "src_test",
+      sourceContentHash: "source_hash",
+      productId: "prd_test",
+      candidateHash,
+      fieldFamily: "nutrition" as const,
+      decision: "verify" as const,
+      payload: candidate,
+      evidenceUrl: candidate.imageUrl,
+      rationale: "Exact current label reviewed",
+      decidedBy: "local_operator",
+      decidedAt: "2026-07-15T01:00:00.000Z",
+    };
+    expect(await validateEvidenceDecision(decision)).toEqual([]);
+    expect(await validateEvidenceDecision({ ...decision, candidateHash: "0".repeat(64) }))
+      .toContain("candidateHash does not match payload");
   });
 
   it("calculates the named protein formulas independently", () => {

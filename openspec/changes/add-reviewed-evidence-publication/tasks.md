@@ -1,9 +1,9 @@
 ## 1. Durable evidence decisions
 
-- [ ] 1.1 Add the evidence-decision migration with exact source, candidate-hash, payload, reviewer, timestamp, and active-decision constraints
-- [ ] 1.2 Implement shared canonical candidate hashing and evidence-decision validation for Worker and Node runtimes
-- [ ] 1.3 Persist verify and reject decisions atomically during local review resolution without clearing unrelated facts
-- [ ] 1.4 Add Worker+D1 tests for exact-value verification, isolated rejection, conflicting decision ids, and source/candidate drift
+- [x] 1.1 Add the evidence-decision migration with exact source, candidate-hash, payload, reviewer, timestamp, and active-decision constraints
+- [x] 1.2 Implement shared canonical candidate hashing and evidence-decision validation for Worker and Node runtimes
+- [x] 1.3 Persist verify and reject decisions atomically during local review resolution without clearing unrelated facts
+- [x] 1.4 Add Worker+D1 tests for exact-value verification, isolated rejection, conflicting decision ids, and source/candidate drift
 
 ## 2. Reconciliation and replay
 

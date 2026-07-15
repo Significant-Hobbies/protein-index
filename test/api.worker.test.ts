@@ -1,6 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import type { CatalogResponse, CoverageResponse, HealthResponse, ProductDetailResponse, ReviewResponse } from "../shared/api";
+import { canonicalJson, nutritionCandidateFromEvidence, nutritionCandidateHash } from "../shared/evidence-decisions";
 
 const worker = exports.default;
 
@@ -74,6 +75,7 @@ function robotoffEvidence(barcode: string, nutritionPer100g: Record<string, numb
         modelName: "nutrition_extractor",
         modelVersion: "nutrition_extractor-2.0",
         observedAt: "2026-07-14T00:00:00.000Z",
+        basis: "per_100g",
         minimumConfidence: 0.93,
         nutritionPer100g,
       },
@@ -275,6 +277,22 @@ describe("Worker catalog API", () => {
     const selected = await env.DB.prepare("SELECT COUNT(*) AS count FROM field_observations WHERE product_id = ? AND field_path LIKE 'nutrition.%' AND selected = 1")
       .bind(review.productId).first<{ count: number }>();
     expect(selected?.count).toBe(8);
+    const decision = await env.DB.prepare(`SELECT source_record_id, source_content_hash, product_id,
+      candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, active
+      FROM evidence_decisions WHERE id = ?`).bind(`evd_${review.reviewId}`).first<Record<string, unknown>>();
+    expect(decision).toMatchObject({
+      source_record_id: review.sourceRecordId,
+      source_content_hash: "hash_verify",
+      product_id: review.productId,
+      field_family: "nutrition",
+      decision: "verify",
+      evidence_url: "https://images.openfoodfacts.org/images/products/label.jpg",
+      rationale: "Reviewed against the current package label",
+      decided_by: "local_operator",
+      active: 1,
+    });
+    expect(decision?.candidate_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.parse(String(decision?.payload_json))).toMatchObject({ nutritionPer100g: nutrition });
   });
 
   it("rejects a Robotoff candidate without clearing independently sourced nutrition", async () => {
@@ -296,6 +314,76 @@ describe("Worker catalog API", () => {
     const unchanged = await env.DB.prepare("SELECT calories, protein_grams FROM nutrition_facts WHERE product_id = ?")
       .bind(review.productId).first<{ calories: number; protein_grams: number }>();
     expect(unchanged).toEqual({ calories: product.calories, protein_grams: product.protein_grams });
+    const decision = await env.DB.prepare("SELECT decision, evidence_url, active FROM evidence_decisions WHERE id = ?")
+      .bind(`evd_${review.reviewId}`).first<{ decision: string; evidence_url: string; active: number }>();
+    expect(decision).toEqual({
+      decision: "reject",
+      evidence_url: "https://images.openfoodfacts.org/images/products/label.jpg",
+      active: 1,
+    });
+  });
+
+  it("fails atomically when an evidence decision id conflicts", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const evidence = robotoffEvidence(product.gtin, {
+      calories: 400, proteinGrams: 40, carbohydrateGrams: 30, sugarGrams: 5,
+      fatGrams: 10, saturatedFatGrams: 3, fibreGrams: 4, sodiumMg: 250,
+    });
+    const review = await insertRobotoffReview({ suffix: "decision-id-conflict", evidence });
+    await env.DB.prepare(`INSERT INTO evidence_decisions
+      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+        decided_by, decided_at, active)
+      SELECT ?, source_id, source_record_id, id, content_hash, product_id,
+        ?, 'nutrition', 'reject', '{}', ?, ?, 'test_operator', ?, 1
+      FROM source_records WHERE id = ?`)
+      .bind(`evd_${review.reviewId}`, "0".repeat(64), "https://example.invalid/old-label", "Conflicting historical decision", "2026-07-14T00:00:00.000Z", review.sourceRecordId)
+      .run();
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "verify_nutrition", rationale: "Current label review", evidenceUrl: "https://images.openfoodfacts.org/images/products/label.jpg" }),
+    });
+    expect(response.status).toBe(409);
+    const row = await env.DB.prepare("SELECT status FROM review_items WHERE id = ?").bind(review.reviewId).first<{ status: string }>();
+    expect(row?.status).toBe("open");
+  });
+
+  it("refuses to reuse a matching candidate decision after source-content drift", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const evidence = robotoffEvidence(product.gtin, {
+      calories: 400, proteinGrams: 40, carbohydrateGrams: 30, sugarGrams: 5,
+      fatGrams: 10, saturatedFatGrams: 3, fibreGrams: 4, sodiumMg: 250,
+    });
+    const candidate = nutritionCandidateFromEvidence(evidence, product.gtin);
+    if (!candidate) throw new Error("Expected valid candidate evidence");
+    const candidateHash = await nutritionCandidateHash(candidate);
+    const review = await insertRobotoffReview({ suffix: "source-drift", evidence });
+    await env.DB.prepare(`INSERT INTO evidence_decisions
+      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+        decided_by, decided_at, active)
+      SELECT 'evd_old_source', source_id, source_record_id, id, 'superseded_source_hash', product_id,
+        ?, 'nutrition', 'verify', ?, ?, ?, 'test_operator', ?, 1
+      FROM source_records WHERE id = ?`)
+      .bind(candidateHash, canonicalJson(candidate), candidate.imageUrl, "Reviewed before source changed", "2026-07-14T00:00:00.000Z", review.sourceRecordId)
+      .run();
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "verify_nutrition", rationale: "Review after source changed", evidenceUrl: candidate.imageUrl }),
+    });
+    expect(response.status).toBe(409);
+    const durable = await env.DB.prepare("SELECT source_content_hash FROM evidence_decisions WHERE id = 'evd_old_source'")
+      .first<{ source_content_hash: string }>();
+    expect(durable?.source_content_hash).toBe("superseded_source_hash");
+    const current = await env.DB.prepare("SELECT COUNT(*) AS count FROM evidence_decisions WHERE id = ?")
+      .bind(`evd_${review.reviewId}`).first<{ count: number }>();
+    expect(current?.count).toBe(0);
   });
 
   it("fails closed when Robotoff review evidence is incomplete", async () => {
