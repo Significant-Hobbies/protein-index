@@ -15,6 +15,9 @@ can scale, or the product will produce precise-looking but invalid comparisons.
 - Add explicit nutrition verification states (`missing`, `unverified`,
   `verified`, `conflict`) and exclude non-verified nutrition from trusted
   rankings by default.
+- Add raw and normalized ingredient statements, ordered ingredients,
+  sub-ingredients, declared percentages, allergens, additives, and ingredient
+  verification/provenance.
 - Add Open Food Facts JSONL ingestion for all India-tagged food records where
   practical, including validation, normalization, idempotency, and review-queue
   creation; ingestion does not depend on a record already being classified as
@@ -24,6 +27,9 @@ can scale, or the product will produce precise-looking but invalid comparisons.
 - Add a scheduled GitHub Action that stages fresh source records and an import
   report as reviewable artifacts; it must not publish unreviewed catalog changes
   or require production credentials for the bootstrap path.
+- Process configured production source exports to exhaustion without an
+  arbitrary product cap, and publish a coverage ledger that distinguishes
+  source-complete from market-complete.
 - Add deterministic entity resolution using exact GTIN first and conservative
   normalized attributes second; ambiguous matches remain unresolved for humans.
 - Add separate marketed-protein and nutrition-derived classifications so
@@ -39,9 +45,9 @@ can scale, or the product will produce precise-looking but invalid comparisons.
 
 ### New Capabilities
 
-- `canonical-catalog`: Canonical products, variants, nutrition, ingredients,
-  nutrition verification state, ingredients, source observations, offers, and
-  source-specific ratings.
+- `canonical-catalog`: Canonical products, variants, extensible nutrients,
+  nutrition verification, source observations, offers, and source-specific
+  ratings.
 - `source-aware-ingestion`: Reproducible source imports with validation,
   provenance, idempotency, and confidence-aware reconciliation.
 - `scheduled-source-sync`: Automatic discovery of source updates through a
@@ -50,6 +56,10 @@ can scale, or the product will produce precise-looking but invalid comparisons.
   a durable manual-review queue for ambiguity.
 - `protein-classification`: Independent marketed-protein and nutritionally
   protein-dense cohorts, including explicit neither and unknown states.
+- `ingredient-intelligence`: Accurate raw and normalized ingredient, allergen,
+  and additive data with verification and source traceability.
+- `catalog-coverage`: Exhaustive configured-source traversal, coverage
+  accounting, gap detection, and honest completeness claims.
 - `protein-metrics`: Named nutrition and price-derived metrics with stable
   formulas, validity checks, and explicit unavailable results.
 - `catalog-experience`: Search, comparison, product detail, provenance, and
@@ -67,6 +77,11 @@ can scale, or the product will produce precise-looking but invalid comparisons.
 - Introduces a weekly/manual GitHub Actions sync workflow. Open Food Facts is the
   credential-free bootstrap source; GS1 India DataKart is the preferred
   brand-owner source but remains disabled until access and license terms exist.
+- Scheduled source syncs process the complete available India slice; bounded
+  sampling remains a local/test-only mode.
+- Uses an extensible nutrient code/unit/basis model and product-kind field so
+  later macro, micronutrient, raw-food, foodservice, and recipe coverage does not
+  require replacing the canonical evidence model.
 - Adds production dependencies for React UI rendering and lightweight Worker
   request routing; all build, Worker, type, and test tooling remains development
   only.

@@ -14,7 +14,8 @@ correcting product data.
 
 **IN scope:** broad ingestion of Indian food records; canonical GTIN-based
 products; separate marketed and nutrition-derived protein classification;
-verified nutrition and ingredients; source-specific offers and ratings;
+verified nutrition; raw and normalized ingredients, allergens, and additives;
+configured-source coverage accounting; source-specific offers and ratings;
 provenance and confidence; deterministic protein and value metrics;
 entity-resolution and nutrition-conflict review.
 
@@ -52,7 +53,8 @@ ONDC integration; purchasing or checkout.
 
 ## Todo / Planned / Deferred / Blocked
 
-1. Build the normalized catalog, ingestion, entity-resolution, metrics, API, and review/search UI.
+1. Build the normalized catalog, ingredients, exhaustive source traversal,
+   ingestion, entity-resolution, metrics, API, and review/search UI.
 2. Run the scheduled source-sync workflow and manually verify the first 500
    high-demand Indian products.
 3. Apply for GS1 India DataKart access and map its commercial/licensing constraints.
@@ -60,4 +62,7 @@ ONDC integration; purchasing or checkout.
 5. Evaluate one quick-commerce provider using a coverage, freshness, legality, and cost scorecard.
 6. Add label-image OCR extraction with anomaly validation and human review.
 7. Deferred: ONDC offer ingestion until the core catalog and retailer reconciliation are stable.
-8. Blocked: production deployment requires explicit approval plus provisioned D1 and R2 resources.
+8. Deferred: expand the generic nutrient/product-kind model into full macros,
+   micronutrients, raw foods, foodservice, prepared dishes, and recipes after the
+   protein catalog proves its accuracy and operating model.
+9. Blocked: production deployment requires explicit approval plus provisioned D1 and R2 resources.

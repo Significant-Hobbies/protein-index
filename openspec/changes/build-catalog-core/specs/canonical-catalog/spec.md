@@ -65,3 +65,19 @@ and ingestion run that supplied it.
 - **WHEN** an operator opens provenance for selected protein grams
 - **THEN** the system returns the normalized value, raw value, source, confidence, observation time, and evidence reference
 
+### Requirement: Nutrient observations are extensible
+The system SHALL represent nutrient code, quantity, unit, basis, preparation
+state, and source independently from the protein-focused selected projection.
+
+#### Scenario: Micronutrient is imported before its UI exists
+- **WHEN** a source provides a supported vitamin or mineral observation
+- **THEN** the evidence can be retained without changing protein metric behavior or claiming the future nutrient surface is shipped
+
+### Requirement: Product kind does not assume packaged retail forever
+The system SHALL identify the first-release canonical entities as
+`retail_packaged` and SHALL keep product-kind-specific identity rules separate
+from shared nutrition evidence.
+
+#### Scenario: Future raw-food entity is introduced
+- **WHEN** raw-food coverage is later added
+- **THEN** it can reuse nutrient and provenance concepts without being forced to use retailer listing identity

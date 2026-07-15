@@ -17,6 +17,7 @@
 - [ ] 3.3 Implement marketed and nutrition-derived protein classification with versioned evidence and unit tests.
 - [ ] 3.4 Implement named protein, price, serving, nutrient, and completeness metrics with unavailable reasons and unit tests.
 - [ ] 3.5 Implement exact-GTIN and conservative exact-composite entity resolution plus ambiguous review suggestions with unit tests.
+- [ ] 3.6 Implement raw and normalized ingredient parsing, ordered components, allergens/additives, verification states, and unit tests.
 
 ## 4. Source ingestion and freshness
 
@@ -25,6 +26,7 @@
 - [ ] 4.3 Implement an explicitly disabled DataKart adapter that documents required commercial configuration without accepting or printing secrets.
 - [ ] 4.4 Implement idempotent reconciliation into local D1 with run accounting, source evidence, confidence precedence, and review-item creation.
 - [ ] 4.5 Add CLI commands for bounded fixture/sample sync, validation-only runs, staged output, and local apply.
+- [ ] 4.6 Add end-of-source coverage accounting, source-completeness proof, gap reporting, and no-cap production traversal.
 
 ## 5. Worker API
 
@@ -45,6 +47,7 @@
 - [ ] 7.1 Add weekly and manual GitHub Actions source-sync workflow with concurrency, timeouts, caching, client identification, and artifact retention.
 - [ ] 7.2 Make the workflow fail closed on empty/materially reduced input and upload snapshot manifest, staged data, hashes, and validation report.
 - [ ] 7.3 Document DataKart registration/integration inputs and the protected future apply step without configuring credentials or production writes.
+- [ ] 7.4 Prove scheduled mode cannot use the local sample cap and reports incomplete traversal as failure.
 
 ## 8. Verification and handoff
 

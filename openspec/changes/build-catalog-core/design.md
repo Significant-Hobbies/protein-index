@@ -58,7 +58,13 @@ cross-repo coordination at this stage.
 Use SQL migrations with these conceptual groups:
 
 - `products`: selected canonical identity and classification fields.
-- `nutrition_facts`: selected per-100-g facts plus basis and verification data.
+- `nutrition_facts`: selected core per-100-g projection plus basis and
+  verification data.
+- `nutrient_values`: extensible nutrient code, quantity, unit, basis,
+  preparation state, and source observation for future macro/micronutrients.
+- `ingredient_statements` and `product_ingredients`: selected raw text,
+  verification, ordered normalized components, percentages, sub-ingredients,
+  allergen declarations, and additive identifiers.
 - `offers` and `ratings`: source listing observations keyed separately.
 - `sources`, `ingestion_runs`, and `source_records`: adapter identity, run
   health, raw record hashes, and traceability.
@@ -102,6 +108,15 @@ states for:
 A record may be both, either, neither, or unknown. Category remains a shopping
 context rather than a proxy for nutritional quality.
 
+Production source traversal has no product-count cap. Each snapshot records
+source-advertised totals when available, records read, India records retained,
+invalid records, duplicates, new/changed/unchanged records, final cursor/end-of-
+stream evidence, and known exclusions. A run is `source_complete` only after it
+reaches the source's terminal cursor or end of export. `source_complete` never
+means the Indian market is complete; the coverage report names sources not
+connected, country-tag limitations, stale brands, and evidence gaps. Limits are
+available only for fixtures and deliberate local samples.
+
 ### Deterministic source selection
 
 Field observations carry `confidence`, `observed_at`, and a source authority
@@ -130,6 +145,25 @@ normalizes to per 100 g only when the source supplies enough unambiguous data.
 It rejects impossible protein/macronutrient amounts, totals far above 100 g,
 non-positive energy, serving/pack inversions, and material calorie-versus-macro
 inconsistency when all relevant macros exist.
+
+Ingredients follow the same evidence discipline. The raw label statement is
+never discarded. Parsed ingredients retain order, nesting, declared percentage,
+and unmapped text; normalization cannot invent a cleaner ingredient when parsing
+is uncertain. Allergens distinguish declared `contains`, precautionary `may
+contain`, and source-derived tags. Ingredient verification requires permitted
+DataKart/brand data or a current human-confirmed package label; community-only
+parsing remains unverified and conflicts remain visible.
+
+### Keep nutrition and product kinds extensible without expanding MVP scope
+
+The first UI and metrics use a typed projection for energy, protein,
+carbohydrate, sugar, fat, saturated fat, fibre, and sodium. Underneath, nutrient
+observations use stable nutrient codes with explicit units and bases so later
+vitamins, minerals, fatty acids, amino acids, and additional macros can be added
+without new evidence semantics. Products carry a `product_kind` whose first
+value is `retail_packaged`; future `raw_food`, `foodservice`, `prepared_dish`,
+`recipe`, or supplement-like entities can reuse observations while defining
+their own identity rules. Building those future surfaces is explicitly deferred.
 
 ### Scheduled sync stages evidence before publication
 
@@ -181,6 +215,9 @@ resources and deploying remain explicit later actions.
 - **All-food export processing is large for hosted runners** → stream compressed
   input, avoid loading the export into memory, chunk artifacts, cache downloads,
   and report runner time/bytes.
+- **No source proves the entire Indian market is exhausted** → prove traversal
+  per configured source, reconcile counts, and expose unconnected sources as
+  explicit coverage gaps instead of claiming 100 percent.
 - **DataKart access may impose retention or display limits** → keep its adapter
   disabled until the signed terms are reviewed; never assume the open-data
   adapter's behavior applies.
@@ -206,7 +243,9 @@ resources and deploying remain explicit later actions.
    manifest, anomaly counts, and idempotent re-import.
 3. Enable the scheduled workflow to publish artifacts only.
 4. Review and import the first 500 high-demand products locally.
-5. Provision D1/R2 and add a protected apply workflow only after explicit deploy
+5. Run the complete India export and reconcile its coverage ledger before using
+   complete or exhaustive language on the product surface.
+6. Provision D1/R2 and add a protected apply workflow only after explicit deploy
    approval and source-license review.
 
 Rollback is file- and migration-based before production exists. After
@@ -221,3 +260,5 @@ be recomputed from prior observations rather than deleting evidence.
   cohorts while operators retain access to all records?
 - Which quick-commerce provider offers an acceptable authorized contract for
   pincode-specific price and availability after the catalog core is stable?
+- Which adjacent nutrition cohort should follow protein first: full packaged
+  food macros/micros, supplements, raw foods, foodservice items, or recipes?
