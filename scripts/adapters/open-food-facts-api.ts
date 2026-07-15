@@ -87,6 +87,8 @@ interface StoredBatchResponse {
   response: ApiSearchResponse;
 }
 
+class SplitBatchError extends Error {}
+
 export interface OpenFoodFactsApiEnrichmentOptions {
   input: string;
   inputManifest: string;
@@ -212,6 +214,9 @@ async function fetchBatch(input: {
         headers: { Accept: "application/json", "User-Agent": input.userAgent },
       });
       if (!response.ok) {
+        if (response.status === 503 && input.codes.length > 1) {
+          throw new SplitBatchError("Open Food Facts could not serve the current batch size");
+        }
         const retryable = response.status === 429 || response.status === 503 || response.status >= 500;
         if (!retryable) throw new Error(`Open Food Facts enrichment returned HTTP ${response.status}`);
         lastError = new Error(`Open Food Facts enrichment returned retryable HTTP ${response.status}`);
@@ -222,6 +227,7 @@ async function fetchBatch(input: {
       }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
+      if (error instanceof SplitBatchError) throw error;
       if (response && response.status < 500 && response.status !== 429) throw lastError;
     }
     if (attempt < input.maximumAttempts) await sleep(retryDelay(response, attempt, input.retryBaseMs));
