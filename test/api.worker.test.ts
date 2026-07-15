@@ -42,7 +42,9 @@ describe("Worker catalog API", () => {
     expect(coverageResponse.status).toBe(200);
     const coverage = await json<CoverageResponse>(coverageResponse);
     expect(coverage.claim).toBe("configured_sources_only");
-    expect(coverage.catalog).toMatchObject({ products: 5, validGtin: 5 });
+    expect(coverage.catalog).toMatchObject({ products: 5, validGtin: 5, structuredNutrition: 5, nutritionLabelImages: 0, extractionCandidates: 0 });
+    expect(coverage.completion).toMatchObject({ status: "incomplete", sourceCoverageComplete: true, outstandingIdentity: 5 });
+    expect(coverage.completion.outstandingNutrition).toBeGreaterThan(0);
     expect(coverage.sources[0]).toMatchObject({ id: "label_fixture", sourceComplete: true, marketComplete: false });
     expect(coverage.disconnectedSources).toContain("gs1_india_datakart");
   });
@@ -60,13 +62,21 @@ describe("Worker catalog API", () => {
     expect(await json<{ error: { code: string } }>(mutation)).toMatchObject({ error: { code: "mutations_disabled" } });
   });
 
-  it("uses trusted protein defaults and returns evidence-rich detail", async () => {
+  it("uses evidence-aware protein-density defaults and returns evidence-rich detail", async () => {
     const catalogResponse = await worker.fetch("http://localhost/api/products");
     expect(catalogResponse.status).toBe(200);
     const catalog = await json<CatalogResponse>(catalogResponse);
-    expect(catalog.trustedDefault).toBe(true);
+    expect(catalog.trustedDefault).toBe(false);
+    expect(catalog.filters).toMatchObject({ verification: "all", scope: "all", sort: "protein_density" });
     expect(catalog.products.length).toBeGreaterThan(0);
-    expect(catalog.products.every((product) => product.nutritionStatus === "verified")).toBe(true);
+    expect(catalog.products.some((product) => product.nutritionStatus === "verified")).toBe(true);
+    expect(catalog.products.filter((product) => product.nutritionStatus === "conflict").every((product) => product.metrics.proteinPer100Calories.value === null)).toBe(true);
+    const densityValues = catalog.products.map((product) => product.metrics.proteinPer100Calories.value).filter((value): value is number => value !== null);
+    expect(densityValues).toEqual([...densityValues].sort((left, right) => right - left));
+    const firstUnavailable = catalog.products.findIndex((product) => product.metrics.proteinPer100Calories.value === null);
+    if (firstUnavailable >= 0) {
+      expect(catalog.products.slice(firstUnavailable).every((product) => product.metrics.proteinPer100Calories.value === null)).toBe(true);
+    }
     const first = catalog.products[0];
     expect(first).toBeDefined();
     if (!first) throw new Error("Expected a catalog product");
@@ -88,7 +98,11 @@ describe("Worker catalog API", () => {
     const discovery = await json<CatalogResponse>(discoveryResponse);
     const unverified = discovery.products.find((product) => product.id === first.id);
     expect(unverified).toBeDefined();
-    expect(unverified?.metrics.proteinPer100Calories).toEqual({ value: null, reason: "nutrition_not_verified" });
+    expect(unverified?.metrics.proteinPer100Calories.value).toBeGreaterThan(0);
+    const trustedResponse = await worker.fetch("http://localhost/api/products?verification=verified&scope=protein&sort=protein_density");
+    const trusted = await json<CatalogResponse>(trustedResponse);
+    expect(trusted.trustedDefault).toBe(true);
+    expect(trusted.products.some((product) => product.id === first.id)).toBe(false);
     await env.DB.prepare("UPDATE nutrition_facts SET status = 'verified' WHERE product_id = ?").bind(first.id).run();
   });
 

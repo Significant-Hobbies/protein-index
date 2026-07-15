@@ -1,0 +1,104 @@
+name: Publish reviewed evidence enrichment
+
+on:
+  workflow_dispatch:
+    inputs:
+      enrichment_run_id:
+        description: Successful enrichment workflow run ID to publish
+        required: true
+        type: string
+      expected_source_snapshot_hash:
+        description: Reviewed source snapshot SHA-256 recorded by the enrichment report
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: protein-index-production-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download selected reviewed enrichment
+        uses: actions/github-script@v9
+        env:
+          ENRICHMENT_RUN_ID: ${{ inputs.enrichment_run_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const runId = Number(process.env.ENRICHMENT_RUN_ID);
+            if (!Number.isSafeInteger(runId) || runId <= 0) throw new Error('enrichment_run_id must be a positive workflow run ID');
+            const response = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+              per_page: 100,
+            });
+            const expectedName = `open-food-facts-enrichment-${runId}`;
+            const artifact = response.data.artifacts.find((candidate) => candidate.name === expectedName && !candidate.expired);
+            if (!artifact) throw new Error(`Reviewed artifact ${expectedName} was not found or has expired`);
+            const download = await github.rest.actions.downloadArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: artifact.id,
+              archive_format: 'zip',
+            });
+            fs.writeFileSync('.data-enrichment.zip', Buffer.from(download.data));
+
+      - name: Expand and pin reviewed enrichment
+        shell: bash
+        env:
+          EXPECTED_SOURCE_HASH: ${{ inputs.expected_source_snapshot_hash }}
+        run: |
+          set -euo pipefail
+          mkdir -p .data/publish-enrichment
+          unzip -q .data-enrichment.zip -d .data/publish-enrichment
+          cd .data/publish-enrichment
+          sha256sum --check checksums.sha256
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile('manifest.json', 'utf8'));
+          const report = JSON.parse(await readFile('report.json', 'utf8'));
+          const failures = [];
+          if (manifest.source !== 'open_food_facts_api') failures.push('unexpected enrichment source');
+          if (manifest.mode !== 'production') failures.push('enrichment mode is not production');
+          if (manifest.sourceComplete !== true || report.sourceComplete !== true) failures.push('enrichment is not complete');
+          if (manifest.terminalEvidence !== 'end_of_file') failures.push('enrichment did not reach its configured barcode-set end');
+          if (report.accountedBarcodes !== report.requestedBarcodes) failures.push('barcode accounting does not reconcile');
+          if (report.outcomes?.failed !== 0) failures.push('enrichment contains failed barcodes');
+          if (report.inputManifestHash !== process.env.EXPECTED_SOURCE_HASH) failures.push('source snapshot hash differs from reviewed hash');
+          if (failures.length) throw new Error(failures.join('; '));
+          NODE
+
+      - name: Publish reviewed enrichment to Cloudflare D1
+        run: pnpm data:publish -- --input .data/publish-enrichment --remote --confirm-remote
+
+      - name: Record publication evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: evidence-enrichment-publication-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            .data/publish-enrichment/manifest.json
+            .data/publish-enrichment/report.json
+            .data/publish-enrichment/checksums.sha256

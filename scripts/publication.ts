@@ -1,12 +1,17 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import type { SourceManifest } from "../shared/types";
 
 interface PublicationReport {
   sourceComplete?: boolean;
   marketComplete?: boolean;
+  requestedBarcodes?: number;
+  accountedBarcodes?: number;
+  outcomes?: {
+    failed?: number;
+  };
   continuity?: {
     currentStagedRecords?: number;
     previousStagedRecords?: number;
@@ -52,6 +57,11 @@ export function assertPublicationEvidence(manifest: SourceManifest, report: Publ
     const maximumDropRatio = report.continuity?.maximumDropRatio ?? 0;
     if (previous > 0 && missing / previous > maximumDropRatio) failures.push("snapshot exceeds the permitted continuity drop");
   }
+  if (manifest.source === "open_food_facts_api") {
+    if (report.requestedBarcodes !== manifest.indiaRecords) failures.push("requested barcode count differs from the manifest");
+    if (report.accountedBarcodes !== report.requestedBarcodes) failures.push("barcode accounting does not reconcile");
+    if (report.outcomes?.failed !== 0) failures.push("enrichment contains failed barcodes");
+  }
   if (failures.length > 0) throw new Error(`Publication snapshot rejected: ${failures.join("; ")}`);
 }
 
@@ -80,15 +90,20 @@ export async function validatePublicationSnapshot(directory: string): Promise<Pu
     if (!line.trim()) continue;
     const match = /^([a-f0-9]{64})\s+\*?(.+)$/.exec(line.trim());
     if (!match?.[1] || !match[2]) throw new Error(`Publication checksum line is malformed: ${line}`);
-    const file = basename(match[2]);
-    if (file !== match[2] && match[2] !== `./${file}`) throw new Error(`Publication checksum path is not portable: ${match[2]}`);
+    const file = match[2].replace(/^\.\//, "");
+    if (isAbsolute(file) || file.includes("\\") || file.split("/").some((part) => part === ".." || part === "")) {
+      throw new Error(`Publication checksum path is not a safe portable relative path: ${match[2]}`);
+    }
     expectedFiles.set(file, match[1]);
   }
-  for (const required of ["manifest.json", "report.json", "source-index.jsonl", "exclusions.jsonl", "staged-products.jsonl"]) {
-    const expected = expectedFiles.get(required);
-    if (!expected) throw new Error(`Publication checksum is missing ${required}`);
-    const actual = await sha256(join(directory, required));
-    if (actual !== expected) throw new Error(`Publication checksum mismatch for ${required}`);
+  const requiredFiles = ["manifest.json", "report.json", "source-index.jsonl", "exclusions.jsonl", "staged-products.jsonl"];
+  if (manifest.source === "open_food_facts_api") requiredFiles.push("outcomes.jsonl");
+  for (const required of requiredFiles) {
+    if (!expectedFiles.has(required)) throw new Error(`Publication checksum is missing ${required}`);
+  }
+  for (const [file, expected] of expectedFiles) {
+    const actual = await sha256(join(directory, file));
+    if (actual !== expected) throw new Error(`Publication checksum mismatch for ${file}`);
   }
   return { directory, manifestPath, reportPath, stagedPath, checksumsPath, manifest, report };
 }

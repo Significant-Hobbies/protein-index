@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { initialFilters, metricEvidenceLabel } from "../src/App";
 import { identityEvidenceHash } from "../scripts/reconcile";
 import { classifyProtein } from "../shared/classification";
 import { resolveIdentity } from "../shared/entity-resolution";
@@ -87,6 +88,12 @@ describe("nutrition accuracy and classification", () => {
 });
 
 describe("metrics and completeness", () => {
+  it("defaults the dashboard to evidence-aware protein density", () => {
+    expect(initialFilters).toEqual({ q: "", category: "all", verification: "all", scope: "all", sort: "protein_density" });
+    expect(metricEvidenceLabel("unverified")).toBe("unverified nutrition");
+    expect(metricEvidenceLabel("verified")).toBe("verified nutrition");
+  });
+
   it("calculates the named protein formulas independently", () => {
     const result = calculateMetrics({
       nutrition: verifiedNutrition.per100g,

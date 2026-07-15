@@ -1,0 +1,145 @@
+name: Enrich Open Food Facts evidence
+
+on:
+  workflow_run:
+    workflows: [Source sync]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful Source sync workflow run ID to enrich
+        required: true
+        type: string
+      expected_input_hash:
+        description: Optional source-export SHA-256 to pin for a manual run
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: open-food-facts-evidence-enrichment
+  cancel-in-progress: false
+
+jobs:
+  enrich:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id || inputs.source_run_id }}
+      EXPECTED_INPUT_HASH: ${{ inputs.expected_input_hash || '' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download source-complete snapshot
+        uses: actions/github-script@v9
+        env:
+          RUN_ID: ${{ env.SOURCE_RUN_ID }}
+        with:
+          script: |
+            const fs = require('fs');
+            const runId = Number(process.env.RUN_ID);
+            if (!Number.isSafeInteger(runId) || runId <= 0) throw new Error('source_run_id must be a positive workflow run ID');
+            const response = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+              per_page: 100,
+            });
+            const expectedName = `open-food-facts-snapshot-${runId}`;
+            const artifact = response.data.artifacts.find((candidate) => candidate.name === expectedName && !candidate.expired);
+            if (!artifact) throw new Error(`Source artifact ${expectedName} was not found or has expired`);
+            const download = await github.rest.actions.downloadArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: artifact.id,
+              archive_format: 'zip',
+            });
+            fs.writeFileSync('.data-source.zip', Buffer.from(download.data));
+
+      - name: Expand and validate source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .data/source-snapshot
+          unzip -q .data-source.zip -d .data/source-snapshot
+          cd .data/source-snapshot
+          sha256sum --check checksums.sha256
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile('manifest.json', 'utf8'));
+          const failures = [];
+          if (manifest.source !== 'open_food_facts') failures.push('unexpected source');
+          if (manifest.mode !== 'production') failures.push('source mode is not production');
+          if (manifest.sourceComplete !== true) failures.push('source is not complete');
+          if (manifest.terminalEvidence !== 'end_of_file') failures.push('source did not reach end-of-file');
+          if (process.env.EXPECTED_INPUT_HASH && manifest.inputHash !== process.env.EXPECTED_INPUT_HASH) failures.push('input hash differs from the requested hash');
+          if (failures.length) throw new Error(failures.join('; '));
+          NODE
+
+      - name: Enrich exact configured barcode set
+        run: >-
+          pnpm data:enrich --
+          --input .data/source-snapshot/staged-products.jsonl
+          --manifest .data/source-snapshot/manifest.json
+          --output .data/enrichment
+          --mode production
+          --batch-size 100
+          --minimum-interval-ms 6500
+
+      - name: Record enrichment checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .data/enrichment
+          sha256sum \
+            manifest.json \
+            report.json \
+            source-index.jsonl \
+            exclusions.jsonl \
+            outcomes.jsonl \
+            staged-products.jsonl \
+            > checksums.sha256
+          find responses -type f -name 'batch-*.json' -print0 | sort -z | xargs -0 sha256sum >> checksums.sha256
+
+      - name: Upload reviewable enrichment artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: open-food-facts-enrichment-${{ github.run_id }}
+          compression-level: 9
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            .data/enrichment/manifest.json
+            .data/enrichment/report.json
+            .data/enrichment/source-index.jsonl
+            .data/enrichment/exclusions.jsonl
+            .data/enrichment/outcomes.jsonl
+            .data/enrichment/staged-products.jsonl
+            .data/enrichment/responses/batch-*.json
+            .data/enrichment/checksums.sha256
+
+      - name: Upload enrichment diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: open-food-facts-enrichment-diagnostics-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            .data/enrichment/manifest.json
+            .data/enrichment/report.json
+            .data/enrichment/outcomes.jsonl
+            .data/enrichment/responses/*.error.json

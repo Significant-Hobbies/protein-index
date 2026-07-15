@@ -11,10 +11,10 @@ all India-tagged foods first and classify protein products afterward.
 
 The dashboard has two explicit evidence boundaries:
 
-- **Trusted** shows protein-relevant products with verified nutrition and is
-  the only mode that exposes comparison metrics.
-- **All evidence** exposes the broader discovery catalog while keeping community
-  nutrition and ingredients visibly unverified.
+- **Trusted** shows protein-relevant products with verified nutrition only.
+- **All evidence** is the discovery view. It exposes comparison metrics only
+  when structured nutrition passes validation, keeps community evidence visibly
+  unverified, and withholds missing or conflicting values.
 
 Missing values stay missing. Open Food Facts values are never promoted to
 label-verified facts merely because they parse successfully.
@@ -57,6 +57,24 @@ end-of-file, compares counts and record hashes with the last good run, and
 uploads reviewable artifacts. Every India-tagged source row is represented by
 either a staged product or an auditable exclusion-ledger entry. The workflow
 never writes to production by itself.
+
+Enrich the exact source-complete barcode set with the richer documented product
+response:
+
+```bash
+pnpm data:enrich -- \
+  --input .data/sample/staged-products.jsonl \
+  --manifest .data/sample/manifest.json \
+  --output .data/enrichment \
+  --mode production
+```
+
+Enrichment uses multi-code batches, identifies this client, stays within the
+documented search limit, retries transient failures, splits persistently
+unavailable batches, and resumes from saved response artifacts. It separately
+accounts for enriched, unchanged, not-found, rejected, and failed barcodes. The
+weekly enrichment workflow creates a reviewable artifact; publication remains
+manual.
 
 ## Reviewed catalog publication
 

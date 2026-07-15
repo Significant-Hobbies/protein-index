@@ -47,6 +47,18 @@ export interface StageResult {
 
 type RawRecord = Record<string, unknown>;
 
+export interface OpenFoodFactsNormalizationSource {
+  source: string;
+  sourceAuthority: StagedProduct["sourceAuthority"];
+  sourceRetentionNotes: string;
+}
+
+const BULK_SOURCE: OpenFoodFactsNormalizationSource = {
+  source: "open_food_facts",
+  sourceAuthority: { identity: 45, nutrition: 40, ingredients: 40 },
+  sourceRetentionNotes: "Open Database License; preserve attribution and share-alike obligations.",
+};
+
 function isRecord(value: unknown): value is RawRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -95,7 +107,14 @@ function parseCoreNutrition(record: RawRecord): NutritionPer100g {
   return nutrition;
 }
 
-function parseGenericNutrients(record: RawRecord): GenericNutrientValue[] {
+function nutritionBasis(record: RawRecord): "per_100g" | "per_100ml" {
+  const unit = normalizeText(stringValue(record.product_quantity_unit));
+  const quantity = normalizeText(stringValue(record.quantity));
+  const volumeUnit = /(?:^|[^a-z])(?:ml|cl|dl|l|litre|liter|litres|liters)(?:[^a-z]|$)/;
+  return volumeUnit.test(unit) || volumeUnit.test(quantity) ? "per_100ml" : "per_100g";
+}
+
+function parseGenericNutrients(record: RawRecord, basis: "per_100g" | "per_100ml"): GenericNutrientValue[] {
   const values: GenericNutrientValue[] = [];
   for (const [key, rawValue] of Object.entries(nutritionContainer(record))) {
     if (!key.endsWith("_100g") || key.endsWith("_value_100g") || key.endsWith("_unit_100g")) continue;
@@ -104,7 +123,7 @@ function parseGenericNutrients(record: RawRecord): GenericNutrientValue[] {
     const code = key.slice(0, -5);
     const unit: GenericNutrientValue["unit"] =
       code === "energy-kcal" ? "kcal" : code === "energy-kj" || code === "energy" ? "kj" : "g";
-    values.push({ code, quantity, unit, basis: "per_100g", preparationState: "as_sold" });
+    values.push({ code, quantity, unit, basis, preparationState: "as_sold" });
   }
   return values;
 }
@@ -146,7 +165,10 @@ function sourceUrl(record: RawRecord, code: string): string {
   return stringValue(record.url) ?? `https://world.openfoodfacts.org/product/${code}`;
 }
 
-function normalizedRecord(record: RawRecord): { staged: StagedProduct | null; issues: ValidationIssue[] } {
+export function normalizeOpenFoodFactsRecord(
+  record: Record<string, unknown>,
+  source: OpenFoodFactsNormalizationSource = BULK_SOURCE,
+): { staged: StagedProduct | null; issues: ValidationIssue[] } {
   const issues: ValidationIssue[] = [];
   const sourceRecordId = stringValue(record.code);
   const name = stringValue(record.product_name) ?? stringValue(record.generic_name);
@@ -172,6 +194,7 @@ function normalizedRecord(record: RawRecord): { staged: StagedProduct | null; is
   }
 
   const observedAt = observationTime(record);
+  const basis = nutritionBasis(record);
   const ingredientRaw = stringValue(record.ingredients_text);
   const invalidPercentages = invalidIngredientPercentages(ingredientRaw);
   if (invalidPercentages.length > 0) {
@@ -187,11 +210,11 @@ function normalizedRecord(record: RawRecord): { staged: StagedProduct | null; is
   const nutrition = {
     per100g: nutritionPer100g,
     servingSizeGrams,
-    basis: "per_100g" as const,
+    basis,
     preparationState: "as_sold" as const,
     status: nutritionPer100g.proteinGrams === null && nutritionPer100g.calories === null ? "missing" as const : "unverified" as const,
     confidence: "medium" as const,
-    source: "open_food_facts",
+    source: source.source,
     observedAt,
     labelVerifiedAt: null,
   };
@@ -213,7 +236,7 @@ function normalizedRecord(record: RawRecord): { staged: StagedProduct | null; is
     additives: parseAdditives(ingredientRaw, listValue(record.additives_tags)),
     status: ingredientRaw ? "unverified" as const : "missing" as const,
     confidence: "medium" as const,
-    source: "open_food_facts",
+    source: source.source,
     observedAt,
   };
   const completeness = calculateCompleteness({
@@ -230,11 +253,11 @@ function normalizedRecord(record: RawRecord): { staged: StagedProduct | null; is
   return {
     issues,
     staged: {
-      source: "open_food_facts",
+      source: source.source,
       sourceKind: "open_data",
-      sourceAuthority: { identity: 45, nutrition: 40, ingredients: 40 },
+      sourceAuthority: source.sourceAuthority,
       sourceLicenseUrl: "https://opendatacommons.org/licenses/odbl/1-0/",
-      sourceRetentionNotes: "Open Database License; preserve attribution and share-alike obligations.",
+      sourceRetentionNotes: source.sourceRetentionNotes,
       sourceRecordId,
       sourceUrl: sourceUrl(record, sourceRecordId),
       observedAt,
@@ -255,7 +278,7 @@ function normalizedRecord(record: RawRecord): { staged: StagedProduct | null; is
       offers: [],
       ratings: [],
       nutrition,
-      nutrients: parseGenericNutrients(record),
+      nutrients: parseGenericNutrients(record, basis),
       ingredients,
       classification,
       completeness: completeness.score,
@@ -430,7 +453,7 @@ export async function stageOpenFoodFacts(options: OpenFoodFactsStageOptions): Pr
       }
       if (!isIndiaRecord(record)) continue;
       indiaRecords += 1;
-      const normalized = normalizedRecord(record);
+      const normalized = normalizeOpenFoodFactsRecord(record);
       for (const issue of normalized.issues) issueCounts[issue.code] = (issueCounts[issue.code] ?? 0) + 1;
       if (!normalized.staged) {
         invalidRecords += 1;

@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { assertDataKartConfigured, DATAKART_ADAPTER_STATUS } from "./adapters/datakart";
 import { stageOpenFoodFacts } from "./adapters/open-food-facts";
+import { enrichOpenFoodFactsApi } from "./adapters/open-food-facts-api";
 import { buildFixtureStage } from "./fixtures";
 import { emitImportSql } from "./reconcile";
 import { validatePublicationSnapshot } from "./publication";
@@ -122,6 +123,31 @@ async function seedCommand(): Promise<void> {
   process.stdout.write("Local fixture catalog migrated and seeded.\n");
 }
 
+async function enrichCommand(): Promise<void> {
+  const input = option("input");
+  const inputManifest = option("manifest");
+  if (!input || !inputManifest) throw new Error("--input and --manifest are required for enrich.");
+  const mode = option("mode") === "production" ? "production" : "sample";
+  const rawLimit = option("limit");
+  const limit = rawLimit === null ? (mode === "sample" ? 100 : null) : Number(rawLimit);
+  if (limit !== null && (!Number.isInteger(limit) || limit <= 0)) throw new Error("--limit must be a positive integer.");
+  const batchSize = Number(option("batch-size") ?? "100");
+  const minimumIntervalMs = Number(option("minimum-interval-ms") ?? "6500");
+  const outputDirectory = option("output") ?? ".data/enrichment";
+  const result = await enrichOpenFoodFactsApi({
+    input,
+    inputManifest,
+    outputDirectory,
+    mode,
+    limit,
+    batchSize,
+    minimumIntervalMs,
+  });
+  const importSqlPath = join(outputDirectory, "import.sql");
+  await emitImportSql({ stagedPath: result.stagedPath, manifestPath: result.manifestPath, outputPath: importSqlPath });
+  process.stdout.write(`${JSON.stringify({ ...result, importSqlPath }, null, 2)}\n`);
+}
+
 async function coverageCommand(): Promise<void> {
   const directory = option("input") ?? ".data/sync";
   const [manifest, report] = await Promise.all([
@@ -177,6 +203,7 @@ async function publishCommand(): Promise<void> {
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (command === "stage") return stageCommand();
+  if (command === "enrich") return enrichCommand();
   if (command === "seed") return seedCommand();
   if (command === "coverage") return coverageCommand();
   if (command === "publish") return publishCommand();
@@ -184,7 +211,7 @@ async function main(): Promise<void> {
     process.stdout.write(`${JSON.stringify(DATAKART_ADAPTER_STATUS, null, 2)}\n`);
     return;
   }
-  throw new Error("Usage: sync.ts <stage|seed|coverage|publish|datakart-status> [options]");
+  throw new Error("Usage: sync.ts <stage|enrich|seed|coverage|publish|datakart-status> [options]");
 }
 
 main().catch((error: unknown) => {

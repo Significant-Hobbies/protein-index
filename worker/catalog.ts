@@ -29,6 +29,7 @@ interface ProductRow {
   saturated_fat_grams: number | null;
   fibre_grams: number | null;
   sodium_mg: number | null;
+  nutrition_basis: "per_100g" | "per_100ml" | "per_serving" | "unknown" | null;
   nutrition_observed_at: string | null;
   label_verified_at: string | null;
   offer_retailer: string | null;
@@ -64,6 +65,7 @@ function mapProduct(row: ProductRow): CatalogProduct {
     sodiumMg: row.sodium_mg,
     observedAt: row.nutrition_observed_at,
     labelVerifiedAt: row.label_verified_at,
+    basis: row.nutrition_basis ?? "unknown",
   };
   const calculatedMetrics = calculateMetrics({
     nutrition,
@@ -71,19 +73,19 @@ function mapProduct(row: ProductRow): CatalogProduct {
     servingSizeGrams: row.serving_size_grams,
     sellingPrice: row.selling_price,
   });
-  const metrics = row.nutrition_status === "verified"
+  const metrics = row.nutrition_status === "verified" || row.nutrition_status === "unverified"
     ? calculatedMetrics
     : {
-        proteinPer100Calories: { value: null, reason: "nutrition_not_verified" },
-        proteinCaloriePercentage: { value: null, reason: "nutrition_not_verified" },
-        costPer25gProtein: { value: null, reason: "nutrition_not_verified" },
-        proteinPerInr100: { value: null, reason: "nutrition_not_verified" },
-        caloriesFor25gProtein: { value: null, reason: "nutrition_not_verified" },
-        sugarPer25gProtein: { value: null, reason: "nutrition_not_verified" },
-        saturatedFatPer25gProtein: { value: null, reason: "nutrition_not_verified" },
-        fibrePer100Calories: { value: null, reason: "nutrition_not_verified" },
-        pricePerServing: { value: null, reason: "nutrition_not_verified" },
-        totalProteinInPack: { value: null, reason: "nutrition_not_verified" },
+        proteinPer100Calories: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
+        proteinCaloriePercentage: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
+        costPer25gProtein: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
+        proteinPerInr100: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
+        caloriesFor25gProtein: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
+        sugarPer25gProtein: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
+        saturatedFatPer25gProtein: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
+        fibrePer100Calories: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
+        pricePerServing: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
+        totalProteinInPack: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
       };
   return {
     id: row.id,
@@ -140,8 +142,8 @@ export function validateSearch(input: URLSearchParams): { value?: SearchInput; e
     category: input.get("category") ?? "all",
     marketed: input.get("marketed") ?? "all",
     dense: input.get("dense") ?? "all",
-    verification: input.get("verification") ?? "verified",
-    scope: input.get("scope") ?? "protein",
+    verification: input.get("verification") ?? "all",
+    scope: input.get("scope") ?? "all",
     minCompleteness: number("minCompleteness", 0),
     sort: input.get("sort") ?? "protein_density",
     page: number("page", 1),
@@ -166,7 +168,7 @@ const SELECT_PRODUCT = `
     p.nutrition_reasons_json, p.completeness, p.completeness_missing_json,
     n.status AS nutrition_status, i.status AS ingredient_status,
     n.calories, n.protein_grams, n.carbohydrate_grams, n.sugar_grams,
-    n.fat_grams, n.saturated_fat_grams, n.fibre_grams, n.sodium_mg,
+    n.fat_grams, n.saturated_fat_grams, n.fibre_grams, n.sodium_mg, n.basis AS nutrition_basis,
     n.observed_at AS nutrition_observed_at, n.label_verified_at,
     o.retailer AS offer_retailer, o.selling_price, o.mrp,
     o.pincode AS offer_pincode, o.observed_at AS offer_observed_at
@@ -203,8 +205,8 @@ function filtersFor(input: SearchInput): { sql: string; bindings: Array<string |
 export async function searchProducts(db: D1Database, input: SearchInput): Promise<CatalogResponse> {
   const filters = filtersFor(input);
   const order = {
-    protein_density: "CASE WHEN n.calories > 0 THEN n.protein_grams * 100.0 / n.calories END DESC, p.name_normalized",
-    cost: "CASE WHEN n.protein_grams > 0 AND p.net_quantity_grams > 0 THEN o.selling_price * 2500.0 / (p.net_quantity_grams * n.protein_grams) END ASC, p.name_normalized",
+    protein_density: "CASE WHEN n.status IN ('verified', 'unverified') AND n.calories > 0 THEN n.protein_grams * 100.0 / n.calories END DESC, p.name_normalized",
+    cost: "CASE WHEN n.status IN ('verified', 'unverified') AND n.protein_grams > 0 AND p.net_quantity_grams > 0 THEN o.selling_price * 2500.0 / (p.net_quantity_grams * n.protein_grams) END ASC NULLS LAST, p.name_normalized",
     completeness: "p.completeness DESC, p.name_normalized",
     name: "p.name_normalized, p.brand_normalized",
   }[input.sort] ?? "p.name_normalized";

@@ -42,6 +42,7 @@ export interface CatalogProduct {
     saturatedFatGrams: number | null;
     fibreGrams: number | null;
     sodiumMg: number | null;
+    basis: "per_100g" | "per_100ml" | "per_serving" | "unknown";
     observedAt: string | null;
     labelVerifiedAt: string | null;
   };
@@ -120,6 +121,9 @@ export interface CoverageResponse {
     products: number;
     validGtin: number;
     missingNutrition: number;
+    structuredNutrition: number;
+    nutritionLabelImages: number;
+    extractionCandidates: number;
     verifiedNutrition: number;
     unverifiedNutrition: number;
     conflictingNutrition: number;
@@ -127,6 +131,15 @@ export interface CoverageResponse {
     verifiedIngredients: number;
     marketedProtein: number;
     nutritionallyProteinDense: number;
+    terminalUnavailableNutrition: number;
+    terminalUnavailableIngredients: number;
+  };
+  completion: {
+    status: "complete" | "incomplete";
+    sourceCoverageComplete: boolean;
+    outstandingIdentity: number;
+    outstandingNutrition: number;
+    outstandingIngredients: number;
   };
   sources: Array<{
     id: string;

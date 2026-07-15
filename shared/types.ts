@@ -152,6 +152,7 @@ export interface ValidationIssue {
   message: string;
   severity: "warning" | "error";
   field: string;
+  details?: Record<string, unknown>;
 }
 
 export interface SourceManifest {

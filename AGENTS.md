@@ -11,7 +11,8 @@ remains incomplete or blocked.
 - **Package manager**: pnpm
 - **Local dev**: `pnpm dev`
 - **Checks**: `pnpm check`
-- **Deploy**: intentionally not configured until a D1 database and R2 bucket are provisioned
+- **Deploy**: `pnpm run deploy` after the reviewed data publication, clean-main,
+  synced-remote, green-CI, and release-preflight gates pass
 
 ## Data rules
 
@@ -21,4 +22,3 @@ remains incomplete or blocked.
 - Never silently overwrite higher-confidence nutrition with lower-confidence data.
 - GTIN matching wins over inferred name matching; ambiguous inferred matches require review.
 - Raw source payloads are evidence and must remain traceable to an ingestion run.
-

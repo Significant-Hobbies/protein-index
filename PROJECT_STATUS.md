@@ -24,6 +24,13 @@ coverage; collapsing retailer ratings into one score; unlicensed permanent
 copies of retailer content; autonomous acceptance of ambiguous product matches;
 ONDC integration; purchasing or checkout.
 
+**Completion gate:** deployment is not completion. The product remains
+incomplete until every active product has terminal verified identity, nutrition,
+and ingredient evidence, or a current label/authoritative source explicitly
+establishes that a field is not applicable or not declared. Every configured
+source must also reconcile without unexplained gaps, and the rendered dashboard
+must pass desktop/mobile verification.
+
 ## Dependencies
 
 ### External
@@ -78,10 +85,20 @@ ONDC integration; purchasing or checkout.
   confirmation and post-import D1 verification
 - Guarded Cloudflare release command with type, test, build, startup, dry-run,
   clean-main, sync, and CI gates
+- Evidence-aware discovery defaults to protein grams per 100 kcal while Trusted
+  mode remains verified-only
+- Resumable, rate-bounded richer Open Food Facts API enrichment with exhaustive
+  barcode outcome accounting
+- Review-gated Robotoff label extraction with basis, unit, confidence, image,
+  and anomaly validation
+- Explicit completion gate separating source exhaustion, structured data,
+  label-image coverage, extraction candidates, and verified product coverage
 
 ## Todo / Planned / Deferred / Blocked
 
-1. Manually verify the first 500 high-demand Indian products against current package labels or authoritative brand-owner evidence.
+1. Verify every active product's nutrition and ingredients against current
+   package labels or authoritative brand-owner evidence; terminal evidence-backed
+   unavailable states are allowed, inferred values are not.
 2. Complete desktop/mobile browser verification; the in-app browser was unavailable during the implementation run.
 3. Apply for GS1 India DataKart access and map its commercial/licensing constraints.
 4. Validate Amazon and Flipkart affiliate integrations against current India terms.
@@ -95,3 +112,8 @@ ONDC integration; purchasing or checkout.
 10. Complete sanctioned desktop/mobile visual verification when the in-app
     browser target becomes available; live API and responsive implementation
     checks are complete.
+11. Run the full richer Open Food Facts barcode backfill and inspect the exact
+    change in structured nutrition and ingredient coverage before publication.
+12. Blocked: verified completeness cannot be achieved from Open Food Facts alone;
+    current labels, brand-owner feeds, DataKart access, or manual verification are
+    required for every remaining product.

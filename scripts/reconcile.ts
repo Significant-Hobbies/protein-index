@@ -147,10 +147,12 @@ export async function emitImportSql(input: {
       );
     }
 
-    await write(
-      output,
-      `INSERT INTO ingredient_statements (product_id, source_record_id, raw_text, language, status, confidence, authority, observed_at, updated_at) VALUES (${productIdSql}, ${sql(sourceRecordId)}, ${sql(product.ingredients.raw)}, ${sql(product.ingredients.language)}, ${sql(product.ingredients.status)}, ${sql(product.ingredients.confidence)}, ${product.sourceAuthority.ingredients}, ${sql(product.ingredients.observedAt)}, ${sql(now)}) ON CONFLICT(product_id) DO UPDATE SET source_record_id = excluded.source_record_id, raw_text = excluded.raw_text, language = excluded.language, status = excluded.status, confidence = excluded.confidence, authority = excluded.authority, observed_at = excluded.observed_at, updated_at = excluded.updated_at WHERE excluded.authority > ingredient_statements.authority OR (excluded.authority = ingredient_statements.authority AND excluded.observed_at > ingredient_statements.observed_at);`,
-    );
+    if (product.ingredients.status !== "missing") {
+      await write(
+        output,
+        `INSERT INTO ingredient_statements (product_id, source_record_id, raw_text, language, status, confidence, authority, observed_at, updated_at) VALUES (${productIdSql}, ${sql(sourceRecordId)}, ${sql(product.ingredients.raw)}, ${sql(product.ingredients.language)}, ${sql(product.ingredients.status)}, ${sql(product.ingredients.confidence)}, ${product.sourceAuthority.ingredients}, ${sql(product.ingredients.observedAt)}, ${sql(now)}) ON CONFLICT(product_id) DO UPDATE SET source_record_id = excluded.source_record_id, raw_text = excluded.raw_text, language = excluded.language, status = excluded.status, confidence = excluded.confidence, authority = excluded.authority, observed_at = excluded.observed_at, updated_at = excluded.updated_at WHERE excluded.authority > ingredient_statements.authority OR (excluded.authority = ingredient_statements.authority AND excluded.observed_at > ingredient_statements.observed_at);`,
+      );
+    }
 
     for (const nutrient of product.nutrients) {
       const nutrientId = stableId("nut", `${sourceRecordId}:${nutrient.code}:${nutrient.basis}:${nutrient.preparationState}`);
