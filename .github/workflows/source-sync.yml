@@ -29,11 +29,11 @@ jobs:
       OUTPUT_PATH: .data/current
       MAXIMUM_DROP_PERCENT: ${{ inputs.maximum_drop_percent || '20' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -41,7 +41,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Restore latest cached export
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .data/source
           key: open-food-facts-export-bootstrap
@@ -81,14 +81,14 @@ jobs:
           printf '%s  %s\n' "$source_hash" "$EXPORT_PATH" > .data/source/checksums.sha256
 
       - name: Save content-addressed export cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .data/source
           key: open-food-facts-export-${{ steps.source.outputs.sha256 }}
 
       - name: Download last known-good continuity artifact
         id: previous
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -185,7 +185,7 @@ jobs:
 
       - name: Upload sync diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: open-food-facts-diagnostics-${{ github.run_id }}
           if-no-files-found: warn
@@ -200,7 +200,7 @@ jobs:
 
       - name: Upload reviewable staged snapshot
         if: steps.stage.outputs.exit_code == '0'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: open-food-facts-snapshot-${{ github.run_id }}
           compression-level: 9
@@ -214,7 +214,7 @@ jobs:
 
       - name: Save continuity baseline
         if: steps.stage.outputs.exit_code == '0'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: open-food-facts-continuity
           compression-level: 9
