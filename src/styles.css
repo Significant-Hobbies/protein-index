@@ -193,11 +193,29 @@ td > small, .product-link span, .source-row span, .mini-table small { display: b
 .queue-summary strong { font-size: 24px; }
 .queue-summary span { margin-right: 14px; color: var(--muted); }
 .review-card { padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.review-card-candidate { grid-column: 1 / -1; }
 .review-card header { display: flex; gap: 12px; }
 .review-card h3 { margin: 0 0 4px; }
 .review-card header p { color: var(--muted); font-size: 11px; }
 .priority { display: grid; place-items: center; width: 40px; height: 40px; background: var(--red-soft); color: var(--red); border-radius: 9px; font-size: 10px; font-weight: 900; }
 .raw-evidence { margin-top: 14px; background: #1b241f; color: #dceee3; }
+.nutrition-candidate { display: grid; grid-template-columns: minmax(220px, .7fr) minmax(0, 1.3fr); gap: 18px; margin-top: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper-deep); }
+.candidate-label { position: relative; display: grid; min-height: 310px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: white; color: white; }
+.candidate-label img { width: 100%; height: 100%; max-height: 420px; object-fit: contain; }
+.candidate-label span { position: absolute; right: 10px; bottom: 10px; padding: 7px 9px; border-radius: 7px; background: rgba(18, 31, 23, .88); font-size: 10px; font-weight: 800; }
+.candidate-evidence { min-width: 0; }
+.candidate-evidence-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.candidate-evidence-head h4 { margin: 4px 0 0; font-family: var(--display); font-size: 25px; }
+.confidence { padding: 6px 8px; border-radius: 999px; background: var(--green-soft); color: var(--green); font-size: 9px; font-weight: 850; white-space: nowrap; }
+.candidate-nutrition-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 14px; }
+.candidate-nutrition-grid div { min-width: 0; padding: 10px; border-radius: 8px; background: white; }
+.candidate-nutrition-grid span { display: block; overflow: hidden; color: var(--muted); font-size: 8px; font-weight: 800; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.candidate-nutrition-grid strong { display: block; margin-top: 5px; font-size: 12px; }
+.candidate-meta { display: grid; gap: 7px; margin: 14px 0 0; }
+.candidate-meta div { display: grid; grid-template-columns: 110px 1fr; gap: 9px; font-size: 10px; }
+.candidate-meta dt { color: var(--muted); }
+.candidate-meta dd { margin: 0; overflow-wrap: anywhere; }
+.candidate-warning { margin: 14px 0 0; padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--amber-soft); color: var(--amber); font-size: 10px; line-height: 1.5; }
 .review-card pre { max-height: 190px; overflow: auto; margin: 0; padding: 11px; border-top: 1px solid #33423a; font-size: 10px; white-space: pre-wrap; }
 .review-card label { display: block; margin-top: 12px; }
 .identity-review { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #f4f2e9; }
@@ -284,6 +302,11 @@ footer button { border: 0; background: transparent; color: var(--lime); font-siz
   .coverage-grid { grid-template-columns: repeat(2, 1fr); }
   .coverage-warning { display: block; }
   .coverage-warning span { display: block; margin-top: 5px; }
+  .nutrition-candidate { grid-template-columns: 1fr; padding: 10px; }
+  .candidate-label { min-height: 260px; }
+  .candidate-nutrition-grid { grid-template-columns: repeat(2, 1fr); }
+  .candidate-evidence-head { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .candidate-meta div { grid-template-columns: 1fr; gap: 2px; }
   .source-row { grid-template-columns: 1fr 1fr; }
   footer { grid-template-columns: 1fr; gap: 8px; }
   footer button { padding: 0; text-align: left; }

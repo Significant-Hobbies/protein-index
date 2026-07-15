@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialFilters, metricEvidenceLabel } from "../src/App";
+import { initialFilters, metricEvidenceLabel, reviewNutritionCandidate } from "../src/App";
 import { identityEvidenceHash } from "../scripts/reconcile";
 import { classifyProtein } from "../shared/classification";
 import { resolveIdentity } from "../shared/entity-resolution";
@@ -95,6 +95,41 @@ describe("metrics and completeness", () => {
     expect(initialFilters).toEqual({ q: "", category: "all", verification: "all", scope: "all", sort: "protein_density" });
     expect(metricEvidenceLabel("unverified")).toBe("unverified nutrition");
     expect(metricEvidenceLabel("verified")).toBe("verified nutrition");
+  });
+
+  it("parses only complete Robotoff nutrition review evidence for the operator UI", () => {
+    const candidate = reviewNutritionCandidate({
+      code: "robotoff_nutrition_candidate",
+      details: {
+        candidate: {
+          predictionId: "prediction-1",
+          imageId: "image-1",
+          imageUrl: "https://images.openfoodfacts.org/label.jpg",
+          modelName: "nutrition_extractor",
+          modelVersion: "nutrition_extractor-2.0",
+          observedAt: "2026-07-15T00:00:00.000Z",
+          basis: "per_100g",
+          minimumConfidence: 0.94,
+          nutritionPer100g: {
+            calories: 400,
+            proteinGrams: 40,
+            carbohydrateGrams: 30,
+            sugarGrams: 5,
+            fatGrams: 10,
+            saturatedFatGrams: 3,
+            fibreGrams: 4,
+            sodiumMg: 250,
+          },
+        },
+      },
+    });
+    expect(candidate).toMatchObject({
+      imageUrl: "https://images.openfoodfacts.org/label.jpg",
+      minimumConfidence: 0.94,
+      nutritionPer100g: { calories: 400, proteinGrams: 40 },
+    });
+    expect(reviewNutritionCandidate({ code: "robotoff_nutrition_candidate", details: { candidate: { imageUrl: "javascript:alert(1)" } } })).toBeNull();
+    expect(reviewNutritionCandidate({ code: "robotoff_image_conflict" })).toBeNull();
   });
 
   it("calculates the named protein formulas independently", () => {

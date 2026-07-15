@@ -25,6 +25,83 @@ export function metricEvidenceLabel(status: EvidenceStatus): string {
   return status === "verified" ? "verified nutrition" : status === "unverified" ? "unverified nutrition" : `${status} nutrition`;
 }
 
+export interface ReviewNutritionCandidate {
+  predictionId: string;
+  imageId: string;
+  imageUrl: string;
+  modelName: string;
+  modelVersion: string;
+  observedAt: string;
+  basis: "per_100g" | "per_serving";
+  minimumConfidence: number;
+  nutritionPer100g: {
+    calories: number | null;
+    proteinGrams: number | null;
+    carbohydrateGrams: number | null;
+    sugarGrams: number | null;
+    fatGrams: number | null;
+    saturatedFatGrams: number | null;
+    fibreGrams: number | null;
+    sodiumMg: number | null;
+  };
+}
+
+function object(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function nullableNumber(value: unknown): number | null | undefined {
+  return value === null ? null : typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+export function reviewNutritionCandidate(evidence: unknown): ReviewNutritionCandidate | null {
+  const root = object(evidence);
+  if (root?.code !== "robotoff_nutrition_candidate") return null;
+  const candidate = object(object(root.details)?.candidate);
+  const nutrition = object(candidate?.nutritionPer100g);
+  if (!candidate || !nutrition) return null;
+  const calories = nullableNumber(nutrition.calories);
+  const proteinGrams = nullableNumber(nutrition.proteinGrams);
+  const carbohydrateGrams = nullableNumber(nutrition.carbohydrateGrams);
+  const sugarGrams = nullableNumber(nutrition.sugarGrams);
+  const fatGrams = nullableNumber(nutrition.fatGrams);
+  const saturatedFatGrams = nullableNumber(nutrition.saturatedFatGrams);
+  const fibreGrams = nullableNumber(nutrition.fibreGrams);
+  const sodiumMg = nullableNumber(nutrition.sodiumMg);
+  if (
+    calories === undefined || proteinGrams === undefined || carbohydrateGrams === undefined ||
+    sugarGrams === undefined || fatGrams === undefined || saturatedFatGrams === undefined ||
+    fibreGrams === undefined || sodiumMg === undefined
+  ) return null;
+  const basis = candidate.basis === "per_100g" || candidate.basis === "per_serving" ? candidate.basis : null;
+  if (
+    typeof candidate.predictionId !== "string" || !candidate.predictionId ||
+    typeof candidate.imageId !== "string" || !candidate.imageId ||
+    typeof candidate.imageUrl !== "string" ||
+    typeof candidate.modelName !== "string" || !candidate.modelName ||
+    typeof candidate.modelVersion !== "string" || !candidate.modelVersion ||
+    typeof candidate.observedAt !== "string" || !Number.isFinite(Date.parse(candidate.observedAt)) ||
+    !basis || typeof candidate.minimumConfidence !== "number" ||
+    !Number.isFinite(candidate.minimumConfidence) || candidate.minimumConfidence < 0 || candidate.minimumConfidence > 1
+  ) return null;
+  try {
+    if (new URL(candidate.imageUrl).protocol !== "https:") return null;
+  } catch {
+    return null;
+  }
+  return {
+    predictionId: candidate.predictionId,
+    imageId: candidate.imageId,
+    imageUrl: candidate.imageUrl,
+    modelName: candidate.modelName,
+    modelVersion: candidate.modelVersion,
+    observedAt: candidate.observedAt,
+    basis,
+    minimumConfidence: candidate.minimumConfidence,
+    nutritionPer100g: { calories, proteinGrams, carbohydrateGrams, sugarGrams, fatGrams, saturatedFatGrams, fibreGrams, sodiumMg },
+  };
+}
+
 function formatNumber(value: number | null, digits = 1): string {
   return value === null ? "—" : new Intl.NumberFormat("en-IN", { maximumFractionDigits: digits }).format(value);
 }
@@ -273,6 +350,42 @@ function ProductDrawer({ detail, loading, error, onClose }: {
   );
 }
 
+function NutritionCandidateEvidence({ candidate, productName }: { candidate: ReviewNutritionCandidate; productName: string | null }) {
+  const rows: Array<[string, number | null, string]> = [
+    ["Energy", candidate.nutritionPer100g.calories, "kcal"],
+    ["Protein", candidate.nutritionPer100g.proteinGrams, "g"],
+    ["Carbohydrate", candidate.nutritionPer100g.carbohydrateGrams, "g"],
+    ["Sugar", candidate.nutritionPer100g.sugarGrams, "g"],
+    ["Fat", candidate.nutritionPer100g.fatGrams, "g"],
+    ["Saturated fat", candidate.nutritionPer100g.saturatedFatGrams, "g"],
+    ["Fibre", candidate.nutritionPer100g.fibreGrams, "g"],
+    ["Sodium", candidate.nutritionPer100g.sodiumMg, "mg"],
+  ];
+  return (
+    <section className="nutrition-candidate" aria-label="Extracted nutrition candidate">
+      <a className="candidate-label" href={candidate.imageUrl} target="_blank" rel="noreferrer">
+        <img src={candidate.imageUrl} alt={`Nutrition label evidence for ${productName ?? "product"}`} loading="lazy" referrerPolicy="no-referrer" />
+        <span>Open full label ↗</span>
+      </a>
+      <div className="candidate-evidence">
+        <div className="candidate-evidence-head">
+          <div><span className="eyebrow">Review candidate</span><h4>Extracted per 100 g</h4></div>
+          <span className="confidence">{formatNumber(candidate.minimumConfidence * 100, 1)}% min confidence</span>
+        </div>
+        <div className="candidate-nutrition-grid">
+          {rows.map(([label, value, unit]) => <div key={label}><span>{label}</span><strong>{formatNumber(value)} {unit}</strong></div>)}
+        </div>
+        <dl className="candidate-meta">
+          <div><dt>Label observed</dt><dd>{new Date(candidate.observedAt).toLocaleString("en-IN")}</dd></div>
+          <div><dt>Normalization</dt><dd>{candidate.basis === "per_serving" ? "Converted from explicit serving values" : "Explicit per-100-g values"}</dd></div>
+          <div><dt>Model evidence</dt><dd>{candidate.modelVersion} · prediction {candidate.predictionId} · image {candidate.imageId}</dd></div>
+        </dl>
+        <p className="candidate-warning"><strong>Human check required.</strong> Confirm this is the current package and every displayed value matches the label before verification.</p>
+      </div>
+    </section>
+  );
+}
+
 function Reviews({ data, loading, error, onResolve, onOpenProduct, readOnly = false }: {
   data: ReviewResponse | null;
   loading: boolean;
@@ -291,9 +404,13 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, readOnly = fa
     <div className="review-layout">
       {readOnly && <div className="read-only-notice"><strong>Public read-only view</strong><span>Evidence can be inspected here. Decisions stay disabled until operator authentication is configured.</span></div>}
       <div className="queue-summary"><strong>{data.counts.open}</strong><span>open</span><strong>{data.counts.resolved}</strong><span>resolved</span></div>
-      {data.items.map((item) => (
-        <article className="review-card" key={item.id}>
+      {data.items.map((item) => {
+        const candidate = reviewNutritionCandidate(item.evidence);
+        const evidenceUrl = evidenceUrls[item.id] ?? candidate?.imageUrl ?? "";
+        return (
+        <article className={`review-card${candidate ? " review-card-candidate" : ""}`} key={item.id}>
           <header><span className="priority">P{item.priority}</span><div><h3>{item.productName ?? "Unmatched source record"}</h3><p>{item.brand ?? item.sourceRecordId} · {item.type.replaceAll("_", " ")}</p></div></header>
+          {candidate && <NutritionCandidateEvidence candidate={candidate} productName={item.productName} />}
           <details className="raw-evidence"><summary>Inspect raw evidence</summary><pre>{JSON.stringify(item.evidence, null, 2)}</pre></details>
           {item.type === "identity" && (
             <div className="identity-review">
@@ -311,14 +428,14 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, readOnly = fa
             </div>
           )}
           {!readOnly && <><label>Decision rationale<textarea value={rationales[item.id] ?? ""} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="What evidence supports this decision?" /></label>
-          {item.type !== "identity" && <label>Label or authoritative evidence URL<input type="url" value={evidenceUrls[item.id] ?? ""} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>}
+          {item.type !== "identity" && <label>Label or authoritative evidence URL<input type="url" value={evidenceUrl} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>}
           <div className="review-actions">
-            {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_nutrition", rationales[item.id] ?? "", evidenceUrls[item.id] || null, null).finally(() => setWorking(null)); }}>Verify nutrition</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_nutrition", rationales[item.id] ?? "", evidenceUrls[item.id] || null, null).finally(() => setWorking(null)); }}>Reject candidate</button></> : null}
+            {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null).finally(() => setWorking(null)); }}>{candidate ? "Verify exact label values" : "Verify nutrition"}</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null).finally(() => setWorking(null)); }}>Reject candidate</button></> : null}
             {item.type === "identity" && <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "create_new", rationales[item.id] ?? "", null, null).finally(() => setWorking(null)); }}>Create distinct product</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "no_match", rationales[item.id] ?? "", null, null).finally(() => setWorking(null)); }}>Keep unmatched</button></>}
-            <button className="ghost" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "dismiss", rationales[item.id] ?? "", evidenceUrls[item.id] || null, null).finally(() => setWorking(null)); }}>Dismiss</button>
+            <button className="ghost" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "dismiss", rationales[item.id] ?? "", evidenceUrl || null, null).finally(() => setWorking(null)); }}>Dismiss</button>
           </div></>}
         </article>
-      ))}
+      )})}
     </div>
   );
 }
