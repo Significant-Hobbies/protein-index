@@ -65,6 +65,8 @@ must pass desktop/mobile verification.
 - 2026-07-16 — resumable Robotoff extraction and weekly GitHub automation implemented for every source product with a nutrition-label image; a five-barcode live sample reconciled all outcomes and rejected a physically impossible partial-macro prediction
 - 2026-07-16 — evidence review release `8c5963a2-66f9-4e44-9ef8-2b647136ed0c` deployed after green CI and guarded preflight; live health, default protein-density order, incomplete completion gate, production mutation denial, and provider-neutral consumer copy verified
 - 2026-07-16 — first full 5,998-label Robotoff extraction started in GitHub Actions run `29442748643`; publication and verification remain review-gated
+- 2026-07-16 — durable nutrition decisions, canonical candidate hashing, exact replay, deterministic review bundles, and protected commit-pinned D1 publication implemented; 43 unit/domain tests and 15 Worker+D1 tests pass
+- 2026-07-16 — first real label candidate reviewed against its 3024×4032 package image and rejected because three declared values were not represented; the checksummed bundle contains zero verification decisions and does not inflate coverage
 
 ## Products
 
@@ -108,6 +110,16 @@ must pass desktop/mobile verification.
   no-prediction, rejection, and failure accounting
 - Evidence-specific label review that promotes only the reviewed candidate's
   validated values and leaves rejected candidates isolated from existing facts
+- Side-by-side operator review of the label image, exact normalized candidate,
+  model metadata, confidence, basis, and human-verification warning
+- Append-only evidence decisions bound to exact source content and canonical
+  candidate hashes, with verified/rejected replay and stale-evidence invalidation
+- Deterministic, checksummed review-decision bundles with fail-closed path,
+  schema, nutrition, GTIN, source-drift, and decision-conflict validation
+- Protected manual publication pinned to a merged bundle commit and explicit
+  ledger hash, with pre-write source checks and exact post-write fact/outcome checks
+- Separate protected publication for source-complete Robotoff candidate artifacts;
+  model output enters the review queue and never becomes verified nutrition by itself
 
 ## Todo / Planned / Deferred / Blocked
 
@@ -133,3 +145,9 @@ must pass desktop/mobile verification.
 12. Blocked: verified completeness cannot be achieved from Open Food Facts alone;
     current labels, brand-owner feeds, DataKart access, or manual verification are
     required for every remaining product.
+13. Finish and checksum the in-progress 5,998-label extraction, inspect its exact
+    outcome distribution, and publish only the review-gated source records.
+14. Publish a reviewed real decision bundle only after its exact source record is
+    present remotely; verify the live coverage delta and retain workflow diagnostics.
+15. Deploy the new label-review UI only after rendered desktop/mobile visual and
+    accessibility verification succeeds.
