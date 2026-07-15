@@ -107,14 +107,16 @@ function parseCoreNutrition(record: RawRecord): NutritionPer100g {
   return nutrition;
 }
 
-function nutritionBasis(record: RawRecord): "per_100g" | "per_100ml" {
+function nutritionBasis(record: RawRecord): "per_100g" | "per_100ml" | "unknown" {
   const unit = normalizeText(stringValue(record.product_quantity_unit));
   const quantity = normalizeText(stringValue(record.quantity));
   const volumeUnit = /(?:^|[^a-z])(?:ml|cl|dl|l|litre|liter|litres|liters)(?:[^a-z]|$)/;
-  return volumeUnit.test(unit) || volumeUnit.test(quantity) ? "per_100ml" : "per_100g";
+  if (volumeUnit.test(unit) || volumeUnit.test(quantity)) return "per_100ml";
+  if (parseQuantity(stringValue(record.quantity))?.grams != null) return "per_100g";
+  return "unknown";
 }
 
-function parseGenericNutrients(record: RawRecord, basis: "per_100g" | "per_100ml"): GenericNutrientValue[] {
+function parseGenericNutrients(record: RawRecord, basis: "per_100g" | "per_100ml" | "unknown"): GenericNutrientValue[] {
   const values: GenericNutrientValue[] = [];
   for (const [key, rawValue] of Object.entries(nutritionContainer(record))) {
     if (!key.endsWith("_100g") || key.endsWith("_value_100g") || key.endsWith("_unit_100g")) continue;

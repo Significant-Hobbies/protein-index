@@ -75,7 +75,7 @@ export interface GenericNutrientValue {
   code: string;
   quantity: number;
   unit: "g" | "mg" | "µg" | "kcal" | "kj";
-  basis: "per_100g" | "per_100ml" | "per_serving";
+  basis: "per_100g" | "per_100ml" | "per_serving" | "unknown";
   preparationState: "as_sold" | "prepared" | "unknown";
 }
 

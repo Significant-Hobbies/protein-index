@@ -108,6 +108,8 @@ describe("Open Food Facts bulk staging", () => {
     });
     expect(normalized.staged?.nutrition.basis).toBe("per_100ml");
     expect(normalized.staged?.nutrients.every(({ basis }) => basis === "per_100ml")).toBe(true);
+    const unknown = normalizeOpenFoodFactsRecord({ ...indiaProduct, code: "8900000000036", quantity: "" });
+    expect(unknown.staged?.nutrition.basis).toBe("unknown");
   });
 
   it("writes an auditable exclusion ledger that reconciles the India slice", async () => {

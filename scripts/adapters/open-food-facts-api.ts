@@ -20,10 +20,8 @@ export const OPEN_FOOD_FACTS_API_FIELDS = [
   "countries_tags",
   "quantity",
   "product_quantity",
-  "product_quantity_unit",
   "serving_size",
   "serving_quantity",
-  "nutrition_data_per",
   "categories",
   "categories_tags",
   "labels",
@@ -47,7 +45,7 @@ export const OPEN_FOOD_FACTS_API_FIELDS = [
   "states_tags",
 ].join(",");
 export const OPEN_FOOD_FACTS_API_REQUEST_SCHEMA = createHash("sha256")
-  .update(`${OPEN_FOOD_FACTS_API_ADAPTER_VERSION}:${OPEN_FOOD_FACTS_MULTI_PRODUCT_URL}:${OPEN_FOOD_FACTS_API_FIELDS}`)
+  .update(`${OPEN_FOOD_FACTS_MULTI_PRODUCT_URL}:${OPEN_FOOD_FACTS_API_FIELDS}`)
   .digest("hex");
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
