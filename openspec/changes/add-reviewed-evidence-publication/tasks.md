@@ -30,6 +30,6 @@
 
 - [x] 5.1 Run type, unit, Worker+D1, build, OpenSpec, startup, and release-guard checks
 - [x] 5.2 Dry-run a synthetic reviewed bundle locally and prove idempotent replay plus fail-closed drift behavior
-- [ ] 5.3 Export and review a bounded real candidate bundle without auto-verifying any unreviewed product
+- [x] 5.3 Export and review a bounded real candidate bundle without auto-verifying any unreviewed product
 - [ ] 5.4 Publish the reviewed real bundle through the guarded workflow and verify the exact live coverage delta
 - [x] 5.5 Keep the product completion gate red until all active product identity, nutrition, and ingredient evidence is terminal and verified
