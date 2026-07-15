@@ -34,6 +34,6 @@
 - [x] 5.2 Run the full configured-barcode enrichment and verify checksums, accounting, deltas, and validation outcomes
 - [x] 5.3 Publish only a reviewed complete enrichment artifact through the guarded D1 path
 - [x] 5.4 Run unit, Worker integration, type, build, OpenSpec, startup, and release-guard checks
-- [ ] 5.5 Deploy the updated Worker and verify live APIs, default ranking, evidence states, mutation denial, and security headers
+- [x] 5.5 Deploy the updated Worker and verify live APIs, default ranking, evidence states, mutation denial, and security headers
 - [ ] 5.6 Complete sanctioned desktop/mobile rendered visual and accessibility verification
 - [ ] 5.7 Keep this change and the product goal open until the completion gate reports no outstanding unverified product evidence
