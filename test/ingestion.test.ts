@@ -730,7 +730,10 @@ describe("Robotoff label evidence", () => {
     const stagedPath = join(directory, "staged-products.jsonl");
     const manifestPath = join(directory, "manifest.json");
     const sqlPath = join(directory, "import.sql");
-    await writeFile(stagedPath, `${result.staged.map((product) => JSON.stringify(product)).join("\n")}\n`, "utf8");
+    const legacyStaged = structuredClone(result.staged);
+    const legacyCandidate = legacyStaged[0]?.validationIssues.find(({ code }) => code === "robotoff_nutrition_candidate");
+    if (legacyCandidate?.details) delete legacyCandidate.details.candidateHash;
+    await writeFile(stagedPath, `${legacyStaged.map((product) => JSON.stringify(product)).join("\n")}\n`, "utf8");
     const now = "2026-07-15T10:00:00.000Z";
     const manifest: SourceManifest = {
       schemaVersion: 1,
@@ -770,6 +773,7 @@ describe("Robotoff label evidence", () => {
     expect(sql).toContain("robotoff_nutrition_candidate");
     expect(sql).toContain("evidence_decisions");
     expect(sql).toContain("candidate_hash");
+    expect(sql).toMatch(/candidateHash.{0,8}[a-f0-9]{64}/);
     expect(sql).toContain("INSERT INTO nutrition_facts");
     expect(sql).toContain("d.decision = 'verify'");
     expect(result.staged[0]?.nutrition.status).toBe("missing");

@@ -76,9 +76,11 @@ async function nutritionDecisionCandidate(product: StagedProduct): Promise<Nutri
   if (!issue) return null;
   const candidate = nutritionCandidateFromEvidence(issue, product.gtin);
   const declaredHash = record(issue.details)?.candidateHash;
-  if (!candidate || typeof declaredHash !== "string") return null;
+  if (!candidate || (declaredHash !== undefined && typeof declaredHash !== "string")) return null;
   const computedHash = await nutritionCandidateHash(candidate);
-  return computedHash === declaredHash ? { candidate, candidateHash: computedHash } : null;
+  return declaredHash === undefined || computedHash === declaredHash
+    ? { candidate, candidateHash: computedHash }
+    : null;
 }
 
 function flattenIngredients(
@@ -310,9 +312,12 @@ export async function emitImportSql(input: {
       const matchingDecisionAbsent = issue.code === "robotoff_nutrition_candidate" && nutritionDecisionWhere
         ? `NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${nutritionDecisionWhere})`
         : "1 = 1";
+      const reviewEvidence = issue.code === "robotoff_nutrition_candidate" && nutritionCandidate
+        ? { ...issue, details: { ...issue.details, candidateHash: nutritionCandidate.candidateHash } }
+        : issue;
       await write(
         output,
-        `INSERT OR IGNORE INTO review_items (id, type, priority, status, source_record_id, product_id, candidate_product_ids_json, evidence_json, created_at) SELECT ${sql(reviewId)}, ${sql(type)}, ${issue.severity === "error" ? 80 : 50}, 'open', ${sql(sourceRecordId)}, ${productIdSql}, '[]', ${json(issue)}, ${sql(now)} WHERE ${matchingDecisionAbsent};`,
+        `INSERT OR IGNORE INTO review_items (id, type, priority, status, source_record_id, product_id, candidate_product_ids_json, evidence_json, created_at) SELECT ${sql(reviewId)}, ${sql(type)}, ${issue.severity === "error" ? 80 : 50}, 'open', ${sql(sourceRecordId)}, ${productIdSql}, '[]', ${json(reviewEvidence)}, ${sql(now)} WHERE ${matchingDecisionAbsent};`,
       );
       if (issue.code === "robotoff_nutrition_candidate" && nutritionDecisionWhere) {
         await write(
