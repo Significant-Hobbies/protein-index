@@ -90,14 +90,31 @@ jobs:
           NODE
 
       - name: Enrich exact configured barcode set
-        run: >-
-          pnpm data:enrich --
-          --input .data/source-snapshot/staged-products.jsonl
-          --manifest .data/source-snapshot/manifest.json
-          --output .data/enrichment
-          --mode production
-          --batch-size 100
-          --minimum-interval-ms 6500
+        shell: bash
+        run: |
+          set -uo pipefail
+          status=1
+          for pass in 1 2 3 4; do
+            echo "Starting enrichment pass $pass of 4"
+            set +e
+            pnpm data:enrich -- \
+              --input .data/source-snapshot/staged-products.jsonl \
+              --manifest .data/source-snapshot/manifest.json \
+              --output .data/enrichment \
+              --mode production \
+              --batch-size 100 \
+              --minimum-interval-ms 6500
+            status=$?
+            set -e
+            if [[ "$status" -eq 0 ]]; then
+              break
+            fi
+            if [[ "$pass" -lt 4 ]]; then
+              echo "Enrichment remains incomplete; cooling down before a response-cache resume"
+              sleep 60
+            fi
+          done
+          exit "$status"
 
       - name: Record enrichment checksums
         shell: bash
@@ -142,4 +159,5 @@ jobs:
             .data/enrichment/manifest.json
             .data/enrichment/report.json
             .data/enrichment/outcomes.jsonl
+            .data/enrichment/responses/batch-*.json
             .data/enrichment/responses/*.error.json

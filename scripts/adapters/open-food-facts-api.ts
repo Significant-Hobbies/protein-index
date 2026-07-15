@@ -106,6 +106,7 @@ export interface OpenFoodFactsApiEnrichmentOptions {
   retryBaseMs?: number;
   maximumAttempts?: number;
   minimumSplitBatchSize?: number;
+  maximumRequestBatchSize?: number;
   fetcher?: FetchLike;
   userAgent?: string;
 }
@@ -296,11 +297,15 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
   const retryBaseMs = options.retryBaseMs ?? 2_000;
   const maximumAttempts = options.maximumAttempts ?? 5;
   const minimumSplitBatchSize = options.minimumSplitBatchSize ?? Math.min(25, batchSize);
+  const maximumRequestBatchSize = options.maximumRequestBatchSize ?? Math.min(50, batchSize);
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 100) throw new Error("API enrichment batch size must be between 1 and 100.");
   if (!Number.isFinite(minimumIntervalMs) || minimumIntervalMs < 0) throw new Error("API enrichment interval must be non-negative.");
   if (!Number.isInteger(maximumAttempts) || maximumAttempts < 1 || maximumAttempts > 8) throw new Error("API enrichment attempts must be between 1 and 8.");
   if (!Number.isInteger(minimumSplitBatchSize) || minimumSplitBatchSize < 1 || minimumSplitBatchSize > batchSize) {
     throw new Error("API enrichment minimum split batch size must be between 1 and the batch size.");
+  }
+  if (!Number.isInteger(maximumRequestBatchSize) || maximumRequestBatchSize < minimumSplitBatchSize || maximumRequestBatchSize > batchSize) {
+    throw new Error("API enrichment maximum request batch size must be between the minimum split size and the checkpoint batch size.");
   }
   if (options.mode === "production" && options.limit !== null) throw new Error("Production enrichment cannot use a barcode limit.");
 
@@ -352,7 +357,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
       afterEnrichment: summaries.filter(({ marketedProtein, hasNutritionPair }) => marketedProtein && hasNutritionPair).length,
     },
   };
-  const fetchCodes = (codes: string[]) => fetchBatchResilient({
+  const fetchChunk = (codes: string[]) => fetchBatchResilient({
     codes,
     fetcher: options.fetcher ?? fetch,
     userAgent: options.userAgent ?? "protein-index/0.1 (+https://github.com/sarthak-fleet/protein-index; nutrition-enrichment)",
@@ -367,6 +372,16 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
     },
     onSplit: () => { fallbackSplits += 1; },
   });
+  const fetchCodes = async (codes: string[]): Promise<ResilientBatchResponse> => {
+    let response: ApiSearchResponse = { count: 0, products: [] };
+    const failedCodes: string[] = [];
+    for (let offset = 0; offset < codes.length; offset += maximumRequestBatchSize) {
+      const fetched = await fetchChunk(codes.slice(offset, offset + maximumRequestBatchSize));
+      response = mergeResponses(response, fetched.response);
+      failedCodes.push(...fetched.failedCodes);
+    }
+    return { response, failedCodes };
+  };
 
   try {
     for (let offset = 0, batch = 1; offset < summaries.length; offset += batchSize, batch += 1) {
@@ -565,6 +580,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
       },
     },
     minimumIntervalMs,
+    maximumRequestBatchSize,
     requestSchema: OPEN_FOOD_FACTS_API_REQUEST_SCHEMA,
     inputManifestHash: sourceManifest.inputHash,
     continuity: {
