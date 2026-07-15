@@ -60,32 +60,62 @@ app.post("/api/reviews/:id/resolve", async (c) => {
     return c.json(errorBody("validation_error", "Expected a JSON object"), 400);
   }
   const input = body as Record<string, unknown>;
-  const decisions: ReviewDecision[] = ["verify_nutrition", "reject_nutrition", "dismiss", "match", "create_new", "no_match"];
+  const decisions: ReviewDecision[] = [
+    "verify_nutrition",
+    "reject_nutrition",
+    "verify_ingredients",
+    "reject_ingredients",
+    "dismiss",
+    "match",
+    "create_new",
+    "no_match",
+  ];
   if (typeof input.decision !== "string" || !decisions.includes(input.decision as ReviewDecision)) {
     return c.json(errorBody("validation_error", "Invalid review decision"), 400);
   }
-  if (typeof input.rationale !== "string" || input.rationale.trim().length < 3) {
-    return c.json(errorBody("validation_error", "A rationale of at least 3 characters is required"), 400);
+  if (typeof input.rationale !== "string" || input.rationale.trim().length < 3 || input.rationale.length > 2_000) {
+    return c.json(errorBody("validation_error", "A rationale between 3 and 2,000 characters is required"), 400);
   }
   let evidenceUrl: string | null = null;
   if (input.evidenceUrl !== undefined && input.evidenceUrl !== null && input.evidenceUrl !== "") {
     if (typeof input.evidenceUrl !== "string") return c.json(errorBody("validation_error", "Evidence URL must be a string"), 400);
     try {
       const parsed = new URL(input.evidenceUrl);
-      if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("unsupported protocol");
+      if (parsed.protocol !== "https:") throw new Error("unsupported protocol");
       evidenceUrl = parsed.toString();
     } catch {
-      return c.json(errorBody("validation_error", "Evidence URL must be a valid HTTP(S) URL"), 400);
+      return c.json(errorBody("validation_error", "Evidence URL must be a valid HTTPS URL"), 400);
     }
   }
-  if (input.decision === "verify_nutrition" && evidenceUrl === null) {
+  if (["verify_nutrition", "verify_ingredients"].includes(input.decision) && evidenceUrl === null) {
     return c.json(errorBody("validation_error", "Verification requires a current label or authoritative-source evidence URL"), 400);
   }
   const candidateProductId = input.candidateProductId === undefined || input.candidateProductId === null || input.candidateProductId === ""
     ? null
     : typeof input.candidateProductId === "string" ? input.candidateProductId : undefined;
   if (candidateProductId === undefined) return c.json(errorBody("validation_error", "Candidate product ID must be a string"), 400);
-  const result = await resolveReview(c.env.DB, c.req.param("id"), input.decision as ReviewDecision, input.rationale.trim(), evidenceUrl, candidateProductId);
+  const reviewedText = input.reviewedText === undefined || input.reviewedText === null
+    ? null
+    : typeof input.reviewedText === "string" ? input.reviewedText : undefined;
+  if (reviewedText === undefined) return c.json(errorBody("validation_error", "Reviewed ingredient text must be a string"), 400);
+  if (input.decision === "verify_ingredients" && !reviewedText?.trim()) {
+    return c.json(errorBody("validation_error", "Ingredient verification requires reviewer-confirmed label text"), 400);
+  }
+  if (reviewedText !== null && reviewedText.length > 25_000) {
+    return c.json(errorBody("validation_error", "Reviewed ingredient text must not exceed 25,000 characters"), 400);
+  }
+  if (input.decision !== "verify_ingredients" && reviewedText !== null) {
+    return c.json(errorBody("validation_error", "Reviewed ingredient text is only valid for ingredient verification"), 400);
+  }
+  const result = await resolveReview(
+    c.env.DB,
+    c.req.param("id"),
+    input.decision as ReviewDecision,
+    input.rationale.trim(),
+    evidenceUrl,
+    candidateProductId,
+    reviewedText,
+  );
   if (result === "not_found") return c.json(errorBody("not_found", "Review item not found"), 404);
   if (result === "conflict") return c.json(errorBody("conflict", "Review item was already resolved"), 409);
   if (result === "invalid_decision") return c.json(errorBody("validation_error", "Decision is not valid for this review type"), 400);

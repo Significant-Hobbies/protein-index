@@ -6,6 +6,14 @@ import {
   validateEvidenceDecision,
   type EvidenceDecisionInput,
 } from "../shared/evidence-decisions";
+import {
+  ingredientCandidateFromEvidence,
+  ingredientCandidateHash,
+  validateIngredientEvidenceDecision,
+  type IngredientEvidenceDecisionInput,
+} from "../shared/ingredient-evidence";
+import { parseIngredients } from "../shared/ingredients";
+import type { NormalizedIngredient } from "../shared/types";
 
 interface ReviewRow {
   id: string;
@@ -42,6 +50,28 @@ const NUTRITION_FIELDS = [
   ["fibreGrams", "fibre_grams", "g"],
   ["sodiumMg", "sodium_mg", "mg"],
 ] as const;
+
+interface ReviewedIngredientRow {
+  id: string;
+  parentId: string | null;
+  ingredient: NormalizedIngredient;
+}
+
+function reviewedIngredientRows(
+  reviewId: string,
+  ingredients: NormalizedIngredient[],
+  parentId: string | null = null,
+  path = "",
+): ReviewedIngredientRow[] {
+  return ingredients.flatMap((ingredient) => {
+    const itemPath = path ? `${path}_${ingredient.position}` : String(ingredient.position);
+    const id = `ing_review_${reviewId}_${itemPath}`;
+    return [
+      { id, parentId, ingredient },
+      ...reviewedIngredientRows(reviewId, ingredient.children, id, itemPath),
+    ];
+  });
+}
 
 export async function listReviews(db: D1Database, status: string, limit: number): Promise<ReviewResponse> {
   const batch = await db.batch([
@@ -88,7 +118,15 @@ export async function listReviews(db: D1Database, status: string, limit: number)
   return { items, counts };
 }
 
-export type ReviewDecision = "verify_nutrition" | "reject_nutrition" | "dismiss" | "match" | "create_new" | "no_match";
+export type ReviewDecision =
+  | "verify_nutrition"
+  | "reject_nutrition"
+  | "verify_ingredients"
+  | "reject_ingredients"
+  | "dismiss"
+  | "match"
+  | "create_new"
+  | "no_match";
 
 export async function resolveReview(
   db: D1Database,
@@ -97,6 +135,7 @@ export async function resolveReview(
   rationale: string,
   evidenceUrl: string | null,
   candidateProductId: string | null,
+  reviewedText: string | null,
 ): Promise<"resolved" | "not_found" | "conflict" | "invalid_decision" | "invalid_candidate"> {
   const review = await db.prepare(`SELECT r.id, r.status, r.product_id, r.type, r.candidate_product_ids_json,
     r.source_record_id, r.evidence_json, s.source_id, s.source_record_id AS source_record_key,
@@ -125,6 +164,10 @@ export async function resolveReview(
   if (review.status !== "open") return "conflict";
   const nutritionReview = ["nutrition_validation", "nutrition_conflict", "coverage_gap"].includes(review.type);
   if (["verify_nutrition", "reject_nutrition"].includes(decision) && !nutritionReview) return "invalid_decision";
+  const ingredientReview = review.type === "ingredient_conflict"
+    && review.source_id === "open_food_facts_robotoff_ingredients";
+  if (["verify_ingredients", "reject_ingredients"].includes(decision) && !ingredientReview) return "invalid_decision";
+  if (ingredientReview && !["verify_ingredients", "reject_ingredients", "dismiss"].includes(decision)) return "invalid_decision";
   const identityReview = review.type === "identity";
   if (["match", "create_new", "no_match"].includes(decision) && !identityReview) return "invalid_decision";
   if (identityReview && !["match", "create_new", "no_match", "dismiss"].includes(decision)) return "invalid_decision";
@@ -145,11 +188,16 @@ export async function resolveReview(
   const candidate = review.source_id === "open_food_facts_robotoff"
     ? nutritionCandidateFromEvidence(parsed(review.evidence_json), review.product_gtin)
     : null;
+  const ingredientCandidate = review.source_id === "open_food_facts_robotoff_ingredients"
+    ? ingredientCandidateFromEvidence(parsed(review.evidence_json), review.product_gtin)
+    : null;
   if (["verify_nutrition", "reject_nutrition"].includes(decision) && review.source_id === "open_food_facts_robotoff" && !candidate) return "invalid_candidate";
   if (decision === "verify_nutrition" && !candidate && !review.nutrition_product_id) return "invalid_decision";
+  if (["verify_ingredients", "reject_ingredients"].includes(decision) && !ingredientCandidate) return "invalid_candidate";
   const status = decision === "dismiss" ? "dismissed" : "resolved";
   const decidedAt = new Date().toISOString();
   let evidenceDecision: EvidenceDecisionInput | null = null;
+  let ingredientEvidenceDecision: IngredientEvidenceDecisionInput | null = null;
   if (
     candidate && review.source_id && review.source_record_key && review.source_record_id &&
     review.source_content_hash && review.product_id && ["verify_nutrition", "reject_nutrition"].includes(decision)
@@ -180,9 +228,53 @@ export async function resolveReview(
       .first<{ id: string }>();
     if (conflicting) return "conflict";
   }
+  if (
+    ingredientCandidate && review.source_id && review.source_record_key && review.source_record_id
+    && review.source_content_hash && review.product_id
+    && ["verify_ingredients", "reject_ingredients"].includes(decision)
+  ) {
+    const candidateHash = await ingredientCandidateHash(ingredientCandidate);
+    ingredientEvidenceDecision = {
+      id: `evd_${id}`,
+      sourceId: review.source_id,
+      sourceRecordKey: review.source_record_key,
+      sourceRecordId: review.source_record_id,
+      sourceContentHash: review.source_content_hash,
+      productId: review.product_id,
+      candidateHash,
+      fieldFamily: "ingredients",
+      decision: decision === "verify_ingredients" ? "verify" : "reject",
+      payload: {
+        candidate: ingredientCandidate,
+        reviewedText: decision === "verify_ingredients" ? reviewedText : null,
+        normalizedIngredients: decision === "verify_ingredients" && reviewedText ? parseIngredients(reviewedText) : [],
+      },
+      evidenceUrl: evidenceUrl ?? ingredientCandidate.imageUrl,
+      rationale,
+      decidedBy: "local_operator",
+      decidedAt,
+    };
+    if ((await validateIngredientEvidenceDecision(ingredientEvidenceDecision)).length > 0) return "invalid_candidate";
+    const conflicting = await db.prepare(`SELECT id FROM evidence_decisions
+      WHERE id = ? OR (
+        source_id = ? AND source_record_key = ? AND candidate_hash = ?
+        AND field_family = 'ingredients' AND active = 1
+      ) LIMIT 1`)
+      .bind(
+        ingredientEvidenceDecision.id,
+        ingredientEvidenceDecision.sourceId,
+        ingredientEvidenceDecision.sourceRecordKey,
+        ingredientEvidenceDecision.candidateHash,
+      )
+      .first<{ id: string }>();
+    if (conflicting) return "conflict";
+  }
+  const resolvedEvidenceUrl = ingredientEvidenceDecision?.evidenceUrl
+    ?? evidenceDecision?.evidenceUrl
+    ?? evidenceUrl;
   const statements = [
     db.prepare("UPDATE review_items SET status = ?, decision = ?, decision_rationale = ?, decision_evidence_url = ?, decided_by = 'local_operator', resolved_at = ? WHERE id = ? AND status = 'open'")
-      .bind(status, decision, rationale, evidenceUrl, decidedAt, id),
+      .bind(status, decision, rationale, resolvedEvidenceUrl, decidedAt, id),
   ];
   if (evidenceDecision) {
     statements.push(db.prepare(`INSERT INTO evidence_decisions
@@ -196,6 +288,28 @@ export async function resolveReview(
         evidenceDecision.candidateHash, evidenceDecision.decision, canonicalJson(evidenceDecision.payload),
         evidenceDecision.evidenceUrl, evidenceDecision.rationale, evidenceDecision.decidedBy,
         evidenceDecision.decidedAt,
+      ));
+  }
+  if (ingredientEvidenceDecision) {
+    statements.push(db.prepare(`INSERT INTO evidence_decisions
+      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+        decided_by, decided_at, active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'ingredients', ?, ?, ?, ?, ?, ?, 1)`)
+      .bind(
+        ingredientEvidenceDecision.id,
+        ingredientEvidenceDecision.sourceId,
+        ingredientEvidenceDecision.sourceRecordKey,
+        ingredientEvidenceDecision.sourceRecordId,
+        ingredientEvidenceDecision.sourceContentHash,
+        ingredientEvidenceDecision.productId,
+        ingredientEvidenceDecision.candidateHash,
+        ingredientEvidenceDecision.decision,
+        canonicalJson(ingredientEvidenceDecision.payload),
+        ingredientEvidenceDecision.evidenceUrl,
+        ingredientEvidenceDecision.rationale,
+        ingredientEvidenceDecision.decidedBy,
+        ingredientEvidenceDecision.decidedAt,
       ));
   }
   if (review.product_id && review.source_record_id && decision === "verify_nutrition" && candidate) {
@@ -274,6 +388,87 @@ export async function resolveReview(
     statements.push(db.prepare("UPDATE field_observations SET selected = 0 WHERE product_id = ? AND field_path LIKE 'nutrition.%'")
       .bind(review.product_id));
   }
+  if (
+    review.product_id
+    && review.source_record_id
+    && decision === "verify_ingredients"
+    && ingredientEvidenceDecision?.payload.reviewedText
+    && ingredientCandidate
+  ) {
+    const reviewedTextValue = ingredientEvidenceDecision.payload.reviewedText;
+    const reviewedIngredients = ingredientEvidenceDecision.payload.normalizedIngredients;
+    const valueHash = `reviewed:${ingredientEvidenceDecision.candidateHash}:ingredients.raw`;
+    statements.push(db.prepare(`INSERT INTO ingredient_statements
+      (product_id, source_record_id, raw_text, language, status, confidence, authority, observed_at, updated_at)
+      VALUES (?, ?, ?, ?, 'verified', 'high', 100, ?, ?)
+      ON CONFLICT(product_id) DO UPDATE SET
+        source_record_id = excluded.source_record_id, raw_text = excluded.raw_text,
+        language = excluded.language, status = excluded.status, confidence = excluded.confidence,
+        authority = excluded.authority, observed_at = excluded.observed_at, updated_at = excluded.updated_at`)
+      .bind(
+        review.product_id,
+        review.source_record_id,
+        reviewedTextValue,
+        ingredientCandidate.language.code,
+        ingredientCandidate.observedAt,
+        decidedAt,
+      ));
+    statements.push(db.prepare("DELETE FROM product_ingredients WHERE product_id = ? AND source_record_id = ?")
+      .bind(review.product_id, review.source_record_id));
+    for (const row of reviewedIngredientRows(id, reviewedIngredients)) {
+      statements.push(db.prepare(`INSERT INTO product_ingredients
+        (id, product_id, source_record_id, parent_id, position, raw_text, normalized_name, percentage, resolved)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(
+          row.id,
+          review.product_id,
+          review.source_record_id,
+          row.parentId,
+          row.ingredient.position,
+          row.ingredient.raw,
+          row.ingredient.normalizedName,
+          row.ingredient.percentage,
+          row.ingredient.normalizedName !== null ? 1 : 0,
+        ));
+    }
+    statements.push(db.prepare("UPDATE field_observations SET selected = 0 WHERE product_id = ? AND field_path = 'ingredients.raw'")
+      .bind(review.product_id));
+    statements.push(db.prepare(`INSERT INTO field_observations
+      (id, product_id, source_record_id, field_path, raw_value_json, normalized_value_json,
+        confidence, authority, observed_at, evidence_url, selected, value_hash)
+      VALUES (?, ?, ?, 'ingredients.raw', ?, ?, 'high', 100, ?, ?, 1, ?)
+      ON CONFLICT(source_record_id, field_path, value_hash) DO UPDATE SET
+        product_id = excluded.product_id, raw_value_json = excluded.raw_value_json,
+        normalized_value_json = excluded.normalized_value_json, confidence = excluded.confidence,
+        authority = excluded.authority, observed_at = excluded.observed_at,
+        evidence_url = excluded.evidence_url, selected = 1`)
+      .bind(
+        `obs_review_${id}_ingredients_raw`,
+        review.product_id,
+        review.source_record_id,
+        JSON.stringify(reviewedTextValue),
+        JSON.stringify(reviewedIngredients),
+        ingredientCandidate.observedAt,
+        ingredientEvidenceDecision.evidenceUrl,
+        valueHash,
+      ));
+    statements.push(db.prepare(`INSERT INTO evidence_outcomes
+      (product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by, notes)
+      VALUES (?, 'ingredients', 'verified', ?, ?, ?, ?, 'local_operator', ?)
+      ON CONFLICT(product_id, field_family) DO UPDATE SET
+        outcome = excluded.outcome, source_record_id = excluded.source_record_id,
+        evidence_url = excluded.evidence_url, observed_at = excluded.observed_at,
+        verified_at = excluded.verified_at, decided_by = excluded.decided_by,
+        notes = excluded.notes`)
+      .bind(
+        review.product_id,
+        review.source_record_id,
+        ingredientEvidenceDecision.evidenceUrl,
+        ingredientCandidate.observedAt,
+        decidedAt,
+        `${rationale} [Robotoff ${ingredientCandidate.modelName} ${ingredientCandidate.modelVersion}; prediction ${ingredientCandidate.predictionId}; entity ${ingredientCandidate.entityIndex}; image ${ingredientCandidate.imageId}]`,
+      ));
+  }
   if (identityReview && decision !== "dismiss" && review.product_id && review.source_record_id && review.source_id && review.source_record_key && review.identity_hash) {
     const targetProductId = decision === "match" ? candidateProductId : decision === "create_new" ? review.product_id : null;
     statements.push(db.prepare(`INSERT INTO identity_decisions
@@ -339,6 +534,13 @@ export async function resolveReview(
       statements.push(db.prepare("UPDATE products SET is_active = 0 WHERE id = ?").bind(review.product_id));
     }
   }
-  await db.batch(statements);
+  try {
+    await db.batch(statements);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("UNIQUE constraint failed: evidence_decisions")) {
+      return "conflict";
+    }
+    throw error;
+  }
   return "resolved";
 }

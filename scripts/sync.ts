@@ -7,6 +7,7 @@ import { assertDataKartConfigured, DATAKART_ADAPTER_STATUS } from "./adapters/da
 import { stageOpenFoodFacts } from "./adapters/open-food-facts";
 import { enrichOpenFoodFactsApi } from "./adapters/open-food-facts-api";
 import { extractRobotoffApi } from "./adapters/robotoff-api";
+import { extractRobotoffIngredientApi, validateRobotoffIngredientArtifact } from "./adapters/robotoff-ingredients-api";
 import { buildFixtureStage } from "./fixtures";
 import { emitImportSql } from "./reconcile";
 import { validatePublicationSnapshot } from "./publication";
@@ -168,23 +169,36 @@ async function extractCommand(): Promise<void> {
   const inputManifest = option("manifest");
   if (!input || !inputManifest) throw new Error("--input and --manifest are required for extract.");
   const source = option("source") ?? "robotoff";
-  if (source !== "robotoff") throw new Error(`Unsupported extraction source: ${source}`);
+  if (!["robotoff", "robotoff-ingredients"].includes(source)) throw new Error(`Unsupported extraction source: ${source}`);
   const mode = option("mode") === "production" ? "production" : "sample";
   const rawLimit = option("limit");
   const limit = rawLimit === null ? (mode === "sample" ? 100 : null) : Number(rawLimit);
   if (limit !== null && (!Number.isInteger(limit) || limit <= 0)) throw new Error("--limit must be a positive integer.");
   const minimumIntervalMs = Number(option("minimum-interval-ms") ?? "1100");
   const confidenceThreshold = Number(option("confidence-threshold") ?? "0.85");
-  const outputDirectory = option("output") ?? ".data/robotoff";
-  const result = await extractRobotoffApi({
-    input,
-    inputManifest,
-    outputDirectory,
-    mode,
-    limit,
-    minimumIntervalMs,
-    confidenceThreshold,
-  });
+  const outputDirectory = option("output") ?? (source === "robotoff-ingredients" ? ".data/robotoff-ingredients" : ".data/robotoff");
+  const result = source === "robotoff-ingredients"
+    ? await extractRobotoffIngredientApi({
+      input,
+      inputManifest,
+      outputDirectory,
+      mode,
+      limit,
+      minimumIntervalMs,
+      confidenceThreshold,
+      maximumAttempts: Number(option("maximum-attempts") ?? "4"),
+      retryBaseMs: Number(option("retry-base-ms") ?? "1500"),
+    })
+    : await extractRobotoffApi({
+      input,
+      inputManifest,
+      outputDirectory,
+      mode,
+      limit,
+      minimumIntervalMs,
+      confidenceThreshold,
+    });
+  if (source === "robotoff-ingredients") await validateRobotoffIngredientArtifact(outputDirectory);
   const importSqlPath = join(outputDirectory, "import.sql");
   await emitImportSql({ stagedPath: result.stagedPath, manifestPath: result.manifestPath, outputPath: importSqlPath });
   process.stdout.write(`${JSON.stringify({ ...result, importSqlPath }, null, 2)}\n`);

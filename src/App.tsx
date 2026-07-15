@@ -46,6 +46,28 @@ export interface ReviewNutritionCandidate {
   };
 }
 
+export interface ReviewIngredientCandidate {
+  predictionId: string;
+  entityIndex: number;
+  imageId: string;
+  imageUrl: string;
+  modelName: string;
+  modelVersion: string;
+  predictedAt: string;
+  observedAt: string;
+  entityText: string;
+  entityConfidence: number;
+  language: { code: string; confidence: number };
+  boundingBox: [number, number, number, number];
+  parsedIngredients: unknown[];
+  ingredientCount: number;
+  knownIngredientCount: number;
+  unknownIngredientCount: number;
+  candidateHash: string;
+  hasConflict: boolean;
+  warnings: Array<{ code: string; message: string }>;
+}
+
 function object(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
@@ -99,6 +121,71 @@ export function reviewNutritionCandidate(evidence: unknown): ReviewNutritionCand
     basis,
     minimumConfidence: candidate.minimumConfidence,
     nutritionPer100g: { calories, proteinGrams, carbohydrateGrams, sugarGrams, fatGrams, saturatedFatGrams, fibreGrams, sodiumMg },
+  };
+}
+
+export function reviewIngredientCandidate(evidence: unknown): ReviewIngredientCandidate | null {
+  const root = object(evidence);
+  if (root?.code !== "robotoff_ingredient_candidate") return null;
+  const details = object(root.details);
+  const candidate = object(details?.candidate);
+  const language = object(candidate?.language);
+  const boundingBox = candidate?.boundingBox;
+  const parsedIngredients = candidate?.parsedIngredients;
+  if (
+    !candidate || !language || !Array.isArray(boundingBox) || boundingBox.length !== 4 ||
+    !boundingBox.every((value) => typeof value === "number" && Number.isFinite(value)) ||
+    !Array.isArray(parsedIngredients) || typeof details?.candidateHash !== "string" ||
+    !/^[a-f0-9]{64}$/.test(details.candidateHash) ||
+    typeof candidate.predictionId !== "string" || !candidate.predictionId ||
+    typeof candidate.entityIndex !== "number" || !Number.isInteger(candidate.entityIndex) || candidate.entityIndex < 0 ||
+    typeof candidate.imageId !== "string" || !candidate.imageId ||
+    typeof candidate.imageUrl !== "string" ||
+    typeof candidate.modelName !== "string" || !candidate.modelName ||
+    typeof candidate.modelVersion !== "string" || !candidate.modelVersion ||
+    typeof candidate.predictedAt !== "string" || !Number.isFinite(Date.parse(candidate.predictedAt)) ||
+    typeof candidate.observedAt !== "string" || !Number.isFinite(Date.parse(candidate.observedAt)) ||
+    typeof candidate.entityText !== "string" || !candidate.entityText.trim() ||
+    typeof candidate.entityConfidence !== "number" || candidate.entityConfidence < 0 || candidate.entityConfidence > 1 ||
+    typeof language.code !== "string" || !language.code ||
+    typeof language.confidence !== "number" || language.confidence < 0 || language.confidence > 1 ||
+    typeof candidate.ingredientCount !== "number" || !Number.isInteger(candidate.ingredientCount) || candidate.ingredientCount < 0 ||
+    typeof candidate.knownIngredientCount !== "number" || !Number.isInteger(candidate.knownIngredientCount) || candidate.knownIngredientCount < 0 ||
+    typeof candidate.unknownIngredientCount !== "number" || !Number.isInteger(candidate.unknownIngredientCount) || candidate.unknownIngredientCount < 0
+  ) return null;
+  try {
+    if (new URL(candidate.imageUrl).protocol !== "https:") return null;
+  } catch {
+    return null;
+  }
+  const warnings = Array.isArray(details.warnings)
+    ? details.warnings.flatMap((warning) => {
+      const item = object(warning);
+      return typeof item?.code === "string" && typeof item.message === "string"
+        ? [{ code: item.code, message: item.message }]
+        : [];
+    })
+    : [];
+  return {
+    predictionId: candidate.predictionId,
+    entityIndex: candidate.entityIndex,
+    imageId: candidate.imageId,
+    imageUrl: candidate.imageUrl,
+    modelName: candidate.modelName,
+    modelVersion: candidate.modelVersion,
+    predictedAt: candidate.predictedAt,
+    observedAt: candidate.observedAt,
+    entityText: candidate.entityText,
+    entityConfidence: candidate.entityConfidence,
+    language: { code: language.code, confidence: language.confidence },
+    boundingBox: boundingBox as [number, number, number, number],
+    parsedIngredients,
+    ingredientCount: candidate.ingredientCount,
+    knownIngredientCount: candidate.knownIngredientCount,
+    unknownIngredientCount: candidate.unknownIngredientCount,
+    candidateHash: details.candidateHash,
+    hasConflict: details.hasConflict === true,
+    warnings,
   };
 }
 
@@ -386,16 +473,90 @@ function NutritionCandidateEvidence({ candidate, productName }: { candidate: Rev
   );
 }
 
+function IngredientCandidateEvidence({
+  candidate,
+  productName,
+  reviewedText,
+  onReviewedText,
+  readOnly,
+}: {
+  candidate: ReviewIngredientCandidate;
+  productName: string | null;
+  reviewedText: string;
+  onReviewedText: (value: string) => void;
+  readOnly: boolean;
+}) {
+  const recognized = candidate.ingredientCount > 0
+    ? candidate.knownIngredientCount / candidate.ingredientCount * 100
+    : 0;
+  return (
+    <section className="ingredient-candidate" aria-label="Extracted ingredient candidate">
+      <a className="candidate-label ingredient-label" href={candidate.imageUrl} target="_blank" rel="noreferrer">
+        <img src={candidate.imageUrl} alt={`Ingredient label evidence for ${productName ?? "product"}`} loading="lazy" referrerPolicy="no-referrer" />
+        <span>Open full label ↗</span>
+      </a>
+      <div className="candidate-evidence ingredient-evidence">
+        <div className="candidate-evidence-head">
+          <div><span className="eyebrow">Human transcription gate</span><h4>Image beside extracted text</h4></div>
+          <span className={`confidence${candidate.hasConflict ? " confidence-conflict" : ""}`}>
+            {candidate.hasConflict ? "conflicting images" : `${formatNumber(candidate.entityConfidence * 100, 2)}% OCR confidence`}
+          </span>
+        </div>
+        <div className="ingredient-text-compare">
+          <div>
+            <span>Immutable model extraction</span>
+            <p>{candidate.entityText}</p>
+          </div>
+          <label>
+            Reviewer-confirmed visible label text
+            <textarea
+              value={reviewedText}
+              onChange={(event) => onReviewedText(event.target.value)}
+              readOnly={readOnly}
+              maxLength={25_000}
+              rows={6}
+              aria-describedby={`ingredient-help-${candidate.candidateHash}`}
+            />
+          </label>
+        </div>
+        <p className="candidate-warning" id={`ingredient-help-${candidate.candidateHash}`}>
+          <strong>Do not trust confidence alone.</strong> Correct every visible OCR error; reject the candidate if this image is cropped, unreadable, or a different variant.
+        </p>
+        <div className="ingredient-counts" aria-label="Ingredient extraction counts">
+          <div><span>Detected</span><strong>{candidate.ingredientCount}</strong></div>
+          <div><span>Known</span><strong>{candidate.knownIngredientCount}</strong></div>
+          <div><span>Unknown</span><strong>{candidate.unknownIngredientCount}</strong></div>
+          <div><span>Taxonomy match</span><strong>{formatNumber(recognized, 1)}%</strong></div>
+        </div>
+        {candidate.warnings.length > 0 && <ul className="candidate-warnings">
+          {candidate.warnings.map((warning, index) => <li key={`${warning.code}-${index}`}><strong>{warning.code.replaceAll("_", " ")}</strong><span>{warning.message}</span></li>)}
+        </ul>}
+        <details className="parsed-ingredient-tree">
+          <summary>Inspect source-parsed ingredient tree</summary>
+          <pre>{JSON.stringify(candidate.parsedIngredients, null, 2)}</pre>
+        </details>
+        <dl className="candidate-meta">
+          <div><dt>Label observed</dt><dd>{new Date(candidate.observedAt).toLocaleString("en-IN")}</dd></div>
+          <div><dt>Language</dt><dd>{candidate.language.code} · {formatNumber(candidate.language.confidence * 100, 1)}% confidence</dd></div>
+          <div><dt>Model evidence</dt><dd>{candidate.modelVersion} · prediction {candidate.predictionId} · entity {candidate.entityIndex} · image {candidate.imageId}</dd></div>
+          <div><dt>Candidate hash</dt><dd><code>{candidate.candidateHash}</code></dd></div>
+        </dl>
+      </div>
+    </section>
+  );
+}
+
 function Reviews({ data, loading, error, onResolve, onOpenProduct, readOnly = false }: {
   data: ReviewResponse | null;
   loading: boolean;
   error: string | null;
-  onResolve: (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null) => Promise<void>;
+  onResolve: (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) => Promise<void>;
   onOpenProduct: (id: string) => void;
   readOnly?: boolean;
 }) {
   const [rationales, setRationales] = useState<Record<string, string>>({});
   const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
+  const [reviewedTexts, setReviewedTexts] = useState<Record<string, string>>({});
   const [working, setWorking] = useState<string | null>(null);
   if (loading) return <div className="loading">Loading review queue…</div>;
   if (error) return <div className="error-state">{error}</div>;
@@ -406,11 +567,20 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, readOnly = fa
       <div className="queue-summary"><strong>{data.counts.open}</strong><span>open</span><strong>{data.counts.resolved}</strong><span>resolved</span></div>
       {data.items.map((item) => {
         const candidate = reviewNutritionCandidate(item.evidence);
-        const evidenceUrl = evidenceUrls[item.id] ?? candidate?.imageUrl ?? "";
+        const ingredientCandidate = reviewIngredientCandidate(item.evidence);
+        const evidenceUrl = evidenceUrls[item.id] ?? candidate?.imageUrl ?? ingredientCandidate?.imageUrl ?? "";
+        const reviewedText = reviewedTexts[item.id] ?? ingredientCandidate?.entityText ?? "";
         return (
-        <article className={`review-card${candidate ? " review-card-candidate" : ""}`} key={item.id}>
+        <article className={`review-card${candidate || ingredientCandidate ? " review-card-candidate" : ""}`} key={item.id}>
           <header><span className="priority">P{item.priority}</span><div><h3>{item.productName ?? "Unmatched source record"}</h3><p>{item.brand ?? item.sourceRecordId} · {item.type.replaceAll("_", " ")}</p></div></header>
           {candidate && <NutritionCandidateEvidence candidate={candidate} productName={item.productName} />}
+          {ingredientCandidate && <IngredientCandidateEvidence
+            candidate={ingredientCandidate}
+            productName={item.productName}
+            reviewedText={reviewedText}
+            onReviewedText={(value) => setReviewedTexts((current) => ({ ...current, [item.id]: value }))}
+            readOnly={readOnly}
+          />}
           <details className="raw-evidence"><summary>Inspect raw evidence</summary><pre>{JSON.stringify(item.evidence, null, 2)}</pre></details>
           {item.type === "identity" && (
             <div className="identity-review">
@@ -422,7 +592,7 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, readOnly = fa
                     <span>{candidate.brand}{candidate.flavour ? ` · ${candidate.flavour}` : ""}</span>
                     <small>GTIN {candidate.gtin ?? "missing"} · {candidate.netQuantityGrams ? `${formatNumber(candidate.netQuantityGrams, 0)} g` : "pack missing"}</small>
                   </button>
-                  {!readOnly && <button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "match", rationales[item.id] ?? "", null, candidate.id).finally(() => setWorking(null)); }}>Match</button>}
+                  {!readOnly && <button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "match", rationales[item.id] ?? "", null, candidate.id, null).finally(() => setWorking(null)); }}>Match</button>}
                 </div>
               ))}
             </div>
@@ -430,9 +600,10 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, readOnly = fa
           {!readOnly && <><label>Decision rationale<textarea value={rationales[item.id] ?? ""} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="What evidence supports this decision?" /></label>
           {item.type !== "identity" && <label>Label or authoritative evidence URL<input type="url" value={evidenceUrl} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>}
           <div className="review-actions">
-            {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null).finally(() => setWorking(null)); }}>{candidate ? "Verify exact label values" : "Verify nutrition"}</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null).finally(() => setWorking(null)); }}>Reject candidate</button></> : null}
-            {item.type === "identity" && <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "create_new", rationales[item.id] ?? "", null, null).finally(() => setWorking(null)); }}>Create distinct product</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "no_match", rationales[item.id] ?? "", null, null).finally(() => setWorking(null)); }}>Keep unmatched</button></>}
-            <button className="ghost" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "dismiss", rationales[item.id] ?? "", evidenceUrl || null, null).finally(() => setWorking(null)); }}>Dismiss</button>
+            {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>{candidate ? "Verify exact label values" : "Verify nutrition"}</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>Reject candidate</button></> : null}
+            {ingredientCandidate && <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_ingredients", rationales[item.id] ?? "", evidenceUrl || null, null, reviewedText).finally(() => setWorking(null)); }}>Verify reviewed label text</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_ingredients", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>Reject this candidate</button></>}
+            {item.type === "identity" && <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "create_new", rationales[item.id] ?? "", null, null, null).finally(() => setWorking(null)); }}>Create distinct product</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "no_match", rationales[item.id] ?? "", null, null, null).finally(() => setWorking(null)); }}>Keep unmatched</button></>}
+            <button className="ghost" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "dismiss", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>Dismiss</button>
           </div></>}
         </article>
       )})}
@@ -535,10 +706,11 @@ export function App() {
 
   useEffect(() => { if (tab === "reviews") loadReviews(); }, [tab]);
 
-  const resolve = async (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null) => {
+  const resolve = async (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) => {
     if (rationale.trim().length < 3) { setReviewState((state) => ({ ...state, error: "Add a rationale of at least 3 characters." })); return; }
-    if (decision === "verify_nutrition" && !evidenceUrl) { setReviewState((state) => ({ ...state, error: "Verification requires a current label or authoritative-source URL." })); return; }
-    await api.resolveReview(item.id, decision, rationale, evidenceUrl, candidateProductId);
+    if (["verify_nutrition", "verify_ingredients"].includes(decision) && !evidenceUrl) { setReviewState((state) => ({ ...state, error: "Verification requires a current label or authoritative-source URL." })); return; }
+    if (decision === "verify_ingredients" && !reviewedText?.trim()) { setReviewState((state) => ({ ...state, error: "Ingredient verification requires the reviewer-confirmed visible label text." })); return; }
+    await api.resolveReview(item.id, decision, rationale, evidenceUrl, candidateProductId, reviewedText);
     loadReviews();
     loadCatalog();
     loadCoverage();

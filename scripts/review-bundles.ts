@@ -8,7 +8,15 @@ import {
   validateEvidenceDecision,
   type EvidenceDecisionInput,
 } from "../shared/evidence-decisions";
+import {
+  ingredientCandidateFromEvidence,
+  validateIngredientEvidenceDecision,
+  type IngredientEvidenceDecisionInput,
+} from "../shared/ingredient-evidence";
 import { normalizeGtin } from "../shared/gtin";
+import type { NormalizedIngredient } from "../shared/types";
+
+export type ReviewEvidenceDecision = EvidenceDecisionInput | IngredientEvidenceDecisionInput;
 
 export interface ReviewDecisionManifest {
   schemaVersion: 1;
@@ -24,7 +32,7 @@ export interface ReviewDecisionManifest {
 export interface ReviewDecisionBundle {
   directory: string;
   manifest: ReviewDecisionManifest;
-  decisions: EvidenceDecisionInput[];
+  decisions: ReviewEvidenceDecision[];
   ledger: string;
 }
 
@@ -92,20 +100,12 @@ function requiredString(value: unknown, field: string): string {
   return value;
 }
 
-function parseDecision(value: unknown): EvidenceDecisionInput {
+function parseDecision(value: unknown): ReviewEvidenceDecision {
   const input = record(value);
   if (!input) throw new Error("Decision record must be an object");
-  const payloadRecord = record(input.payload);
-  const payloadBarcode = typeof payloadRecord?.barcode === "string" ? payloadRecord.barcode : null;
-  const payload = nutritionCandidateFromEvidence(
-    { code: "robotoff_nutrition_candidate", details: { candidate: input.payload } },
-    payloadBarcode,
-  );
-  if (!payload) throw new Error("Decision payload is not a valid nutrition candidate");
-  const decision = input.decision === "verify" || input.decision === "reject" ? input.decision : null;
+  const decision: "verify" | "reject" | null = input.decision === "verify" || input.decision === "reject" ? input.decision : null;
   if (!decision) throw new Error("Decision value is not supported");
-  if (input.fieldFamily !== "nutrition") throw new Error("Decision fieldFamily is not supported");
-  return {
+  const common = {
     id: requiredString(input.id, "id"),
     sourceId: requiredString(input.sourceId, "sourceId"),
     sourceRecordKey: requiredString(input.sourceRecordKey, "sourceRecordKey"),
@@ -113,17 +113,46 @@ function parseDecision(value: unknown): EvidenceDecisionInput {
     sourceContentHash: requiredString(input.sourceContentHash, "sourceContentHash"),
     productId: requiredString(input.productId, "productId"),
     candidateHash: requiredString(input.candidateHash, "candidateHash"),
-    fieldFamily: "nutrition",
     decision,
-    payload,
     evidenceUrl: requiredString(input.evidenceUrl, "evidenceUrl"),
     rationale: requiredString(input.rationale, "rationale"),
     decidedBy: requiredString(input.decidedBy, "decidedBy"),
     decidedAt: requiredString(input.decidedAt, "decidedAt"),
   };
+  const payloadRecord = record(input.payload);
+  if (input.fieldFamily === "nutrition") {
+    const payloadBarcode = typeof payloadRecord?.barcode === "string" ? payloadRecord.barcode : null;
+    const payload = nutritionCandidateFromEvidence(
+      { code: "robotoff_nutrition_candidate", details: { candidate: input.payload } },
+      payloadBarcode,
+    );
+    if (!payload) throw new Error("Decision payload is not a valid nutrition candidate");
+    return { ...common, fieldFamily: "nutrition", payload };
+  }
+  if (input.fieldFamily === "ingredients") {
+    const candidateRecord = record(payloadRecord?.candidate);
+    const payloadBarcode = typeof candidateRecord?.barcode === "string" ? candidateRecord.barcode : null;
+    const candidate = ingredientCandidateFromEvidence(
+      { code: "robotoff_ingredient_candidate", details: { candidate: payloadRecord?.candidate } },
+      payloadBarcode,
+    );
+    if (!candidate) throw new Error("Decision payload is not a valid ingredient candidate");
+    return {
+      ...common,
+      fieldFamily: "ingredients",
+      payload: {
+        candidate,
+        reviewedText: typeof payloadRecord?.reviewedText === "string" ? payloadRecord.reviewedText : null,
+        normalizedIngredients: Array.isArray(payloadRecord?.normalizedIngredients)
+          ? payloadRecord.normalizedIngredients as NormalizedIngredient[]
+          : [],
+      },
+    };
+  }
+  throw new Error("Decision fieldFamily is not supported");
 }
 
-export function evidenceDecisionFromDatabaseRow(row: Record<string, unknown>): EvidenceDecisionInput {
+export function evidenceDecisionFromDatabaseRow(row: Record<string, unknown>): ReviewEvidenceDecision {
   if (typeof row.payload_json !== "string") throw new Error("Database decision payload_json is missing");
   return parseDecision({
     id: row.id,
@@ -184,23 +213,27 @@ function checksumEntries(text: string): Map<string, string> {
 }
 
 export async function writeReviewDecisionBundle(input: {
-  decisions: EvidenceDecisionInput[];
+  decisions: ReviewEvidenceDecision[];
   outputRoot: string;
   createdAt?: string;
 }): Promise<ReviewDecisionBundle> {
   if (input.decisions.length === 0) throw new Error("Refusing to create an empty review decision bundle");
-  const decisions = [...input.decisions].sort((left, right) => left.id.localeCompare(right.id));
+  const decisions = input.decisions.map((decision) => parseDecision(decision))
+    .sort((left, right) => left.id.localeCompare(right.id));
   const seen = new Set<string>();
   const verifiedProducts = new Set<string>();
   for (const decision of decisions) {
     if (seen.has(decision.id)) throw new Error(`Duplicate decision id: ${decision.id}`);
     seen.add(decision.id);
-    const errors = await validateEvidenceDecision(decision);
+    const errors = decision.fieldFamily === "nutrition"
+      ? await validateEvidenceDecision(decision)
+      : await validateIngredientEvidenceDecision(decision);
     if (errors.length > 0) throw new Error(`Decision ${decision.id} is invalid: ${errors.join("; ")}`);
-    if (decision.decision === "verify" && verifiedProducts.has(decision.productId)) {
-      throw new Error(`Multiple verify decisions target product ${decision.productId}`);
+    const verifiedProductKey = `${decision.fieldFamily}:${decision.productId}`;
+    if (decision.decision === "verify" && verifiedProducts.has(verifiedProductKey)) {
+      throw new Error(`Multiple ${decision.fieldFamily} verify decisions target product ${decision.productId}`);
     }
-    if (decision.decision === "verify") verifiedProducts.add(decision.productId);
+    if (decision.decision === "verify") verifiedProducts.add(verifiedProductKey);
   }
   const ledger = `${decisions.map((decision) => canonicalJson(decision)).join("\n")}\n`;
   const ledgerSha256 = sha256Text(ledger);
@@ -247,13 +280,15 @@ export async function readReviewDecisionBundle(directory: string): Promise<Revie
   if (!ledger.endsWith("\n")) throw new Error("Review decision ledger must end with a newline");
   const lines = ledger.split("\n").filter(Boolean);
   if (lines.length === 0) throw new Error("Review decision ledger is empty");
-  const decisions: EvidenceDecisionInput[] = [];
+  const decisions: ReviewEvidenceDecision[] = [];
   const ids = new Set<string>();
   const candidateKeys = new Set<string>();
   const verifiedProducts = new Set<string>();
   for (const line of lines) {
     const parsed = parseDecision(JSON.parse(line) as unknown);
-    const errors = await validateEvidenceDecision(parsed);
+    const errors = parsed.fieldFamily === "nutrition"
+      ? await validateEvidenceDecision(parsed)
+      : await validateIngredientEvidenceDecision(parsed);
     if (errors.length > 0) throw new Error(`Decision ${parsed.id} is invalid: ${errors.join("; ")}`);
     if (canonicalJson(parsed) !== line) throw new Error(`Decision ${parsed.id} is not canonical JSON`);
     if (ids.has(parsed.id)) throw new Error(`Duplicate decision id: ${parsed.id}`);
@@ -261,10 +296,11 @@ export async function readReviewDecisionBundle(directory: string): Promise<Revie
     const candidateKey = `${parsed.sourceId}\u0000${parsed.sourceRecordKey}\u0000${parsed.candidateHash}\u0000${parsed.fieldFamily}`;
     if (candidateKeys.has(candidateKey)) throw new Error(`Duplicate active candidate decision: ${parsed.id}`);
     candidateKeys.add(candidateKey);
-    if (parsed.decision === "verify" && verifiedProducts.has(parsed.productId)) {
-      throw new Error(`Multiple verify decisions target product ${parsed.productId}`);
+    const verifiedProductKey = `${parsed.fieldFamily}:${parsed.productId}`;
+    if (parsed.decision === "verify" && verifiedProducts.has(verifiedProductKey)) {
+      throw new Error(`Multiple ${parsed.fieldFamily} verify decisions target product ${parsed.productId}`);
     }
-    if (parsed.decision === "verify") verifiedProducts.add(parsed.productId);
+    if (parsed.decision === "verify") verifiedProducts.add(verifiedProductKey);
     decisions.push(parsed);
   }
   const sortedIds = [...ids].sort();
@@ -291,13 +327,16 @@ export function validateReviewDecisionSources(bundle: ReviewDecisionBundle, sour
       source.contentHash !== decision.sourceContentHash || source.productId !== decision.productId
     ) throw new Error(`Decision ${decision.id} source evidence has drifted`);
     const sourceGtin = normalizeGtin(source.productGtin);
-    if (!sourceGtin || sourceGtin !== normalizeGtin(decision.payload.barcode)) {
+    const candidateBarcode = decision.fieldFamily === "nutrition"
+      ? decision.payload.barcode
+      : decision.payload.candidate.barcode;
+    if (!sourceGtin || sourceGtin !== normalizeGtin(candidateBarcode)) {
       throw new Error(`Decision ${decision.id} product GTIN does not match candidate evidence`);
     }
   }
 }
 
-export function validateExistingEvidenceDecisions(bundle: ReviewDecisionBundle, existing: EvidenceDecisionInput[]): void {
+export function validateExistingEvidenceDecisions(bundle: ReviewDecisionBundle, existing: ReviewEvidenceDecision[]): void {
   const byId = new Map(existing.map((decision) => [decision.id, decision]));
   const byCandidate = new Map(existing.map((decision) => [
     `${decision.sourceId}\u0000${decision.sourceRecordKey}\u0000${decision.candidateHash}\u0000${decision.fieldFamily}`,
@@ -314,6 +353,25 @@ export function validateExistingEvidenceDecisions(bundle: ReviewDecisionBundle, 
       throw new Error(`Decision ${decision.id} conflicts with an existing active candidate decision`);
     }
   }
+}
+
+interface FlattenedReviewedIngredient {
+  path: string;
+  parentPath: string | null;
+  ingredient: NormalizedIngredient;
+}
+
+function flattenReviewedIngredients(
+  ingredients: NormalizedIngredient[],
+  parentPath: string | null = null,
+): FlattenedReviewedIngredient[] {
+  return ingredients.flatMap((ingredient) => {
+    const path = parentPath === null ? String(ingredient.position) : `${parentPath}.${ingredient.position}`;
+    return [
+      { path, parentPath, ingredient },
+      ...flattenReviewedIngredients(ingredient.children, path),
+    ];
+  });
 }
 
 export async function emitReviewDecisionSql(
@@ -340,17 +398,68 @@ export async function emitReviewDecisionSql(
         decided_by, decided_at, active)
       SELECT ${sql(decision.id)}, ${sql(decision.sourceId)}, ${sql(decision.sourceRecordKey)},
         ${sql(decision.sourceRecordId)}, ${sql(decision.sourceContentHash)}, ${sql(decision.productId)},
-        ${sql(decision.candidateHash)}, 'nutrition', ${sql(decision.decision)},
+        ${sql(decision.candidateHash)}, ${sql(decision.fieldFamily)}, ${sql(decision.decision)},
         ${sql(canonicalJson(decision.payload))}, ${sql(decision.evidenceUrl)}, ${sql(decision.rationale)},
         ${sql(decision.decidedBy)}, ${sql(decision.decidedAt)}, 1
       WHERE NOT EXISTS (SELECT 1 FROM evidence_decisions WHERE id = ${sql(decision.id)});`);
     statements.push(`UPDATE review_items SET status = 'resolved',
-      decision = ${sql(decision.decision === "verify" ? "verify_nutrition" : "reject_nutrition")},
+      decision = ${sql(`${decision.decision === "verify" ? "verify" : "reject"}_${decision.fieldFamily}`)},
       decision_rationale = ${sql(decision.rationale)}, decision_evidence_url = ${sql(decision.evidenceUrl)},
       decided_by = ${sql(decision.decidedBy)}, resolved_at = ${sql(decision.decidedAt)}
       WHERE source_record_id = ${sql(decision.sourceRecordId)} AND status = 'open'
         AND json_extract(evidence_json, '$.details.candidateHash') = ${sql(decision.candidateHash)};`);
     if (decision.decision !== "verify") continue;
+    if (decision.fieldFamily === "ingredients") {
+      const reviewedText = decision.payload.reviewedText;
+      if (!reviewedText) throw new Error(`Ingredient verify decision ${decision.id} is missing reviewed text`);
+      const candidate = decision.payload.candidate;
+      const flattened = flattenReviewedIngredients(decision.payload.normalizedIngredients);
+      statements.push(`INSERT INTO ingredient_statements
+        (product_id, source_record_id, raw_text, language, status, confidence, authority, observed_at, updated_at)
+        VALUES (${sql(decision.productId)}, ${sql(decision.sourceRecordId)}, ${sql(reviewedText)},
+          ${sql(candidate.language.code)}, 'verified', 'high', 100, ${sql(candidate.observedAt)}, ${sql(decision.decidedAt)})
+        ON CONFLICT(product_id) DO UPDATE SET source_record_id = excluded.source_record_id,
+          raw_text = excluded.raw_text, language = excluded.language, status = excluded.status,
+          confidence = excluded.confidence, authority = excluded.authority,
+          observed_at = excluded.observed_at, updated_at = excluded.updated_at;`);
+      statements.push(`DELETE FROM product_ingredients WHERE product_id = ${sql(decision.productId)}
+        AND source_record_id = ${sql(decision.sourceRecordId)};`);
+      for (const row of flattened) {
+        const id = stableId("ing", `${decision.id}:${row.path}`);
+        const parentId = row.parentPath === null ? null : stableId("ing", `${decision.id}:${row.parentPath}`);
+        statements.push(`INSERT INTO product_ingredients
+          (id, product_id, source_record_id, parent_id, position, raw_text, normalized_name, percentage, resolved)
+          VALUES (${sql(id)}, ${sql(decision.productId)}, ${sql(decision.sourceRecordId)}, ${sql(parentId)},
+            ${sql(row.ingredient.position)}, ${sql(row.ingredient.raw)}, ${sql(row.ingredient.normalizedName)},
+            ${sql(row.ingredient.percentage)}, ${row.ingredient.normalizedName === null ? 0 : 1});`);
+      }
+      statements.push(`UPDATE field_observations SET selected = 0
+        WHERE product_id = ${sql(decision.productId)} AND field_path = 'ingredients.raw';`);
+      const valueHash = `reviewed:${decision.candidateHash}:ingredients.raw`;
+      statements.push(`INSERT INTO field_observations
+        (id, product_id, source_record_id, field_path, raw_value_json, normalized_value_json,
+          confidence, authority, observed_at, evidence_url, selected, value_hash)
+        VALUES (${sql(stableId("obs", `${decision.id}:ingredients.raw`))}, ${sql(decision.productId)},
+          ${sql(decision.sourceRecordId)}, 'ingredients.raw', ${sql(JSON.stringify(reviewedText))},
+          ${sql(canonicalJson(decision.payload.normalizedIngredients))}, 'high', 100,
+          ${sql(candidate.observedAt)}, ${sql(decision.evidenceUrl)}, 1, ${sql(valueHash)})
+        ON CONFLICT(source_record_id, field_path, value_hash) DO UPDATE SET
+          product_id = excluded.product_id, raw_value_json = excluded.raw_value_json,
+          normalized_value_json = excluded.normalized_value_json, confidence = excluded.confidence,
+          authority = excluded.authority, observed_at = excluded.observed_at,
+          evidence_url = excluded.evidence_url, selected = 1;`);
+      statements.push(`INSERT INTO evidence_outcomes
+        (product_id, field_family, outcome, source_record_id, evidence_url, observed_at,
+          verified_at, decided_by, notes)
+        VALUES (${sql(decision.productId)}, 'ingredients', 'verified', ${sql(decision.sourceRecordId)},
+          ${sql(decision.evidenceUrl)}, ${sql(candidate.observedAt)}, ${sql(decision.decidedAt)},
+          ${sql(decision.decidedBy)}, ${sql(decision.rationale)})
+        ON CONFLICT(product_id, field_family) DO UPDATE SET outcome = excluded.outcome,
+          source_record_id = excluded.source_record_id, evidence_url = excluded.evidence_url,
+          observed_at = excluded.observed_at, verified_at = excluded.verified_at,
+          decided_by = excluded.decided_by, notes = excluded.notes;`);
+      continue;
+    }
     const nutrition = decision.payload.nutritionPer100g;
     statements.push(`INSERT INTO nutrition_facts
       (product_id, source_record_id, status, confidence, authority, basis, preparation_state,
@@ -491,12 +600,19 @@ export function validateReviewExistingDecisionState(bundle: ReviewDecisionBundle
 
 export async function emitReviewPostconditionQuery(bundle: ReviewDecisionBundle, outputPath: string): Promise<void> {
   const decisionIds = sqlList(bundle.decisions.map(({ id }) => id));
-  const verifyProducts = sqlList(bundle.decisions.filter(({ decision }) => decision === "verify").map(({ productId }) => productId));
+  const nutritionVerifyProducts = sqlList(bundle.decisions
+    .filter((decision) => decision.decision === "verify" && decision.fieldFamily === "nutrition")
+    .map(({ productId }) => productId));
+  const ingredientVerifyProducts = sqlList(bundle.decisions
+    .filter((decision) => decision.decision === "verify" && decision.fieldFamily === "ingredients")
+    .map(({ productId }) => productId));
   const candidateHashes = sqlList(bundle.decisions.map(({ candidateHash }) => candidateHash));
   const statements = [
     `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id, candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at FROM evidence_decisions WHERE active = 1 AND id IN (${decisionIds}) ORDER BY id;`,
-    `SELECT product_id, source_record_id, status, authority, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at FROM nutrition_facts WHERE product_id IN (${verifyProducts}) ORDER BY product_id;`,
-    `SELECT product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by FROM evidence_outcomes WHERE field_family = 'nutrition' AND product_id IN (${verifyProducts}) ORDER BY product_id;`,
+    `SELECT product_id, source_record_id, status, authority, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at FROM nutrition_facts WHERE product_id IN (${nutritionVerifyProducts}) ORDER BY product_id;`,
+    `SELECT product_id, source_record_id, raw_text, language, status, confidence, authority, observed_at, updated_at FROM ingredient_statements WHERE product_id IN (${ingredientVerifyProducts}) ORDER BY product_id;`,
+    `SELECT id, product_id, source_record_id, parent_id, position, raw_text, normalized_name, percentage, resolved FROM product_ingredients WHERE product_id IN (${ingredientVerifyProducts}) ORDER BY product_id, parent_id, position, id;`,
+    `SELECT product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by FROM evidence_outcomes WHERE (field_family = 'nutrition' AND product_id IN (${nutritionVerifyProducts})) OR (field_family = 'ingredients' AND product_id IN (${ingredientVerifyProducts})) ORDER BY field_family, product_id;`,
     `SELECT id, source_record_id, json_extract(evidence_json, '$.details.candidateHash') AS candidate_hash FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes}) ORDER BY id;`,
   ];
   await writeFile(outputPath, `${statements.join("\n")}\n`, "utf8");
@@ -507,29 +623,67 @@ function sameNumber(actual: unknown, expected: number | null): boolean {
 }
 
 export function validateReviewPostconditions(bundle: ReviewDecisionBundle, value: unknown): ReviewPublicationPostconditions {
-  const [decisionRows, factRows, outcomeRows, unresolvedRows] = d1Results(value, 4);
-  if (!decisionRows || !factRows || !outcomeRows || !unresolvedRows) throw new Error("D1 postcondition query is incomplete");
+  const [decisionRows, nutritionFactRows, ingredientFactRows, ingredientRows, outcomeRows, unresolvedRows] = d1Results(value, 6);
+  if (!decisionRows || !nutritionFactRows || !ingredientFactRows || !ingredientRows || !outcomeRows || !unresolvedRows) {
+    throw new Error("D1 postcondition query is incomplete");
+  }
   const existing = decisionRows.map(evidenceDecisionFromDatabaseRow);
   validateExistingEvidenceDecisions(bundle, existing);
   if (existing.length !== bundle.manifest.decisionCount) throw new Error("Applied decision count does not match the reviewed bundle");
-  const facts = new Map(factRows.map((row) => [row.product_id, row]));
-  const outcomes = new Map(outcomeRows.map((row) => [row.product_id, row]));
+  const nutritionFacts = new Map(nutritionFactRows.map((row) => [row.product_id, row]));
+  const ingredientFacts = new Map(ingredientFactRows.map((row) => [row.product_id, row]));
+  const ingredientRowsBySource = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of ingredientRows) {
+    const sourceRecordId = requiredString(row.source_record_id, "ingredient source_record_id");
+    ingredientRowsBySource.set(sourceRecordId, [...(ingredientRowsBySource.get(sourceRecordId) ?? []), row]);
+  }
+  const outcomes = new Map(outcomeRows.map((row) => [`${row.field_family}:${row.product_id}`, row]));
   const verified = bundle.decisions.filter(({ decision }) => decision === "verify");
   for (const decision of verified) {
-    const fact = facts.get(decision.productId);
-    const nutrition = decision.payload.nutritionPer100g;
-    if (
-      !fact || fact.source_record_id !== decision.sourceRecordId || fact.status !== "verified" || fact.authority !== 100 ||
-      !sameNumber(fact.calories, nutrition.calories) || !sameNumber(fact.protein_grams, nutrition.proteinGrams) ||
-      !sameNumber(fact.carbohydrate_grams, nutrition.carbohydrateGrams) || !sameNumber(fact.sugar_grams, nutrition.sugarGrams) ||
-      !sameNumber(fact.fat_grams, nutrition.fatGrams) || !sameNumber(fact.saturated_fat_grams, nutrition.saturatedFatGrams) ||
-      !sameNumber(fact.fibre_grams, nutrition.fibreGrams) || !sameNumber(fact.sodium_mg, nutrition.sodiumMg) ||
-      fact.label_verified_at !== decision.decidedAt || fact.observed_at !== decision.payload.observedAt
-    ) throw new Error(`Verified nutrition postcondition failed for ${decision.id}`);
-    const outcome = outcomes.get(decision.productId);
+    const observedAt = decision.fieldFamily === "nutrition"
+      ? decision.payload.observedAt
+      : decision.payload.candidate.observedAt;
+    if (decision.fieldFamily === "nutrition") {
+      const fact = nutritionFacts.get(decision.productId);
+      const nutrition = decision.payload.nutritionPer100g;
+      if (
+        !fact || fact.source_record_id !== decision.sourceRecordId || fact.status !== "verified" || fact.authority !== 100 ||
+        !sameNumber(fact.calories, nutrition.calories) || !sameNumber(fact.protein_grams, nutrition.proteinGrams) ||
+        !sameNumber(fact.carbohydrate_grams, nutrition.carbohydrateGrams) || !sameNumber(fact.sugar_grams, nutrition.sugarGrams) ||
+        !sameNumber(fact.fat_grams, nutrition.fatGrams) || !sameNumber(fact.saturated_fat_grams, nutrition.saturatedFatGrams) ||
+        !sameNumber(fact.fibre_grams, nutrition.fibreGrams) || !sameNumber(fact.sodium_mg, nutrition.sodiumMg) ||
+        fact.label_verified_at !== decision.decidedAt || fact.observed_at !== observedAt
+      ) throw new Error(`Verified nutrition postcondition failed for ${decision.id}`);
+    } else {
+      const fact = ingredientFacts.get(decision.productId);
+      if (
+        !fact || fact.source_record_id !== decision.sourceRecordId ||
+        fact.raw_text !== decision.payload.reviewedText || fact.language !== decision.payload.candidate.language.code ||
+        fact.status !== "verified" || fact.confidence !== "high" || fact.authority !== 100 ||
+        fact.observed_at !== observedAt || fact.updated_at !== decision.decidedAt
+      ) throw new Error(`Verified ingredient statement postcondition failed for ${decision.id}`);
+      const expectedRows = flattenReviewedIngredients(decision.payload.normalizedIngredients).map((row) => ({
+        id: stableId("ing", `${decision.id}:${row.path}`),
+        product_id: decision.productId,
+        source_record_id: decision.sourceRecordId,
+        parent_id: row.parentPath === null ? null : stableId("ing", `${decision.id}:${row.parentPath}`),
+        position: row.ingredient.position,
+        raw_text: row.ingredient.raw,
+        normalized_name: row.ingredient.normalizedName,
+        percentage: row.ingredient.percentage,
+        resolved: row.ingredient.normalizedName === null ? 0 : 1,
+      }));
+      const actualRows = [...(ingredientRowsBySource.get(decision.sourceRecordId) ?? [])]
+        .sort((left, right) => String(left.id).localeCompare(String(right.id)));
+      expectedRows.sort((left, right) => left.id.localeCompare(right.id));
+      if (canonicalJson(actualRows) !== canonicalJson(expectedRows)) {
+        throw new Error(`Verified normalized ingredient postcondition failed for ${decision.id}`);
+      }
+    }
+    const outcome = outcomes.get(`${decision.fieldFamily}:${decision.productId}`);
     if (
       !outcome || outcome.outcome !== "verified" || outcome.source_record_id !== decision.sourceRecordId ||
-      outcome.evidence_url !== decision.evidenceUrl || outcome.observed_at !== decision.payload.observedAt ||
+      outcome.evidence_url !== decision.evidenceUrl || outcome.observed_at !== observedAt ||
       outcome.verified_at !== decision.decidedAt || outcome.decided_by !== decision.decidedBy
     ) throw new Error(`Verified evidence outcome postcondition failed for ${decision.id}`);
   }

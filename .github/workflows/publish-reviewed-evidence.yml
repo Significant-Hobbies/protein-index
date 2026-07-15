@@ -1,4 +1,4 @@
-name: Publish reviewed nutrition evidence
+name: Publish reviewed evidence
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       bundle_path:
-        description: Bundle directory under review-decisions/
+        description: Nutrition and/or ingredient bundle directory under review-decisions/
         required: true
         type: string
       expected_ledger_hash:

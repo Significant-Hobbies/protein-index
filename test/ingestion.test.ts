@@ -1,10 +1,13 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { normalizeOpenFoodFactsRecord, stageOpenFoodFacts } from "../scripts/adapters/open-food-facts";
 import { enrichOpenFoodFactsApi } from "../scripts/adapters/open-food-facts-api";
 import { extractRobotoffApi } from "../scripts/adapters/robotoff-api";
+import { extractRobotoffIngredientApi, validateRobotoffIngredientArtifact } from "../scripts/adapters/robotoff-ingredients-api";
+import { parseRobotoffIngredientEvidence } from "../scripts/adapters/robotoff-ingredients";
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "../scripts/adapters/robotoff";
 import { assertPublicationEvidence } from "../scripts/publication";
 import { emitImportSql } from "../scripts/reconcile";
@@ -18,6 +21,8 @@ import {
   writeReviewDecisionBundle,
 } from "../scripts/review-bundles";
 import { canonicalJson, nutritionCandidateFromEvidence, nutritionCandidateHash, type EvidenceDecisionInput } from "../shared/evidence-decisions";
+import { ingredientCandidateHash, type IngredientEvidenceDecisionInput } from "../shared/ingredient-evidence";
+import { parseIngredients } from "../shared/ingredients";
 import type { SourceManifest } from "../shared/types";
 
 const indiaProduct = {
@@ -43,6 +48,251 @@ const indiaProduct = {
   },
   last_modified_t: 1_752_537_600,
 };
+
+const ingredientPrediction = {
+  id: 10477207,
+  type: "ner",
+  model_name: "ingredient_detection",
+  model_version: "ingredient-detection-1.0",
+  timestamp: "2024-08-12T15:45:02.473405",
+  image: {
+    barcode: "0001241000224",
+    uploaded_at: "2024-08-10T04:07:50",
+    image_id: "2",
+    source_image: "/000/124/100/0224/2.jpg",
+  },
+  data: {
+    entities: [{
+      lang: { lang: "en", confidence: 0.61748207 },
+      text: "Casein, Sucrose, Precooked Rice Flour, Edible Vegetable R Solids, Bengal Gram.",
+      score: 0.9999909996986389,
+      ingredients: [
+        { id: "en:casein", text: "Casein", in_taxonomy: true },
+        { id: "en:sucrose", text: "Sucrose", in_taxonomy: true },
+        { id: "en:rice-flour", text: "Rice Flour", in_taxonomy: true },
+        { id: "en:edible-vegetable-r-solids", text: "Edible Vegetable R Solids", in_taxonomy: false },
+        { id: "en:bengal-gram", text: "Bengal Gram", in_taxonomy: false },
+      ],
+      bounding_box: [52, 79, 305, 1568],
+      ingredients_n: 8,
+      known_ingredients_n: 4,
+      unknown_ingredients_n: 4,
+    }],
+  },
+};
+
+describe("Robotoff ingredient evidence", () => {
+  const context = {
+    code: "00001241000224",
+    ingredientImageUrl: "https://images.openfoodfacts.org/images/products/000/124/100/0224/2.jpg",
+  };
+
+  it("parses the official ingredient-detection entity shape without verifying it", () => {
+    const parsed = parseRobotoffIngredientEvidence({ image_predictions: [
+      ingredientPrediction,
+      { ...ingredientPrediction, id: 1, type: "nutrition_extraction", model_name: "nutrition_extractor" },
+    ] }, context);
+    expect(parsed).toMatchObject({ predictionCount: 1, entityCount: 1, hasConflict: false });
+    expect(parsed.candidates[0]).toMatchObject({
+      predictionId: "10477207",
+      entityIndex: 0,
+      barcode: "0001241000224",
+      imageId: "2",
+      modelName: "ingredient_detection",
+      modelVersion: "ingredient-detection-1.0",
+      language: { code: "en", confidence: 0.61748207 },
+      ingredientCount: 8,
+      knownIngredientCount: 4,
+      unknownIngredientCount: 4,
+    });
+    expect(parsed.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_ingredient_low_taxonomy_recognition",
+      severity: "warning",
+    }));
+  });
+
+  it("rejects low-confidence and identity-mismatched entities", () => {
+    const lowConfidence = {
+      ...ingredientPrediction,
+      data: { entities: [{ ...ingredientPrediction.data.entities[0], score: 0.5 }] },
+    };
+    expect(parseRobotoffIngredientEvidence({ image_predictions: [lowConfidence] }, context).issues)
+      .toContainEqual(expect.objectContaining({ code: "robotoff_ingredient_low_confidence" }));
+    const wrongIdentity = {
+      ...ingredientPrediction,
+      image: { ...ingredientPrediction.image, barcode: "8900000000012" },
+    };
+    expect(parseRobotoffIngredientEvidence({ image_predictions: [wrongIdentity] }, context).issues)
+      .toContainEqual(expect.objectContaining({ code: "robotoff_ingredient_identity_mismatch" }));
+  });
+
+  it("keeps materially different image text candidates and marks their conflict", () => {
+    const conflicting = {
+      ...ingredientPrediction,
+      id: 10477208,
+      image: { ...ingredientPrediction.image, image_id: "3", source_image: "/000/124/100/0224/3.jpg" },
+      data: { entities: [{
+        ...ingredientPrediction.data.entities[0],
+        text: "Casein, Sucrose, Peanut Flour.",
+      }] },
+    };
+    const parsed = parseRobotoffIngredientEvidence({ image_predictions: [ingredientPrediction, conflicting] }, context);
+    expect(parsed).toMatchObject({ predictionCount: 2, entityCount: 2, hasConflict: true });
+    expect(parsed.candidates).toHaveLength(2);
+    expect(parsed.issues.filter(({ code }) => code === "robotoff_ingredient_image_conflict")).toHaveLength(2);
+  });
+
+  it("collects the exact ingredient-image cohort and resumes per GTIN", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-ingredients-"));
+    const input = join(directory, "source.jsonl");
+    await writeFile(input, `${JSON.stringify({
+      ...indiaProduct,
+      code: "00001241000224",
+      image_ingredients_url: context.ingredientImageUrl,
+    })}\n`, "utf8");
+    const source = await stageOpenFoodFacts({
+      input,
+      outputDirectory: join(directory, "source"),
+      mode: "sample",
+      limit: null,
+    });
+    const outputDirectory = join(directory, "extracted");
+    let requests = 0;
+    const first = await extractRobotoffIngredientApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      fetcher: async (request) => {
+        requests += 1;
+        const url = new URL(request.toString());
+        expect(url.searchParams.get("type")).toBe("ner");
+        expect(url.searchParams.get("model_name")).toBe("ingredient_detection");
+        expect(url.searchParams.get("barcode")).toBe("00001241000224");
+        return new Response(JSON.stringify({ image_predictions: [ingredientPrediction] }), { status: 200 });
+      },
+    });
+    expect(requests).toBe(1);
+    expect(first).toMatchObject({
+      contexts: 1,
+      outcomes: { candidate: 1, no_prediction: 0, rejected: 0, failed: 0 },
+      fetchedBarcodes: 1,
+      resumedBarcodes: 0,
+    });
+    const candidates = (await readFile(first.candidatesPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({
+      requestedCode: "00001241000224",
+      candidateHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      candidate: { predictionId: "10477207", entityIndex: 0 },
+    });
+    const staged = (await readFile(first.stagedPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(staged).toHaveLength(1);
+    expect(staged[0]).toMatchObject({
+      source: "open_food_facts_robotoff_ingredients",
+      ingredients: { raw: null, status: "missing" },
+      rawEvidence: {
+        candidateHash: candidates[0].candidateHash,
+        candidate: { predictionId: "10477207", entityIndex: 0 },
+      },
+      validationIssues: [{
+        code: "robotoff_ingredient_candidate",
+        details: { candidateHash: candidates[0].candidateHash },
+      }],
+    });
+    const sqlPath = join(outputDirectory, "import.sql");
+    await emitImportSql({ stagedPath: first.stagedPath, manifestPath: first.manifestPath, outputPath: sqlPath });
+    const sql = await readFile(sqlPath, "utf8");
+    expect(sql).toContain("'ingredient_conflict'");
+    expect(sql).toContain(candidates[0].candidateHash);
+    expect(sql).toContain("INSERT INTO ingredient_statements");
+    expect(sql).toContain("d.field_family = 'ingredients'");
+    expect(sql).toContain("d.decision = 'verify'");
+    expect(sql).toContain("WITH RECURSIVE decision AS");
+    expect(sql).toContain("decision = CASE");
+    expect(sql).toContain("'verify_ingredients'");
+    expect(sql).not.toContain("VALUES ('prd_b0e8e3fe90558cbe96e938b1', 'src_");
+    expect(sql).not.toContain("verified_nutrition");
+    await expect(validateRobotoffIngredientArtifact(outputDirectory)).resolves.toMatchObject({
+      report: {
+        requestedBarcodes: 1,
+        accountedBarcodes: 1,
+        candidateRecords: 1,
+        modelVersions: { "ingredient-detection-1.0": 1 },
+        languages: { en: 1 },
+        taxonomyRecognition: { belowSixtyPercent: 1, atLeastSixtyPercent: 0 },
+      },
+    });
+
+    const resumed = await extractRobotoffIngredientApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      fetcher: async () => { throw new Error("completed GTIN should not be fetched again"); },
+    });
+    expect(resumed).toMatchObject({ fetchedBarcodes: 0, resumedBarcodes: 1, outcomes: { candidate: 1 } });
+  });
+
+  it("retries ingredient requests and records terminal failure evidence", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-ingredients-failure-"));
+    const input = join(directory, "source.jsonl");
+    await writeFile(input, `${JSON.stringify({
+      ...indiaProduct,
+      code: "00001241000224",
+      image_ingredients_url: context.ingredientImageUrl,
+    })}\n`, "utf8");
+    const source = await stageOpenFoodFacts({ input, outputDirectory: join(directory, "source"), mode: "sample", limit: null });
+    let attempts = 0;
+    const outputDirectory = join(directory, "extracted");
+    await expect(extractRobotoffIngredientApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      maximumAttempts: 2,
+      fetcher: async () => {
+        attempts += 1;
+        return new Response("busy", { status: 503 });
+      },
+    })).rejects.toThrow("incomplete");
+    expect(attempts).toBe(2);
+    const outcome = JSON.parse((await readFile(join(outputDirectory, "outcomes.jsonl"), "utf8")).trim());
+    expect(outcome).toMatchObject({ requestedCode: "00001241000224", status: "failed" });
+    await expect(validateRobotoffIngredientArtifact(outputDirectory)).rejects.toThrow("not source complete");
+  });
+
+  it("rejects tampered ingredient extraction artifacts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-ingredients-tamper-"));
+    const input = join(directory, "source.jsonl");
+    await writeFile(input, `${JSON.stringify({
+      ...indiaProduct,
+      code: "00001241000224",
+      image_ingredients_url: context.ingredientImageUrl,
+    })}\n`, "utf8");
+    const source = await stageOpenFoodFacts({ input, outputDirectory: join(directory, "source"), mode: "sample", limit: null });
+    const outputDirectory = join(directory, "extracted");
+    const result = await extractRobotoffIngredientApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      fetcher: async () => new Response(JSON.stringify({ image_predictions: [ingredientPrediction] }), { status: 200 }),
+    });
+    await writeFile(result.candidatesPath, `${await readFile(result.candidatesPath, "utf8")} `, "utf8");
+    await expect(validateRobotoffIngredientArtifact(outputDirectory)).rejects.toThrow("checksum mismatch");
+  });
+});
 
 async function reviewDecision(id: string, decision: "verify" | "reject" = "verify"): Promise<EvidenceDecisionInput> {
   const evidence = {
@@ -83,7 +333,126 @@ async function reviewDecision(id: string, decision: "verify" | "reject" = "verif
   };
 }
 
+async function ingredientReviewDecision(id: string): Promise<IngredientEvidenceDecisionInput> {
+  const parsed = parseRobotoffIngredientEvidence(
+    { image_predictions: [ingredientPrediction] },
+    {
+      code: "00001241000224",
+      ingredientImageUrl: "https://images.openfoodfacts.org/images/products/000/124/100/0224/2.jpg",
+    },
+  );
+  const candidate = parsed.candidates[0];
+  if (!candidate) throw new Error("Expected valid ingredient review fixture candidate");
+  const reviewedText = "Casein, sucrose, precooked rice flour, Bengal gram";
+  return {
+    id,
+    sourceId: "open_food_facts_robotoff_ingredients",
+    sourceRecordKey: `00001241000224:${candidate.predictionId}:${candidate.entityIndex}`,
+    sourceRecordId: `src_${id}`,
+    sourceContentHash: `source_${id}`,
+    productId: "prd_ingredient_fixture",
+    candidateHash: await ingredientCandidateHash(candidate),
+    fieldFamily: "ingredients",
+    decision: "verify",
+    payload: { candidate, reviewedText, normalizedIngredients: parseIngredients(reviewedText) },
+    evidenceUrl: candidate.imageUrl,
+    rationale: "Corrected visible OCR artifacts against the current ingredient label",
+    decidedBy: "local_operator",
+    decidedAt: "2026-07-15T01:00:00.000Z",
+  };
+}
+
 describe("Reviewed evidence bundles", () => {
+  it("round-trips ingredient decisions in the backward-compatible reviewed bundle", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-ingredient-review-bundle-"));
+    const nutrition = await reviewDecision("evd_nutrition", "verify");
+    const ingredients = await ingredientReviewDecision("evd_ingredients");
+    const written = await writeReviewDecisionBundle({
+      decisions: [nutrition, ingredients],
+      outputRoot: directory,
+      createdAt: "2026-07-15T02:00:00.000Z",
+    });
+    const parsed = await readReviewDecisionBundle(written.directory);
+    expect(parsed.manifest).toMatchObject({ decisionCount: 2, verifyCount: 2, rejectCount: 0 });
+    expect(parsed.decisions.map(({ fieldFamily }) => fieldFamily).sort()).toEqual(["ingredients", "nutrition"]);
+    const ingredientDecision = parsed.decisions.find(({ fieldFamily }) => fieldFamily === "ingredients");
+    expect(ingredientDecision).toMatchObject({
+      fieldFamily: "ingredients",
+      payload: { reviewedText: ingredients.payload.reviewedText, normalizedIngredients: ingredients.payload.normalizedIngredients },
+    });
+    const sqlPath = join(directory, "ingredient-review.sql");
+    await emitReviewDecisionSql(parsed, sqlPath);
+    const sql = await readFile(sqlPath, "utf8");
+    expect(sql).toContain("'ingredients', 'verify'");
+    expect(sql).toContain("'verify_ingredients'");
+    expect(sql).toContain("INSERT INTO ingredient_statements");
+    expect(sql).toContain("INSERT INTO product_ingredients");
+    expect(sql).toContain("'ingredients.raw'");
+    expect(sql).toContain("'ingredients', 'verified'");
+
+    const ingredientOnly = await writeReviewDecisionBundle({
+      decisions: [ingredients],
+      outputRoot: join(directory, "ingredient-only"),
+      createdAt: "2026-07-15T02:00:00.000Z",
+    });
+    const exact = ingredientOnly.decisions[0];
+    if (!exact || exact.fieldFamily !== "ingredients") throw new Error("Expected ingredient-only reviewed bundle");
+    const row = {
+      id: exact.id,
+      source_id: exact.sourceId,
+      source_record_key: exact.sourceRecordKey,
+      source_record_id: exact.sourceRecordId,
+      source_content_hash: exact.sourceContentHash,
+      product_id: exact.productId,
+      candidate_hash: exact.candidateHash,
+      field_family: exact.fieldFamily,
+      decision: exact.decision,
+      payload_json: canonicalJson(exact.payload),
+      evidence_url: exact.evidenceUrl,
+      rationale: exact.rationale,
+      decided_by: exact.decidedBy,
+      decided_at: exact.decidedAt,
+    };
+    const ingredientRows = exact.payload.normalizedIngredients.map((ingredient) => ({
+      id: `ing_${createHash("sha256").update(`${exact.id}:${ingredient.position}`).digest("hex").slice(0, 24)}`,
+      product_id: exact.productId,
+      source_record_id: exact.sourceRecordId,
+      parent_id: null,
+      position: ingredient.position,
+      raw_text: ingredient.raw,
+      normalized_name: ingredient.normalizedName,
+      percentage: ingredient.percentage,
+      resolved: ingredient.normalizedName === null ? 0 : 1,
+    }));
+    expect(validateReviewPostconditions(ingredientOnly, [
+      { success: true, results: [row] },
+      { success: true, results: [] },
+      { success: true, results: [{
+        product_id: exact.productId,
+        source_record_id: exact.sourceRecordId,
+        raw_text: exact.payload.reviewedText,
+        language: exact.payload.candidate.language.code,
+        status: "verified",
+        confidence: "high",
+        authority: 100,
+        observed_at: exact.payload.candidate.observedAt,
+        updated_at: exact.decidedAt,
+      }] },
+      { success: true, results: ingredientRows },
+      { success: true, results: [{
+        product_id: exact.productId,
+        field_family: "ingredients",
+        outcome: "verified",
+        source_record_id: exact.sourceRecordId,
+        evidence_url: exact.evidenceUrl,
+        observed_at: exact.payload.candidate.observedAt,
+        verified_at: exact.decidedAt,
+        decided_by: exact.decidedBy,
+      }] },
+      { success: true, results: [] },
+    ])).toMatchObject({ decisions: 1, verifiedFacts: 1, verifiedOutcomes: 1, unresolvedCandidates: 0 });
+  });
+
   it("exports deterministic sorted ledgers and validates exact source linkage", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-review-bundle-"));
     const second = await reviewDecision("evd_b", "reject");
@@ -110,7 +479,7 @@ describe("Reviewed evidence bundles", () => {
       sourceRecordId: item.sourceRecordId,
       contentHash: item.sourceContentHash,
       productId: item.productId,
-      productGtin: item.payload.barcode,
+      productGtin: item.fieldFamily === "nutrition" ? item.payload.barcode : item.payload.candidate.barcode,
     })))).not.toThrow();
     expect(() => validateReviewDecisionSources(parsed, parsed.decisions.map((item, index) => ({
       sourceId: item.sourceId,
@@ -118,7 +487,7 @@ describe("Reviewed evidence bundles", () => {
       sourceRecordId: item.sourceRecordId,
       contentHash: index === 0 ? "drifted" : item.sourceContentHash,
       productId: item.productId,
-      productGtin: item.payload.barcode,
+      productGtin: item.fieldFamily === "nutrition" ? item.payload.barcode : item.payload.candidate.barcode,
     })))).toThrow("source evidence has drifted");
     expect(() => validateExistingEvidenceDecisions(parsed, [{ ...first, rationale: "Conflicting edit" }]))
       .toThrow("conflicts with an existing decision id");
@@ -137,7 +506,7 @@ describe("Reviewed evidence bundles", () => {
       source_record_id: item.sourceRecordId,
       content_hash: item.sourceContentHash,
       product_id: item.productId,
-      product_gtin: item.payload.barcode,
+      product_gtin: item.fieldFamily === "nutrition" ? item.payload.barcode : item.payload.candidate.barcode,
     }));
     expect(() => validateReviewPublicationState(parsed, [
       { success: true, results: sourceRows },
@@ -178,8 +547,11 @@ describe("Reviewed evidence bundles", () => {
         label_verified_at: first.decidedAt,
         observed_at: first.payload.observedAt,
       }] },
+      { success: true, results: [] },
+      { success: true, results: [] },
       { success: true, results: [{
         product_id: first.productId,
+        field_family: "nutrition",
         outcome: "verified",
         source_record_id: first.sourceRecordId,
         evidence_url: first.evidenceUrl,
@@ -196,7 +568,7 @@ describe("Reviewed evidence bundles", () => {
       unresolvedCandidates: 0,
     });
     expect(() => validateReviewPostconditions(parsed, [
-      postconditions[0], postconditions[1], postconditions[2],
+      postconditions[0], postconditions[1], postconditions[2], postconditions[3], postconditions[4],
       { success: true, results: [{ id: "rev_still_open" }] },
     ])).toThrow("remain unresolved");
   });

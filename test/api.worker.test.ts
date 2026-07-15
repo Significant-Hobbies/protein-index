@@ -67,6 +67,49 @@ async function insertRobotoffReview(input: {
   return { reviewId, productId: product.id, sourceRecordId };
 }
 
+async function insertIngredientReview(input: {
+  suffix: string;
+  evidence: unknown;
+}): Promise<{ reviewId: string; productId: string; sourceRecordId: string }> {
+  const product = await env.DB.prepare("SELECT id, gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+    .first<{ id: string; gtin: string }>();
+  const run = await env.DB.prepare("SELECT id FROM ingestion_runs ORDER BY started_at LIMIT 1").first<{ id: string }>();
+  if (!product || !run) throw new Error("Expected seeded product and ingestion run");
+  const sourceRecordId = `src_robotoff_ingredients_${input.suffix}`;
+  const reviewId = `rev_robotoff_ingredients_${input.suffix}`;
+  const observedAt = "2026-07-16T00:00:00.000Z";
+  await env.DB.batch([
+    env.DB.prepare(`INSERT OR IGNORE INTO sources
+      (id, name, kind, identity_authority, nutrition_authority, ingredient_authority,
+        license_url, retention_notes, credential_requirement, created_at)
+      VALUES ('open_food_facts_robotoff_ingredients', 'Open Food Facts Robotoff ingredients',
+        'open_data', 0, 0, 20, 'https://opendatacommons.org/licenses/odbl/1-0/',
+        'Ingredient review evidence only', NULL, ?)`)
+      .bind(observedAt),
+    env.DB.prepare(`INSERT INTO source_records
+      (id, source_id, source_record_id, product_id, source_url, content_hash, identity_hash,
+        observed_at, first_seen_run_id, last_seen_run_id, raw_evidence_json, resolution_rule)
+      VALUES (?, 'open_food_facts_robotoff_ingredients', ?, ?, ?, ?, ?, ?, ?, ?, '{}', 'exact_gtin')`)
+      .bind(
+        sourceRecordId,
+        `${product.gtin}:ingredient:${input.suffix}`,
+        product.id,
+        `https://robotoff.openfoodfacts.org/api/v1/image_predictions?barcode=${product.gtin}&type=ner&model_name=ingredient_detection`,
+        `ingredient_hash_${input.suffix}`,
+        `ingredient_identity_${input.suffix}`,
+        observedAt,
+        run.id,
+        run.id,
+      ),
+    env.DB.prepare(`INSERT INTO review_items
+      (id, type, priority, status, source_record_id, product_id, candidate_product_ids_json,
+        evidence_json, created_at)
+      VALUES (?, 'ingredient_conflict', 50, 'open', ?, ?, '[]', ?, ?)`)
+      .bind(reviewId, sourceRecordId, product.id, JSON.stringify(input.evidence), observedAt),
+  ]);
+  return { reviewId, productId: product.id, sourceRecordId };
+}
+
 function robotoffEvidence(barcode: string, nutritionPer100g: Record<string, number | null>): unknown {
   return {
     code: "robotoff_nutrition_candidate",
@@ -89,7 +132,131 @@ function robotoffEvidence(barcode: string, nutritionPer100g: Record<string, numb
   };
 }
 
+function robotoffIngredientEvidence(barcode: string, suffix: string): {
+  evidence: unknown;
+  candidate: {
+    imageUrl: string;
+    entityText: string;
+    observedAt: string;
+  };
+} {
+  const candidate = {
+    predictionId: `ingredient-prediction-${suffix}`,
+    entityIndex: 0,
+    barcode,
+    imageId: `ingredient-image-${suffix}`,
+    imageUrl: `https://images.openfoodfacts.org/images/products/${suffix}.jpg`,
+    modelName: "ingredient_detection" as const,
+    modelVersion: "ingredient-detection-1.0",
+    predictedAt: "2026-07-16T00:00:00.000Z",
+    observedAt: "2026-07-15T23:00:00.000Z",
+    entityText: "Whey blend 70% (concentrate, isolate), cocoa 8%, flavour",
+    entityConfidence: 0.99,
+    language: { code: "en", confidence: 0.9 },
+    boundingBox: [10, 20, 300, 800] as [number, number, number, number],
+    parsedIngredients: [
+      { id: "en:whey-protein", text: "Whey blend", in_taxonomy: true },
+      { id: "en:cocoa", text: "Cocoa", in_taxonomy: true },
+      { id: "en:flavouring", text: "Flavour", in_taxonomy: true },
+    ],
+    ingredientCount: 5,
+    knownIngredientCount: 4,
+    unknownIngredientCount: 1,
+  };
+  return {
+    candidate,
+    evidence: {
+      code: "robotoff_ingredient_candidate",
+      severity: "warning",
+      field: "ingredients",
+      details: { candidate },
+    },
+  };
+}
+
 describe("Worker catalog API", () => {
+  it("preserves nutrition decisions while migrating the evidence family discriminator", async () => {
+    const source = await env.DB.prepare(`SELECT s.id AS source_record_id, s.source_id,
+      s.source_record_id AS source_record_key, s.content_hash, s.product_id
+      FROM source_records s WHERE s.product_id IS NOT NULL ORDER BY s.id LIMIT 1`)
+      .first<{
+        source_record_id: string;
+        source_id: string;
+        source_record_key: string;
+        content_hash: string;
+        product_id: string;
+      }>();
+    if (!source) throw new Error("Expected seeded source evidence");
+    const legacyMigration = env.TEST_MIGRATIONS.find(({ name }) => name.startsWith("0005_"));
+    const forwardMigration = env.TEST_MIGRATIONS.find(({ name }) => name.startsWith("0006_"));
+    if (!legacyMigration || !forwardMigration) throw new Error("Expected evidence decision migrations");
+    const tableName = "migration_evidence_decisions";
+    await applyQueries(legacyMigration.queries.map((query) => query.replaceAll("evidence_decisions", tableName)));
+    await env.DB.prepare(`INSERT INTO ${tableName}
+      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+        decided_by, decided_at, active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'nutrition', 'verify', '{}', ?, ?, ?, ?, 1)`)
+      .bind(
+        "migration_nutrition_decision",
+        source.source_id,
+        source.source_record_key,
+        source.source_record_id,
+        source.content_hash,
+        source.product_id,
+        "0".repeat(64),
+        "https://images.openfoodfacts.org/migration-label.jpg",
+        "Preserve existing nutrition decision",
+        "migration_test",
+        "2026-07-16T00:00:00.000Z",
+      ).run();
+    await applyQueries(forwardMigration.queries.map((query) => query.replaceAll("evidence_decisions", tableName)));
+    const preserved = await env.DB.prepare(`SELECT id, field_family, decision, candidate_hash
+      FROM ${tableName} WHERE id = 'migration_nutrition_decision'`).first<Record<string, unknown>>();
+    expect(preserved).toEqual({
+      id: "migration_nutrition_decision",
+      field_family: "nutrition",
+      decision: "verify",
+      candidate_hash: "0".repeat(64),
+    });
+    await expect(env.DB.prepare(`INSERT INTO ${tableName}
+      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+        decided_by, decided_at, active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'ingredients', 'reject', '{}', ?, ?, ?, ?, 1)`)
+      .bind(
+        "migration_ingredient_decision",
+        source.source_id,
+        `${source.source_record_key}:ingredients`,
+        source.source_record_id,
+        source.content_hash,
+        source.product_id,
+        "1".repeat(64),
+        "https://images.openfoodfacts.org/migration-ingredients.jpg",
+        "Ingredient evidence remains review only",
+        "migration_test",
+        "2026-07-16T00:01:00.000Z",
+      ).run()).resolves.toMatchObject({ success: true });
+    await expect(env.DB.prepare(`INSERT INTO ${tableName}
+      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+        decided_by, decided_at, active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'identity', 'reject', '{}', ?, ?, ?, ?, 1)`)
+      .bind(
+        "migration_invalid_decision",
+        source.source_id,
+        `${source.source_record_key}:identity`,
+        source.source_record_id,
+        source.content_hash,
+        source.product_id,
+        "2".repeat(64),
+        "https://images.openfoodfacts.org/migration-invalid.jpg",
+        "Unsupported evidence family",
+        "migration_test",
+        "2026-07-16T00:02:00.000Z",
+      ).run()).rejects.toThrow();
+  });
+
   it("reports seeded health and configured-source coverage", async () => {
     const healthResponse = await worker.fetch("http://localhost/api/health");
     expect(healthResponse.status).toBe(200);
@@ -329,6 +496,189 @@ describe("Worker catalog API", () => {
     });
   });
 
+  it("applies reviewer-confirmed ingredient text and normalized provenance atomically", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const fixture = robotoffIngredientEvidence(product.gtin, "verify");
+    const review = await insertIngredientReview({ suffix: "verify", evidence: fixture.evidence });
+    const reviewedText = "Whey blend 70% (concentrate, isolate), cocoa 8%, natural flavour";
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "verify_ingredients",
+        rationale: "Corrected the visible OCR wording against the current package label",
+        evidenceUrl: fixture.candidate.imageUrl,
+        reviewedText,
+      }),
+    });
+    expect(response.status).toBe(200);
+    const statement = await env.DB.prepare(`SELECT source_record_id, raw_text, language, status,
+      confidence, authority, observed_at FROM ingredient_statements WHERE product_id = ?`)
+      .bind(review.productId).first<Record<string, unknown>>();
+    expect(statement).toEqual({
+      source_record_id: review.sourceRecordId,
+      raw_text: reviewedText,
+      language: "en",
+      status: "verified",
+      confidence: "high",
+      authority: 100,
+      observed_at: fixture.candidate.observedAt,
+    });
+    const normalized = await env.DB.prepare(`SELECT parent_id, position, raw_text, normalized_name,
+      percentage, resolved FROM product_ingredients WHERE product_id = ? AND source_record_id = ?
+      ORDER BY parent_id, position`)
+      .bind(review.productId, review.sourceRecordId).all<Record<string, unknown>>();
+    expect(normalized.results).toHaveLength(5);
+    expect(normalized.results).toContainEqual(expect.objectContaining({
+      position: 0,
+      raw_text: "Whey blend 70% (concentrate, isolate)",
+      normalized_name: "whey blend",
+      percentage: 70,
+      resolved: 1,
+    }));
+    const observation = await env.DB.prepare(`SELECT raw_value_json, normalized_value_json,
+      confidence, authority, evidence_url, selected FROM field_observations
+      WHERE product_id = ? AND field_path = 'ingredients.raw' AND selected = 1`)
+      .bind(review.productId).first<Record<string, unknown>>();
+    expect(observation).toMatchObject({
+      raw_value_json: JSON.stringify(reviewedText),
+      confidence: "high",
+      authority: 100,
+      evidence_url: fixture.candidate.imageUrl,
+      selected: 1,
+    });
+    expect(JSON.parse(String(observation?.normalized_value_json))).toHaveLength(3);
+    const outcome = await env.DB.prepare(`SELECT outcome, source_record_id, evidence_url, decided_by
+      FROM evidence_outcomes WHERE product_id = ? AND field_family = 'ingredients'`)
+      .bind(review.productId).first<Record<string, unknown>>();
+    expect(outcome).toEqual({
+      outcome: "verified",
+      source_record_id: review.sourceRecordId,
+      evidence_url: fixture.candidate.imageUrl,
+      decided_by: "local_operator",
+    });
+    const decision = await env.DB.prepare(`SELECT field_family, decision, payload_json, evidence_url, active
+      FROM evidence_decisions WHERE id = ?`).bind(`evd_${review.reviewId}`).first<Record<string, unknown>>();
+    expect(decision).toMatchObject({
+      field_family: "ingredients",
+      decision: "verify",
+      evidence_url: fixture.candidate.imageUrl,
+      active: 1,
+    });
+    expect(JSON.parse(String(decision?.payload_json))).toMatchObject({
+      candidate: { entityText: fixture.candidate.entityText },
+      reviewedText,
+    });
+  });
+
+  it("fails closed on incomplete, insecure, oversized, or mismatched ingredient evidence", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const fixture = robotoffIngredientEvidence(product.gtin, "strict");
+    const review = await insertIngredientReview({ suffix: "strict", evidence: fixture.evidence });
+    const request = (body: Record<string, unknown>) => worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "verify_ingredients",
+        rationale: "Reviewed against the current package label",
+        reviewedText: fixture.candidate.entityText,
+        ...body,
+      }),
+    });
+    expect((await request({})).status).toBe(400);
+    expect((await request({ evidenceUrl: "http://images.openfoodfacts.org/insecure.jpg" })).status).toBe(400);
+    expect((await request({ evidenceUrl: fixture.candidate.imageUrl, reviewedText: "x".repeat(25_001) })).status).toBe(400);
+    expect((await request({ evidenceUrl: "https://images.openfoodfacts.org/images/products/different.jpg" })).status).toBe(400);
+    const stillOpen = await env.DB.prepare("SELECT status FROM review_items WHERE id = ?")
+      .bind(review.reviewId).first<{ status: string }>();
+    expect(stillOpen?.status).toBe("open");
+    const durable = await env.DB.prepare("SELECT COUNT(*) AS count FROM evidence_decisions WHERE id = ?")
+      .bind(`evd_${review.reviewId}`).first<{ count: number }>();
+    expect(durable?.count).toBe(0);
+  });
+
+  it("allows only one concurrent decision for the exact ingredient candidate", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const fixture = robotoffIngredientEvidence(product.gtin, "concurrent");
+    const review = await insertIngredientReview({ suffix: "concurrent", evidence: fixture.evidence });
+    const resolve = () => worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "verify_ingredients",
+        rationale: "Concurrent verification against the current package label",
+        evidenceUrl: fixture.candidate.imageUrl,
+        reviewedText: fixture.candidate.entityText,
+      }),
+    });
+    const responses = await Promise.all([resolve(), resolve()]);
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 409]);
+    const state = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE id = ?) AS decisions,
+      (SELECT COUNT(*) FROM ingredient_statements WHERE product_id = ? AND source_record_id = ? AND status = 'verified') AS verified,
+      (SELECT COUNT(*) FROM review_items WHERE id = ? AND status = 'resolved') AS resolved`)
+      .bind(`evd_${review.reviewId}`, review.productId, review.sourceRecordId, review.reviewId)
+      .first<{ decisions: number; verified: number; resolved: number }>();
+    expect(state).toEqual({ decisions: 1, verified: 1, resolved: 1 });
+  });
+
+  it("rejects only the exact ingredient candidate and preserves community ingredients", async () => {
+    const product = await env.DB.prepare(`SELECT p.gtin, i.source_record_id, i.raw_text, i.status, i.authority,
+      eo.outcome AS prior_outcome, eo.source_record_id AS prior_outcome_source
+      FROM products p JOIN ingredient_statements i ON i.product_id = p.id
+      LEFT JOIN evidence_outcomes eo ON eo.product_id = p.id AND eo.field_family = 'ingredients'
+      WHERE p.is_active = 1 AND p.gtin IS NOT NULL ORDER BY p.id LIMIT 1`)
+      .first<{
+        gtin: string;
+        source_record_id: string;
+        raw_text: string;
+        status: string;
+        authority: number;
+        prior_outcome: string | null;
+        prior_outcome_source: string | null;
+      }>();
+    if (!product) throw new Error("Expected seeded ingredients");
+    const fixture = robotoffIngredientEvidence(product.gtin, "reject");
+    const review = await insertIngredientReview({ suffix: "reject", evidence: fixture.evidence });
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "reject_ingredients",
+        rationale: "Image belongs to an older package variant",
+      }),
+    });
+    expect(response.status).toBe(200);
+    const unchanged = await env.DB.prepare(`SELECT source_record_id, raw_text, status, authority
+      FROM ingredient_statements WHERE product_id = ?`).bind(review.productId).first<Record<string, unknown>>();
+    expect(unchanged).toEqual({
+      source_record_id: product.source_record_id,
+      raw_text: product.raw_text,
+      status: product.status,
+      authority: product.authority,
+    });
+    const decision = await env.DB.prepare(`SELECT field_family, decision, payload_json, evidence_url
+      FROM evidence_decisions WHERE id = ?`).bind(`evd_${review.reviewId}`).first<Record<string, unknown>>();
+    expect(decision).toMatchObject({
+      field_family: "ingredients",
+      decision: "reject",
+      evidence_url: fixture.candidate.imageUrl,
+    });
+    expect(JSON.parse(String(decision?.payload_json))).toMatchObject({ reviewedText: null });
+    const outcome = await env.DB.prepare(`SELECT outcome, source_record_id FROM evidence_outcomes
+      WHERE product_id = ? AND field_family = 'ingredients'`).bind(review.productId).first();
+    expect(outcome).toEqual(product.prior_outcome === null ? null : {
+      outcome: product.prior_outcome,
+      source_record_id: product.prior_outcome_source,
+    });
+  });
+
   it("fails atomically when an evidence decision id conflicts", async () => {
     const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
       .first<{ gtin: string }>();
@@ -472,6 +822,86 @@ describe("Worker catalog API", () => {
     expect(staleOutcome?.count).toBe(0);
   });
 
+  it("reconstructs unchanged ingredient decisions and invalidates drifted evidence", async () => {
+    await applyQueries(env.TEST_INGREDIENT_REPLAY_QUERIES);
+    const review = await env.DB.prepare(`SELECT r.id, r.evidence_json, r.source_record_id, r.product_id
+      FROM review_items r JOIN source_records s ON s.id = r.source_record_id
+      WHERE s.source_id = 'open_food_facts_robotoff_ingredients'
+        AND s.source_record_id = '08900000000012:1901:0' AND r.status = 'open'`)
+      .first<{ id: string; evidence_json: string; source_record_id: string; product_id: string }>();
+    if (!review) throw new Error("Expected ingredient replay review");
+    const evidence = JSON.parse(review.evidence_json) as { details?: { candidate?: { entityText?: string; imageUrl?: string } } };
+    const reviewedText = evidence.details?.candidate?.entityText;
+    const evidenceUrl = evidence.details?.candidate?.imageUrl;
+    if (!reviewedText || !evidenceUrl) throw new Error("Expected complete ingredient replay evidence");
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.id}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "verify_ingredients",
+        rationale: "Synthetic ingredient replay verification against the current package image",
+        evidenceUrl,
+        reviewedText,
+      }),
+    });
+    expect(response.status).toBe(200);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM ingredient_statements WHERE product_id = ?").bind(review.product_id),
+      env.DB.prepare("DELETE FROM product_ingredients WHERE product_id = ? AND source_record_id = ?")
+        .bind(review.product_id, review.source_record_id),
+      env.DB.prepare("DELETE FROM field_observations WHERE product_id = ? AND source_record_id = ? AND field_path = 'ingredients.raw'")
+        .bind(review.product_id, review.source_record_id),
+      env.DB.prepare("DELETE FROM evidence_outcomes WHERE product_id = ? AND field_family = 'ingredients'")
+        .bind(review.product_id),
+    ]);
+    await applyQueries(env.TEST_INGREDIENT_REPLAY_QUERIES);
+
+    const reconstructed = await env.DB.prepare(`SELECT raw_text, language, status, confidence, authority
+      FROM ingredient_statements WHERE product_id = ?`).bind(review.product_id).first<Record<string, unknown>>();
+    expect(reconstructed).toEqual({
+      raw_text: reviewedText,
+      language: "en",
+      status: "verified",
+      confidence: "high",
+      authority: 100,
+    });
+    const replayState = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM product_ingredients WHERE product_id = ? AND source_record_id = ?) AS ingredients,
+      (SELECT COUNT(*) FROM field_observations WHERE product_id = ? AND source_record_id = ? AND field_path = 'ingredients.raw' AND selected = 1) AS selected,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE product_id = ? AND field_family = 'ingredients' AND outcome = 'verified') AS outcomes,
+      (SELECT COUNT(*) FROM review_items WHERE source_record_id = ? AND status = 'open') AS unresolved`)
+      .bind(
+        review.product_id,
+        review.source_record_id,
+        review.product_id,
+        review.source_record_id,
+        review.product_id,
+        review.source_record_id,
+      ).first<{ ingredients: number; selected: number; outcomes: number; unresolved: number }>();
+    expect(replayState).toEqual({ ingredients: 2, selected: 1, outcomes: 1, unresolved: 0 });
+
+    await applyQueries(env.TEST_INGREDIENT_DRIFT_QUERIES);
+    const drifted = await env.DB.prepare(`SELECT r.status, r.evidence_json FROM review_items r
+      JOIN source_records s ON s.id = r.source_record_id
+      WHERE s.source_id = 'open_food_facts_robotoff_ingredients'
+        AND s.source_record_id = '08900000000012:1901:0' AND r.status = 'open'
+      ORDER BY r.created_at DESC LIMIT 1`).first<{ status: string; evidence_json: string }>();
+    expect(drifted?.status).toBe("open");
+    const driftEvidence = JSON.parse(drifted?.evidence_json ?? "null") as { details?: { candidateHash?: string } };
+    const priorDecision = await env.DB.prepare(`SELECT candidate_hash FROM evidence_decisions
+      WHERE source_record_key = '08900000000012:1901:0' AND field_family = 'ingredients'`)
+      .first<{ candidate_hash: string }>();
+    expect(driftEvidence.details?.candidateHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(driftEvidence.details?.candidateHash).not.toBe(priorDecision?.candidate_hash);
+    const invalidated = await env.DB.prepare(`SELECT
+      (SELECT status FROM ingredient_statements WHERE product_id = ?) AS status,
+      (SELECT COUNT(*) FROM field_observations WHERE product_id = ? AND source_record_id = ? AND field_path = 'ingredients.raw' AND selected = 1) AS selected,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE product_id = ? AND field_family = 'ingredients') AS outcomes`)
+      .bind(review.product_id, review.product_id, review.source_record_id, review.product_id)
+      .first<{ status: string; selected: number; outcomes: number }>();
+    expect(invalidated).toEqual({ status: "conflict", selected: 0, outcomes: 0 });
+  });
+
   it("applies a review bundle idempotently and exposes partial-application postcondition failure", async () => {
     await applyQueries(env.TEST_REVIEW_BUNDLE_SOURCE_QUERIES);
     const source = await env.DB.prepare(`SELECT id, product_id FROM source_records
@@ -515,6 +945,59 @@ describe("Worker catalog API", () => {
       .bind(source.product_id, source.id, source.product_id, source.id)
       .first<{ decisions: number; selected: number; nutrients: number }>();
     expect(replayed).toEqual({ decisions: 1, selected: 4, nutrients: 4 });
+  });
+
+  it("applies an ingredient review bundle idempotently with exact source-linked facts", async () => {
+    await applyQueries(env.TEST_INGREDIENT_BUNDLE_SOURCE_QUERIES);
+    const source = await env.DB.prepare(`SELECT id, product_id FROM source_records
+      WHERE source_id = 'open_food_facts_robotoff_ingredients'
+        AND source_record_id = '08900000000012:1904:0'`)
+      .first<{ id: string; product_id: string }>();
+    if (!source?.product_id) throw new Error("Expected ingredient review bundle source record");
+    const applyStatements = env.TEST_INGREDIENT_BUNDLE_APPLY_QUERIES.filter((query) => !query.startsWith("SELECT "));
+    const first = applyStatements[0];
+    if (!first) throw new Error("Expected ingredient bundle decision statement");
+    await env.DB.prepare(first).run();
+    const partial = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE id = 'evd_ingredient_bundle_fixture') AS decisions,
+      (SELECT COUNT(*) FROM ingredient_statements WHERE product_id = ? AND source_record_id = ? AND status = 'verified') AS verified,
+      (SELECT COUNT(*) FROM review_items WHERE source_record_id = ? AND status = 'open') AS unresolved`)
+      .bind(source.product_id, source.id, source.id)
+      .first<{ decisions: number; verified: number; unresolved: number }>();
+    expect(partial).toEqual({ decisions: 1, verified: 0, unresolved: 1 });
+
+    await applyQueries(applyStatements);
+    const applied = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE id = 'evd_ingredient_bundle_fixture') AS decisions,
+      (SELECT COUNT(*) FROM ingredient_statements WHERE product_id = ? AND source_record_id = ? AND status = 'verified' AND authority = 100) AS verified,
+      (SELECT COUNT(*) FROM product_ingredients WHERE product_id = ? AND source_record_id = ?) AS ingredients,
+      (SELECT COUNT(*) FROM field_observations WHERE product_id = ? AND source_record_id = ? AND field_path = 'ingredients.raw' AND selected = 1) AS selected,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE product_id = ? AND field_family = 'ingredients' AND source_record_id = ? AND outcome = 'verified') AS outcomes,
+      (SELECT COUNT(*) FROM review_items WHERE source_record_id = ? AND status = 'open') AS unresolved`)
+      .bind(
+        source.product_id, source.id,
+        source.product_id, source.id,
+        source.product_id, source.id,
+        source.product_id, source.id,
+        source.id,
+      ).first<{ decisions: number; verified: number; ingredients: number; selected: number; outcomes: number; unresolved: number }>();
+    expect(applied).toEqual({ decisions: 1, verified: 1, ingredients: 3, selected: 1, outcomes: 1, unresolved: 0 });
+    const statement = await env.DB.prepare("SELECT raw_text, language, observed_at FROM ingredient_statements WHERE product_id = ?")
+      .bind(source.product_id).first<Record<string, unknown>>();
+    expect(statement).toEqual({
+      raw_text: "Defatted soy flour 100%, salt, spices",
+      language: "en",
+      observed_at: "2026-07-15T09:00:00.000Z",
+    });
+
+    await applyQueries(applyStatements);
+    const replayed = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE id = 'evd_ingredient_bundle_fixture') AS decisions,
+      (SELECT COUNT(*) FROM product_ingredients WHERE product_id = ? AND source_record_id = ?) AS ingredients,
+      (SELECT COUNT(*) FROM field_observations WHERE product_id = ? AND source_record_id = ? AND field_path = 'ingredients.raw' AND selected = 1) AS selected`)
+      .bind(source.product_id, source.id, source.product_id, source.id)
+      .first<{ decisions: number; ingredients: number; selected: number }>();
+    expect(replayed).toEqual({ decisions: 1, ingredients: 3, selected: 1 });
   });
 
   it("fails closed when Robotoff review evidence is incomplete", async () => {

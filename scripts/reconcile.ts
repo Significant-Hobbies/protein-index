@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
 import { nutritionCandidateFromEvidence, nutritionCandidateHash, type NutritionCandidate } from "../shared/evidence-decisions";
+import { ingredientCandidateFromEvidence, ingredientCandidateHash, type IngredientCandidate } from "../shared/ingredient-evidence";
 import { compositeIdentityKey, normalizeText } from "../shared/gtin";
 import type { NormalizedIngredient, SourceManifest, StagedProduct } from "../shared/types";
 
@@ -65,6 +66,11 @@ interface NutritionDecisionCandidate {
   candidateHash: string;
 }
 
+interface IngredientDecisionCandidate {
+  candidate: IngredientCandidate;
+  candidateHash: string;
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -81,6 +87,23 @@ async function nutritionDecisionCandidate(product: StagedProduct): Promise<Nutri
   return declaredHash === undefined || computedHash === declaredHash
     ? { candidate, candidateHash: computedHash }
     : null;
+}
+
+async function ingredientDecisionCandidate(product: StagedProduct): Promise<IngredientDecisionCandidate | null> {
+  const issue = product.validationIssues.find(({ code }) => code === "robotoff_ingredient_candidate");
+  const details = record(issue?.details);
+  const declaredHash = details?.candidateHash;
+  if (!issue || (declaredHash !== undefined && typeof declaredHash !== "string")) return null;
+  try {
+    const candidate = ingredientCandidateFromEvidence(issue, product.gtin);
+    if (!candidate) return null;
+    const computedHash = await ingredientCandidateHash(candidate);
+    return declaredHash === undefined || computedHash === declaredHash
+      ? { candidate, candidateHash: computedHash }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function flattenIngredients(
@@ -128,6 +151,7 @@ export async function emitImportSql(input: {
     const sourceRecordId = stableId("src", `${product.source}:${product.sourceRecordId}`);
     const identityHash = identityEvidenceHash(product);
     const nutritionCandidate = await nutritionDecisionCandidate(product);
+    const ingredientCandidate = await ingredientDecisionCandidate(product);
     const decisionProductSql = `(SELECT d.target_product_id FROM identity_decisions d WHERE d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.identity_hash = ${sql(identityHash)} AND d.active = 1 ORDER BY d.decided_at DESC LIMIT 1)`;
     const decisionKindSql = `(SELECT d.decision FROM identity_decisions d WHERE d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.identity_hash = ${sql(identityHash)} AND d.active = 1 ORDER BY d.decided_at DESC LIMIT 1)`;
     const productIdSql = `COALESCE(${decisionProductSql}, ${sql(productId)})`;
@@ -224,6 +248,52 @@ export async function emitImportSql(input: {
       );
     }
 
+    const ingredientDecisionWhere = ingredientCandidate
+      ? `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.source_record_id = ${sql(sourceRecordId)} AND d.source_content_hash = ${sql(product.contentHash)} AND d.product_id = ${productIdSql} AND d.candidate_hash = ${sql(ingredientCandidate.candidateHash)} AND d.field_family = 'ingredients' AND d.active = 1`
+      : null;
+    if (ingredientCandidate && ingredientDecisionWhere) {
+      const verifyWhere = `${ingredientDecisionWhere} AND d.decision = 'verify'`;
+      const driftWhere = `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.product_id = ${productIdSql} AND d.field_family = 'ingredients' AND d.active = 1 AND (d.source_content_hash <> ${sql(product.contentHash)} OR d.candidate_hash <> ${sql(ingredientCandidate.candidateHash)})`;
+      await write(
+        output,
+        `UPDATE ingredient_statements SET status = 'conflict', confidence = 'low', authority = MIN(authority, 20), updated_at = ${sql(now)} WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${ingredientDecisionWhere});`,
+      );
+      await write(
+        output,
+        `UPDATE field_observations SET selected = 0 WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND field_path = 'ingredients.raw' AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${ingredientDecisionWhere});`,
+      );
+      await write(
+        output,
+        `DELETE FROM evidence_outcomes WHERE product_id = ${productIdSql} AND field_family = 'ingredients' AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${ingredientDecisionWhere});`,
+      );
+      await write(
+        output,
+        `INSERT INTO ingredient_statements (product_id, source_record_id, raw_text, language, status, confidence, authority, observed_at, updated_at) SELECT d.product_id, d.source_record_id, json_extract(d.payload_json, '$.reviewedText'), json_extract(d.payload_json, '$.candidate.language.code'), 'verified', 'high', 100, json_extract(d.payload_json, '$.candidate.observedAt'), d.decided_at FROM evidence_decisions d WHERE ${verifyWhere} ORDER BY d.decided_at DESC LIMIT 1 ON CONFLICT(product_id) DO UPDATE SET source_record_id = excluded.source_record_id, raw_text = excluded.raw_text, language = excluded.language, status = excluded.status, confidence = excluded.confidence, authority = excluded.authority, observed_at = excluded.observed_at, updated_at = excluded.updated_at;`,
+      );
+      await write(
+        output,
+        `DELETE FROM product_ingredients WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${verifyWhere});`,
+      );
+      await write(
+        output,
+        `WITH RECURSIVE decision AS (SELECT d.* FROM evidence_decisions d WHERE ${verifyWhere} ORDER BY d.decided_at DESC LIMIT 1), ingredient_nodes(path, parent_path, position, raw_text, normalized_name, percentage, children) AS (SELECT CAST(root.key AS TEXT), NULL, CAST(json_extract(root.value, '$.position') AS INTEGER), json_extract(root.value, '$.raw'), json_extract(root.value, '$.normalizedName'), json_extract(root.value, '$.percentage'), json_extract(root.value, '$.children') FROM decision d, json_each(d.payload_json, '$.normalizedIngredients') root UNION ALL SELECT ingredient_nodes.path || '.' || child.key, ingredient_nodes.path, CAST(json_extract(child.value, '$.position') AS INTEGER), json_extract(child.value, '$.raw'), json_extract(child.value, '$.normalizedName'), json_extract(child.value, '$.percentage'), json_extract(child.value, '$.children') FROM ingredient_nodes, json_each(ingredient_nodes.children) child) INSERT INTO product_ingredients (id, product_id, source_record_id, parent_id, position, raw_text, normalized_name, percentage, resolved) SELECT 'ing_reviewed_' || substr(d.candidate_hash, 1, 16) || '_' || replace(n.path, '.', '_'), d.product_id, d.source_record_id, CASE WHEN n.parent_path IS NULL THEN NULL ELSE 'ing_reviewed_' || substr(d.candidate_hash, 1, 16) || '_' || replace(n.parent_path, '.', '_') END, n.position, n.raw_text, n.normalized_name, n.percentage, CASE WHEN n.normalized_name IS NULL THEN 0 ELSE 1 END FROM decision d, ingredient_nodes n;`,
+      );
+      await write(
+        output,
+        `UPDATE field_observations SET selected = 0 WHERE product_id = ${productIdSql} AND field_path = 'ingredients.raw' AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${verifyWhere});`,
+      );
+      const reviewedIngredientValueHash = `reviewed:${ingredientCandidate.candidateHash}:ingredients.raw`;
+      const reviewedIngredientObservationId = stableId("obs", `${sourceRecordId}:${reviewedIngredientValueHash}`);
+      await write(
+        output,
+        `INSERT INTO field_observations (id, product_id, source_record_id, field_path, raw_value_json, normalized_value_json, confidence, authority, observed_at, evidence_url, selected, value_hash) SELECT ${sql(reviewedIngredientObservationId)}, d.product_id, d.source_record_id, 'ingredients.raw', json_quote(json_extract(d.payload_json, '$.reviewedText')), json(json_extract(d.payload_json, '$.normalizedIngredients')), 'high', 100, json_extract(d.payload_json, '$.candidate.observedAt'), d.evidence_url, 1, ${sql(reviewedIngredientValueHash)} FROM evidence_decisions d WHERE ${verifyWhere} ORDER BY d.decided_at DESC LIMIT 1 ON CONFLICT(source_record_id, field_path, value_hash) DO UPDATE SET product_id = excluded.product_id, raw_value_json = excluded.raw_value_json, normalized_value_json = excluded.normalized_value_json, confidence = excluded.confidence, authority = excluded.authority, observed_at = excluded.observed_at, evidence_url = excluded.evidence_url, selected = 1;`,
+      );
+      await write(
+        output,
+        `INSERT INTO evidence_outcomes (product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by, notes) SELECT d.product_id, 'ingredients', 'verified', d.source_record_id, d.evidence_url, json_extract(d.payload_json, '$.candidate.observedAt'), d.decided_at, d.decided_by, d.rationale FROM evidence_decisions d WHERE ${verifyWhere} ORDER BY d.decided_at DESC LIMIT 1 ON CONFLICT(product_id, field_family) DO UPDATE SET outcome = excluded.outcome, source_record_id = excluded.source_record_id, evidence_url = excluded.evidence_url, observed_at = excluded.observed_at, verified_at = excluded.verified_at, decided_by = excluded.decided_by, notes = excluded.notes;`,
+      );
+    }
+
     if (product.ingredients.status !== "missing") {
       await write(
         output,
@@ -304,16 +374,30 @@ export async function emitImportSql(input: {
     }
 
     for (const issue of product.validationIssues) {
-      const type = issue.code === "invalid_gtin" ? "invalid_gtin" : issue.code.startsWith("invalid_ingredient") ? "ingredient_conflict" : "nutrition_validation";
+      const isIngredientCandidate = issue.code === "robotoff_ingredient_candidate" && ingredientCandidate !== null;
+      const type = issue.code === "invalid_gtin"
+        ? "invalid_gtin"
+        : issue.code.startsWith("invalid_ingredient") || isIngredientCandidate
+          ? "ingredient_conflict"
+          : "nutrition_validation";
       const reviewIdentity = issue.code === "robotoff_nutrition_candidate" && nutritionCandidate
         ? `${sourceRecordId}:${issue.code}:${issue.field}:${product.contentHash}:${nutritionCandidate.candidateHash}`
+        : isIngredientCandidate
+          ? `${sourceRecordId}:${issue.code}:${issue.field}:${product.contentHash}:${ingredientCandidate.candidateHash}`
         : `${sourceRecordId}:${issue.code}:${issue.field}`;
       const reviewId = stableId("rev", reviewIdentity);
-      const matchingDecisionAbsent = issue.code === "robotoff_nutrition_candidate" && nutritionDecisionWhere
-        ? `NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${nutritionDecisionWhere})`
+      const matchingDecisionWhere = issue.code === "robotoff_nutrition_candidate"
+        ? nutritionDecisionWhere
+        : isIngredientCandidate
+          ? ingredientDecisionWhere
+          : null;
+      const matchingDecisionAbsent = matchingDecisionWhere
+        ? `NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${matchingDecisionWhere})`
         : "1 = 1";
       const reviewEvidence = issue.code === "robotoff_nutrition_candidate" && nutritionCandidate
         ? { ...issue, details: { ...issue.details, candidateHash: nutritionCandidate.candidateHash } }
+        : isIngredientCandidate
+          ? { ...issue, details: { ...issue.details, candidateHash: ingredientCandidate.candidateHash } }
         : issue;
       await write(
         output,
@@ -325,8 +409,16 @@ export async function emitImportSql(input: {
           `UPDATE review_items SET status = 'resolved', decision = CASE (SELECT d.decision FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1) WHEN 'verify' THEN 'verify_nutrition' ELSE 'reject_nutrition' END, decision_rationale = (SELECT d.rationale FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), decision_evidence_url = (SELECT d.evidence_url FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), decided_by = (SELECT d.decided_by FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), resolved_at = (SELECT d.decided_at FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1) WHERE id = ${sql(reviewId)} AND status = 'open' AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${nutritionDecisionWhere});`,
         );
       }
+      if (isIngredientCandidate && ingredientDecisionWhere) {
+        await write(
+          output,
+          `UPDATE review_items SET status = 'resolved', decision = CASE (SELECT d.decision FROM evidence_decisions d WHERE ${ingredientDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1) WHEN 'verify' THEN 'verify_ingredients' ELSE 'reject_ingredients' END, decision_rationale = (SELECT d.rationale FROM evidence_decisions d WHERE ${ingredientDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), decision_evidence_url = (SELECT d.evidence_url FROM evidence_decisions d WHERE ${ingredientDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), decided_by = (SELECT d.decided_by FROM evidence_decisions d WHERE ${ingredientDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), resolved_at = (SELECT d.decided_at FROM evidence_decisions d WHERE ${ingredientDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1) WHERE id = ${sql(reviewId)} AND status = 'open' AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${ingredientDecisionWhere});`,
+        );
+      }
     }
-    if (product.classification.marketed && product.nutrition.status !== "verified") {
+    if (product.source !== "open_food_facts_robotoff_ingredients"
+      && product.classification.marketed
+      && product.nutrition.status !== "verified") {
       const reviewId = stableId("rev", `${sourceRecordId}:coverage:verified_nutrition`);
       await write(
         output,

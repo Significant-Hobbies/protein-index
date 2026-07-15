@@ -71,7 +71,7 @@ without increasing label evidence.
 
 An immutable ingredient candidate contains:
 
-- prediction id, normalized barcode, image id and HTTPS image URL;
+- prediction id, entity index, normalized barcode, image id and HTTPS image URL;
 - model name/version and observation timestamp;
 - exact entity text and entity confidence;
 - detected language and confidence;

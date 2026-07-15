@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialFilters, metricEvidenceLabel, reviewNutritionCandidate } from "../src/App";
+import { initialFilters, metricEvidenceLabel, reviewIngredientCandidate, reviewNutritionCandidate } from "../src/App";
 import {
   canonicalJson,
   nutritionCandidateFromEvidence,
@@ -9,6 +9,15 @@ import {
 import { identityEvidenceHash } from "../scripts/reconcile";
 import { classifyProtein } from "../shared/classification";
 import { resolveIdentity } from "../shared/entity-resolution";
+import {
+  ingredientCandidateHash,
+  ingredientCandidateFromEvidence,
+  ingredientCandidatesConflict,
+  ingredientCandidateWarnings,
+  validateIngredientEvidenceDecision,
+  validateIngredientCandidate,
+  type IngredientCandidate,
+} from "../shared/ingredient-evidence";
 import { hasValidGtinCheckDigit, normalizeGtin, normalizeText, parseQuantity } from "../shared/gtin";
 import { invalidIngredientPercentages, parseAdditives, parseAllergens, parseIngredients } from "../shared/ingredients";
 import { calculateCompleteness, calculateMetrics } from "../shared/metrics";
@@ -138,6 +147,45 @@ describe("metrics and completeness", () => {
     expect(reviewNutritionCandidate({ code: "robotoff_image_conflict" })).toBeNull();
   });
 
+  it("parses complete ingredient evidence for side-by-side review and rejects unsafe images", () => {
+    const evidence = {
+      code: "robotoff_ingredient_candidate",
+      details: {
+        candidateHash: "a".repeat(64),
+        hasConflict: true,
+        warnings: [{ code: "low_language_confidence", message: "Check the detected language." }],
+        candidate: {
+          predictionId: "ingredient-1",
+          entityIndex: 0,
+          imageId: "label-1",
+          imageUrl: "https://images.openfoodfacts.org/ingredient.jpg",
+          modelName: "ingredient_detection",
+          modelVersion: "ingredient-detection-1.0",
+          predictedAt: "2026-07-15T01:00:00.000Z",
+          observedAt: "2026-07-15T00:00:00.000Z",
+          entityText: "Defatted soy flour 100%",
+          entityConfidence: 0.99,
+          language: { code: "en", confidence: 0.8 },
+          boundingBox: [1, 2, 300, 900],
+          parsedIngredients: [{ text: "Defatted soy flour", in_taxonomy: true }],
+          ingredientCount: 1,
+          knownIngredientCount: 1,
+          unknownIngredientCount: 0,
+        },
+      },
+    };
+    expect(reviewIngredientCandidate(evidence)).toMatchObject({
+      entityText: "Defatted soy flour 100%",
+      candidateHash: "a".repeat(64),
+      hasConflict: true,
+      warnings: [{ code: "low_language_confidence" }],
+    });
+    const unsafe = structuredClone(evidence);
+    unsafe.details.candidate.imageUrl = "javascript:alert(1)";
+    expect(reviewIngredientCandidate(unsafe)).toBeNull();
+    expect(reviewIngredientCandidate({ code: "robotoff_ingredient_candidate", details: { candidateHash: "bad" } })).toBeNull();
+  });
+
   it("hashes the exact canonical candidate and rejects decision drift", async () => {
     const evidence = {
       code: "robotoff_nutrition_candidate",
@@ -217,6 +265,137 @@ describe("metrics and completeness", () => {
 });
 
 describe("ingredient intelligence", () => {
+  const ingredientCandidate: IngredientCandidate = {
+    predictionId: "10477207",
+    entityIndex: 0,
+    barcode: "0001241000224",
+    imageId: "2",
+    imageUrl: "https://images.openfoodfacts.org/images/products/000/124/100/0224/2.jpg",
+    modelName: "ingredient_detection",
+    modelVersion: "ingredient-detection-1.0",
+    predictedAt: "2024-08-12T15:45:02.473405Z",
+    observedAt: "2024-08-10T04:07:50.000Z",
+    entityText: "Casein, Sucrose, Precooked Rice Flour, Bengal Gram.",
+    entityConfidence: 0.99999,
+    language: { code: "en", confidence: 0.61748207 },
+    boundingBox: [52, 79, 305, 1568],
+    parsedIngredients: [
+      { id: "en:casein", text: "Casein", in_taxonomy: true },
+      { id: "en:bengal-gram", text: "Bengal Gram", in_taxonomy: false },
+    ],
+    ingredientCount: 4,
+    knownIngredientCount: 2,
+    unknownIngredientCount: 2,
+  };
+
+  it("validates and hashes immutable ingredient candidates", async () => {
+    expect(validateIngredientCandidate(ingredientCandidate, { expectedGtin: "00001241000224" })).toEqual([]);
+    const hash = await ingredientCandidateHash(ingredientCandidate);
+    expect(hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(await ingredientCandidateHash({ ...ingredientCandidate, barcode: "00001241000224" })).toBe(hash);
+    expect(await ingredientCandidateHash({ ...ingredientCandidate, entityText: `${ingredientCandidate.entityText} Salt.` })).not.toBe(hash);
+  });
+
+  it("parses only complete ingredient candidates from review evidence", () => {
+    const evidence = { code: "robotoff_ingredient_candidate", details: { candidate: ingredientCandidate } };
+    expect(ingredientCandidateFromEvidence(evidence, "00001241000224")).toMatchObject({
+      predictionId: "10477207",
+      entityText: ingredientCandidate.entityText,
+    });
+    expect(ingredientCandidateFromEvidence({ code: "robotoff_ingredient_candidate", details: { candidate: { ...ingredientCandidate, imageUrl: "javascript:alert(1)" } } }, "00001241000224")).toBeNull();
+    expect(ingredientCandidateFromEvidence({ code: "robotoff_nutrition_candidate", details: { candidate: ingredientCandidate } }, "00001241000224")).toBeNull();
+  });
+
+  it("validates exact, corrected, and rejected ingredient decisions", async () => {
+    const candidateHash = await ingredientCandidateHash(ingredientCandidate);
+    const decision = {
+      id: "evd_ingredient",
+      sourceId: "open_food_facts_robotoff_ingredients",
+      sourceRecordKey: "00001241000224:10477207:0",
+      sourceRecordId: "src_ingredient",
+      sourceContentHash: "source_hash",
+      productId: "prd_ingredient",
+      candidateHash,
+      fieldFamily: "ingredients" as const,
+      decision: "verify" as const,
+      payload: {
+        candidate: ingredientCandidate,
+        reviewedText: ingredientCandidate.entityText,
+        normalizedIngredients: parseIngredients(ingredientCandidate.entityText),
+      },
+      evidenceUrl: ingredientCandidate.imageUrl,
+      rationale: "Exact current ingredient label reviewed",
+      decidedBy: "local_operator",
+      decidedAt: "2026-07-16T00:00:00.000Z",
+    };
+    expect(await validateIngredientEvidenceDecision(decision)).toEqual([]);
+    expect(await validateIngredientEvidenceDecision({
+      ...decision,
+      payload: {
+        ...decision.payload,
+        reviewedText: "Casein, Sucrose, Precooked Rice Flour, Edible Vegetable Fat Solids, Bengal Gram.",
+        normalizedIngredients: parseIngredients("Casein, Sucrose, Precooked Rice Flour, Edible Vegetable Fat Solids, Bengal Gram."),
+      },
+      rationale: "Corrected visible OCR errors against the current label",
+    })).toEqual([]);
+    expect(await validateIngredientEvidenceDecision({
+      ...decision,
+      decision: "reject",
+      payload: { ...decision.payload, reviewedText: null, normalizedIngredients: [] },
+    })).toEqual([]);
+    expect(await validateIngredientEvidenceDecision({ ...decision, candidateHash: "0".repeat(64) }))
+      .toContain("candidateHash does not match payload");
+    expect(await validateIngredientEvidenceDecision({ ...decision, evidenceUrl: "https://example.com/label.jpg" }))
+      .toContain("evidenceUrl must match the candidate label image");
+    expect(await validateIngredientEvidenceDecision({ ...decision, payload: { ...decision.payload, reviewedText: null, normalizedIngredients: [] } }))
+      .toContain("verify decisions require bounded reviewer-confirmed text");
+    expect(await validateIngredientEvidenceDecision({
+      ...decision,
+      payload: { ...decision.payload, reviewedText: "Milk solids 500%", normalizedIngredients: parseIngredients("Milk solids 500%") },
+      rationale: "Corrected invalid text against the label",
+    })).toContain("reviewedText contains an invalid ingredient percentage");
+  });
+
+  it("rejects malformed, low-confidence, and identity-mismatched candidates", () => {
+    expect(validateIngredientCandidate(
+      { ...ingredientCandidate, imageUrl: "https://example.com/label.jpg" },
+      { expectedGtin: "00001241000224" },
+    )).toContain("imageUrl must be an official Open Food Facts HTTPS image");
+    expect(validateIngredientCandidate(
+      { ...ingredientCandidate, entityConfidence: 0.84 },
+      { expectedGtin: "00001241000224", confidenceThreshold: 0.85 },
+    )).toContain("entityConfidence is outside the admitted range");
+    expect(validateIngredientCandidate(
+      { ...ingredientCandidate, barcode: "8900000000012" },
+      { expectedGtin: "00001241000224" },
+    )).toContain("barcode does not match expectedGtin");
+    expect(validateIngredientCandidate(
+      { ...ingredientCandidate, ingredientCount: 5 },
+      { expectedGtin: "00001241000224" },
+    )).toContain("ingredient counts do not reconcile");
+  });
+
+  it("keeps duplicate text stable and flags materially conflicting text", () => {
+    expect(ingredientCandidatesConflict([
+      ingredientCandidate,
+      { ...ingredientCandidate, imageId: "3", entityText: `  ${ingredientCandidate.entityText.toUpperCase()}  ` },
+    ])).toBe(false);
+    expect(ingredientCandidatesConflict([
+      ingredientCandidate,
+      { ...ingredientCandidate, imageId: "3", entityText: "Casein, Sucrose, Peanut Flour." },
+    ])).toBe(true);
+  });
+
+  it("surfaces low taxonomy and language confidence as review warnings", () => {
+    expect(ingredientCandidateWarnings({
+      ...ingredientCandidate,
+      language: { code: "en", confidence: 0.4 },
+      ingredientCount: 8,
+      knownIngredientCount: 3,
+      unknownIngredientCount: 5,
+    }).map(({ code }) => code)).toEqual(["low_language_confidence", "low_taxonomy_recognition"]);
+  });
+
   it("preserves ordered compound ingredients and percentages", () => {
     const parsed = parseIngredients("Whey blend 70% (concentrate, isolate), cocoa 8%, flavour");
     expect(parsed.map(({ normalizedName }) => normalizedName)).toEqual(["whey blend", "cocoa", "flavour"]);

@@ -1,0 +1,164 @@
+name: Extract ingredient label evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful Source sync workflow run ID containing the production Open Food Facts snapshot
+        required: true
+        type: string
+      expected_input_hash:
+        description: Optional source-export SHA-256 to pin this run
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: open-food-facts-robotoff-ingredient-extraction
+  cancel-in-progress: false
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      EXPECTED_INPUT_HASH: ${{ inputs.expected_input_hash || '' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download source-complete snapshot
+        uses: actions/github-script@v9
+        env:
+          RUN_ID: ${{ env.SOURCE_RUN_ID }}
+        with:
+          script: |
+            const fs = require('fs');
+            const runId = Number(process.env.RUN_ID);
+            if (!Number.isSafeInteger(runId) || runId <= 0) throw new Error('source_run_id must be a positive workflow run ID');
+            const response = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+              per_page: 100,
+            });
+            const expectedName = `open-food-facts-snapshot-${runId}`;
+            const artifact = response.data.artifacts.find((candidate) => candidate.name === expectedName && !candidate.expired);
+            if (!artifact) throw new Error(`Source artifact ${expectedName} was not found or has expired`);
+            const download = await github.rest.actions.downloadArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: artifact.id,
+              archive_format: 'zip',
+            });
+            fs.writeFileSync('.data-source.zip', Buffer.from(download.data));
+
+      - name: Expand and validate source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .data/source-snapshot
+          unzip -q .data-source.zip -d .data/source-snapshot
+          cd .data/source-snapshot
+          sha256sum --check checksums.sha256
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile('manifest.json', 'utf8'));
+          const failures = [];
+          if (manifest.source !== 'open_food_facts') failures.push('unexpected source');
+          if (manifest.mode !== 'production') failures.push('source mode is not production');
+          if (manifest.sourceComplete !== true) failures.push('source is not complete');
+          if (manifest.terminalEvidence !== 'end_of_file') failures.push('source did not reach end-of-file');
+          if (process.env.EXPECTED_INPUT_HASH && manifest.inputHash !== process.env.EXPECTED_INPUT_HASH) failures.push('input hash differs from the requested hash');
+          if (failures.length) throw new Error(failures.join('; '));
+          NODE
+
+      - name: Extract every eligible ingredient label image
+        shell: bash
+        run: |
+          set -uo pipefail
+          status=1
+          for pass in 1 2 3 4; do
+            echo "Starting ingredient extraction pass $pass of 4"
+            set +e
+            pnpm data:extract -- \
+              --source robotoff-ingredients \
+              --input .data/source-snapshot/staged-products.jsonl \
+              --manifest .data/source-snapshot/manifest.json \
+              --output .data/robotoff-ingredients \
+              --mode production \
+              --confidence-threshold 0.85 \
+              --minimum-interval-ms 1100 \
+              --maximum-attempts 4
+            status=$?
+            set -e
+            if [[ "$status" -eq 0 ]]; then
+              break
+            fi
+            if [[ "$pass" -lt 4 ]]; then
+              echo "Extraction remains incomplete; cooling down before resuming failed GTINs"
+              sleep 60
+            fi
+          done
+          exit "$status"
+
+      - name: Verify terminal cohort accounting and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .data/robotoff-ingredients
+          sha256sum --check checksums.sha256
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile('manifest.json', 'utf8'));
+          const report = JSON.parse(await readFile('report.json', 'utf8'));
+          const failures = [];
+          if (manifest.source !== 'open_food_facts_robotoff_ingredients') failures.push('unexpected extraction source');
+          if (manifest.mode !== 'production') failures.push('extraction mode is not production');
+          if (manifest.sourceComplete !== true || report.sourceComplete !== true) failures.push('extraction is incomplete');
+          if (manifest.terminalEvidence !== 'end_of_file') failures.push('eligible ingredient-image cohort was not exhausted');
+          if (report.accountedBarcodes !== report.requestedBarcodes) failures.push('GTIN accounting does not reconcile');
+          if (report.outcomes?.failed !== 0) failures.push('extraction contains failed GTINs');
+          if (!report.cohortHash) failures.push('cohort hash is missing');
+          if (failures.length) throw new Error(failures.join('; '));
+          NODE
+
+      - name: Upload review-gated ingredient candidates
+        uses: actions/upload-artifact@v7
+        with:
+          name: robotoff-ingredient-candidates-${{ github.run_id }}
+          compression-level: 9
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            .data/robotoff-ingredients/manifest.json
+            .data/robotoff-ingredients/report.json
+            .data/robotoff-ingredients/cohort.jsonl
+            .data/robotoff-ingredients/candidates.jsonl
+            .data/robotoff-ingredients/source-index.jsonl
+            .data/robotoff-ingredients/exclusions.jsonl
+            .data/robotoff-ingredients/outcomes.jsonl
+            .data/robotoff-ingredients/staged-products.jsonl
+            .data/robotoff-ingredients/responses/*.json
+            .data/robotoff-ingredients/checksums.sha256
+
+      - name: Upload extraction diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: robotoff-ingredient-diagnostics-${{ github.run_id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: .data/robotoff-ingredients/
