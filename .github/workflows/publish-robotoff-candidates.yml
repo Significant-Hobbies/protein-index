@@ -3,6 +3,14 @@ name: Publish reviewed label candidates
 on:
   workflow_dispatch:
     inputs:
+      candidate_family:
+        description: Review-gated candidate family to publish
+        required: true
+        default: nutrition
+        type: choice
+        options:
+          - nutrition
+          - ingredients
       extraction_run_id:
         description: Successful Robotoff extraction workflow run ID to publish
         required: true
@@ -28,6 +36,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CANDIDATE_FAMILY: ${{ inputs.candidate_family }}
       EXTRACTION_RUN_ID: ${{ inputs.extraction_run_id }}
       EXPECTED_INPUT_HASH: ${{ inputs.expected_input_hash }}
     steps:
@@ -53,13 +62,16 @@ jobs:
             const fs = require('fs');
             const runId = Number(process.env.RUN_ID);
             if (!Number.isSafeInteger(runId) || runId <= 0) throw new Error('extraction_run_id must be a positive workflow run ID');
+            const family = process.env.CANDIDATE_FAMILY;
+            if (!['nutrition', 'ingredients'].includes(family)) throw new Error('candidate_family is not supported');
             const response = await github.rest.actions.listWorkflowRunArtifacts({
               owner: context.repo.owner,
               repo: context.repo.repo,
               run_id: runId,
               per_page: 100,
             });
-            const expectedName = `robotoff-label-candidates-${runId}`;
+            const prefix = family === 'ingredients' ? 'robotoff-ingredient-candidates' : 'robotoff-label-candidates';
+            const expectedName = `${prefix}-${runId}`;
             const artifact = response.data.artifacts.find((candidate) => candidate.name === expectedName && !candidate.expired);
             if (!artifact) throw new Error(`Reviewed artifact ${expectedName} was not found or has expired`);
             const download = await github.rest.actions.downloadArtifact({
@@ -83,7 +95,10 @@ jobs:
           const manifest = JSON.parse(await readFile('manifest.json', 'utf8'));
           const report = JSON.parse(await readFile('report.json', 'utf8'));
           const failures = [];
-          if (manifest.source !== 'open_food_facts_robotoff') failures.push('unexpected extraction source');
+          const expectedSource = process.env.CANDIDATE_FAMILY === 'ingredients'
+            ? 'open_food_facts_robotoff_ingredients'
+            : 'open_food_facts_robotoff';
+          if (manifest.source !== expectedSource) failures.push('unexpected extraction source');
           if (manifest.mode !== 'production') failures.push('extraction mode is not production');
           if (manifest.sourceComplete !== true || report.sourceComplete !== true) failures.push('extraction is incomplete');
           if (manifest.terminalEvidence !== 'end_of_file') failures.push('extraction did not exhaust its eligible barcode set');
@@ -97,13 +112,25 @@ jobs:
         run: pnpm data:publish -- --input .data/publish-robotoff --remote --confirm-remote
 
       - name: Record candidate publication state
-        run: >-
-          pnpm exec wrangler d1 execute protein-index --remote --yes --json --command
-          "SELECT COUNT(*) AS source_records FROM source_records WHERE source_id = 'open_food_facts_robotoff';
-          SELECT COUNT(*) AS open_candidates FROM review_items r JOIN source_records s ON s.id = r.source_record_id
-          WHERE s.source_id = 'open_food_facts_robotoff' AND r.status = 'open'
-          AND json_extract(r.evidence_json, '$.code') = 'robotoff_nutrition_candidate';"
-          > .data/publish-robotoff/publication-state.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$CANDIDATE_FAMILY" == "ingredients" ]]; then
+            source_id="open_food_facts_robotoff_ingredients"
+            review_code="robotoff_ingredient_candidate"
+          elif [[ "$CANDIDATE_FAMILY" == "nutrition" ]]; then
+            source_id="open_food_facts_robotoff"
+            review_code="robotoff_nutrition_candidate"
+          else
+            echo "Unsupported candidate family: $CANDIDATE_FAMILY" >&2
+            exit 1
+          fi
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json --command \
+            "SELECT COUNT(*) AS source_records FROM source_records WHERE source_id = '$source_id';
+            SELECT COUNT(*) AS open_candidates FROM review_items r JOIN source_records s ON s.id = r.source_record_id
+            WHERE s.source_id = '$source_id' AND r.status = 'open'
+            AND json_extract(r.evidence_json, '$.code') = '$review_code';" \
+            > .data/publish-robotoff/publication-state.json
 
       - name: Checksum publication evidence
         if: always()
@@ -118,7 +145,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: label-candidate-publication-${{ github.run_id }}
+          name: review-candidate-publication-${{ github.run_id }}
           retention-days: 90
           if-no-files-found: warn
           path: |
