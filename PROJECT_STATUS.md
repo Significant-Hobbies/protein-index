@@ -69,6 +69,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — first real label candidate reviewed against its 3024×4032 package image and rejected because three declared values were not represented; the checksummed bundle contains zero verification decisions and does not inflate coverage
 - 2026-07-16 — all 17,615 nutrition image-level source records published to the production evidence ledger as review-only data, creating 1,556 open candidates while verified nutrition and ingredients correctly remained zero
 - 2026-07-16 — review-only ingredient extraction, exact reviewer transcription, durable replay/drift invalidation, checksum bundles, protected publication, and responsive evidence UI implemented; 57 unit/domain tests and 22 Worker+D1 tests pass
+- 2026-07-16 — first source-matched nutrition rejection published after exact remote source/hash validation; postconditions recorded one durable decision, promoted zero facts, and resolved only the rejected candidate
 
 ## Products
 
@@ -156,7 +157,8 @@ must pass desktop/mobile verification.
     required for every remaining product.
 13. Review the 1,556 open nutrition candidates against current package images;
     extraction confidence alone must never increase verified coverage.
-14. Publish a reviewed real decision bundle only after its exact source record is
-    present remotely; verify the live coverage delta and retain workflow diagnostics.
+14. Continue publishing real reviewed decisions only after exact source/hash
+    validation; every publication must verify the live coverage delta and retain
+    workflow diagnostics.
 15. Deploy the new label-review UI only after rendered desktop/mobile visual and
     accessibility verification succeeds.

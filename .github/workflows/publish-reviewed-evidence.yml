@@ -77,10 +77,13 @@ jobs:
           --expected-ledger-hash "$EXPECTED_LEDGER_HASH"
 
       - name: Read exact current source state before any write
-        run: >-
-          pnpm exec wrangler d1 execute protein-index --remote --yes --json
-          --file .data/publication/source-state.sql
-          > .data/publication/source-state.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          query="$(< .data/publication/source-state.sql)"
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json \
+            --command "$query" \
+            > .data/publication/source-state.json
 
       - name: Fail closed on source or candidate drift before any write
         run: >-
@@ -101,8 +104,9 @@ jobs:
             --output .data/publication/decision-state.sql \
             --kind decisions \
             --expected-ledger-hash "$EXPECTED_LEDGER_HASH"
+          query="$(< .data/publication/decision-state.sql)"
           pnpm exec wrangler d1 execute protein-index --remote --yes --json \
-            --file .data/publication/decision-state.sql \
+            --command "$query" \
             > .data/publication/decision-state.json
 
       - name: Fail closed on existing decision conflicts
@@ -127,8 +131,9 @@ jobs:
             --input .data/publication/bundle \
             --output .data/publication/postconditions.sql \
             --expected-ledger-hash "$EXPECTED_LEDGER_HASH"
+          query="$(< .data/publication/postconditions.sql)"
           pnpm exec wrangler d1 execute protein-index --remote --yes --json \
-            --file .data/publication/postconditions.sql \
+            --command "$query" \
             > .data/publication/postconditions.json
 
       - name: Verify decisions, facts, outcomes, and resolved candidates
