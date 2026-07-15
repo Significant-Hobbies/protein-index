@@ -294,7 +294,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
   const minimumIntervalMs = options.minimumIntervalMs ?? 6_500;
   const retryBaseMs = options.retryBaseMs ?? 2_000;
   const maximumAttempts = options.maximumAttempts ?? 5;
-  const minimumSplitBatchSize = options.minimumSplitBatchSize ?? Math.min(25, batchSize);
+  const minimumSplitBatchSize = options.minimumSplitBatchSize ?? 1;
   const maximumRequestBatchSize = options.maximumRequestBatchSize ?? Math.min(50, batchSize);
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 100) throw new Error("API enrichment batch size must be between 1 and 100.");
   if (!Number.isFinite(minimumIntervalMs) || minimumIntervalMs < 0) throw new Error("API enrichment interval must be non-negative.");

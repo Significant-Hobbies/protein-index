@@ -393,7 +393,6 @@ describe("Open Food Facts rich API enrichment", () => {
       minimumIntervalMs: 0,
       retryBaseMs: 0,
       maximumAttempts: 5,
-      minimumSplitBatchSize: 1,
       fetcher: async (input) => {
         requests += 1;
         const codes = new URL(input.toString()).searchParams.get("code")?.split(",") ?? [];
