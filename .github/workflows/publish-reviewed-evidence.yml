@@ -1,0 +1,158 @@
+name: Publish reviewed nutrition evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_commit:
+        description: Exact merged commit containing the reviewed decision bundle
+        required: true
+        type: string
+      bundle_path:
+        description: Bundle directory under review-decisions/
+        required: true
+        type: string
+      expected_ledger_hash:
+        description: Reviewed decisions.jsonl SHA-256 from manifest.json
+        required: true
+        type: string
+      confirm_remote:
+        description: Apply this exact reviewed bundle to production D1
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protein-index-production-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main' && inputs.confirm_remote
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BUNDLE_COMMIT: ${{ inputs.bundle_commit }}
+      BUNDLE_PATH: ${{ inputs.bundle_path }}
+      EXPECTED_LEDGER_HASH: ${{ inputs.expected_ledger_hash }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Extract only the merged reviewed bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$BUNDLE_COMMIT" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$BUNDLE_PATH" =~ ^review-decisions/review-[a-f0-9]{20}$ ]]
+          [[ "$EXPECTED_LEDGER_HASH" =~ ^[a-f0-9]{64}$ ]]
+          git cat-file -e "$BUNDLE_COMMIT^{commit}"
+          git merge-base --is-ancestor "$BUNDLE_COMMIT" origin/main
+          mkdir -p .data/publication/bundle
+          for file in manifest.json decisions.jsonl checksums.sha256; do
+            git show "$BUNDLE_COMMIT:$BUNDLE_PATH/$file" > ".data/publication/bundle/$file"
+          done
+
+      - name: Validate checksums and prepare source-state query
+        run: >-
+          pnpm exec tsx scripts/sync.ts review-query
+          --input .data/publication/bundle
+          --output .data/publication/source-state.sql
+          --kind source
+          --expected-ledger-hash "$EXPECTED_LEDGER_HASH"
+
+      - name: Read exact current source state before any write
+        run: >-
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json
+          --file .data/publication/source-state.sql
+          > .data/publication/source-state.json
+
+      - name: Fail closed on source or candidate drift before any write
+        run: >-
+          pnpm exec tsx scripts/sync.ts review-source-check
+          --input .data/publication/bundle
+          --state .data/publication/source-state.json
+          --output .data/publication/source-validation.json
+          --expected-ledger-hash "$EXPECTED_LEDGER_HASH"
+
+      - name: Apply the reviewed decision schema
+        run: pnpm exec wrangler d1 migrations apply protein-index --remote
+
+      - name: Read existing durable decision state
+        run: |
+          set -euo pipefail
+          pnpm exec tsx scripts/sync.ts review-query \
+            --input .data/publication/bundle \
+            --output .data/publication/decision-state.sql \
+            --kind decisions \
+            --expected-ledger-hash "$EXPECTED_LEDGER_HASH"
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json \
+            --file .data/publication/decision-state.sql \
+            > .data/publication/decision-state.json
+
+      - name: Fail closed on existing decision conflicts
+        run: >-
+          pnpm exec tsx scripts/sync.ts review-prepare
+          --input .data/publication/bundle
+          --source-state .data/publication/source-state.json
+          --decision-state .data/publication/decision-state.json
+          --output .data/publication/apply.sql
+          --plan .data/publication/plan.json
+          --expected-ledger-hash "$EXPECTED_LEDGER_HASH"
+
+      - name: Apply exact reviewed decisions
+        run: >-
+          pnpm exec wrangler d1 execute protein-index --remote --yes
+          --file .data/publication/apply.sql
+
+      - name: Query publication postconditions
+        run: |
+          set -euo pipefail
+          pnpm exec tsx scripts/sync.ts review-postquery \
+            --input .data/publication/bundle \
+            --output .data/publication/postconditions.sql \
+            --expected-ledger-hash "$EXPECTED_LEDGER_HASH"
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json \
+            --file .data/publication/postconditions.sql \
+            > .data/publication/postconditions.json
+
+      - name: Verify decisions, facts, outcomes, and resolved candidates
+        run: >-
+          pnpm exec tsx scripts/sync.ts review-postcheck
+          --input .data/publication/bundle
+          --state .data/publication/postconditions.json
+          --output .data/publication/report.json
+          --expected-ledger-hash "$EXPECTED_LEDGER_HASH"
+
+      - name: Checksum publication diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          find .data/publication -type f ! -name diagnostics.sha256 -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > .data/publication/diagnostics.sha256
+
+      - name: Upload publication diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reviewed-evidence-publication-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: warn
+          path: .data/publication/

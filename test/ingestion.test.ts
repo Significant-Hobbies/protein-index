@@ -12,10 +12,12 @@ import {
   emitReviewDecisionSql,
   readReviewDecisionBundle,
   validateExistingEvidenceDecisions,
+  validateReviewPostconditions,
+  validateReviewPublicationState,
   validateReviewDecisionSources,
   writeReviewDecisionBundle,
 } from "../scripts/review-bundles";
-import { nutritionCandidateFromEvidence, nutritionCandidateHash, type EvidenceDecisionInput } from "../shared/evidence-decisions";
+import { canonicalJson, nutritionCandidateFromEvidence, nutritionCandidateHash, type EvidenceDecisionInput } from "../shared/evidence-decisions";
 import type { SourceManifest } from "../shared/types";
 
 const indiaProduct = {
@@ -129,6 +131,74 @@ describe("Reviewed evidence bundles", () => {
     expect(sql).toContain("INSERT INTO nutrition_facts");
     expect(sql).toContain("SELECT COUNT(*) AS applied_decisions");
     expect(sql).toContain("SELECT COUNT(*) AS unresolved_candidates");
+    const sourceRows = parsed.decisions.map((item) => ({
+      source_id: item.sourceId,
+      source_record_key: item.sourceRecordKey,
+      source_record_id: item.sourceRecordId,
+      content_hash: item.sourceContentHash,
+      product_id: item.productId,
+      product_gtin: item.payload.barcode,
+    }));
+    expect(() => validateReviewPublicationState(parsed, [
+      { success: true, results: sourceRows },
+      { success: true, results: [] },
+    ])).not.toThrow();
+    const decisionRows = parsed.decisions.map((item) => ({
+      id: item.id,
+      source_id: item.sourceId,
+      source_record_key: item.sourceRecordKey,
+      source_record_id: item.sourceRecordId,
+      source_content_hash: item.sourceContentHash,
+      product_id: item.productId,
+      candidate_hash: item.candidateHash,
+      field_family: item.fieldFamily,
+      decision: item.decision,
+      payload_json: canonicalJson(item.payload),
+      evidence_url: item.evidenceUrl,
+      rationale: item.rationale,
+      decided_by: item.decidedBy,
+      decided_at: item.decidedAt,
+    }));
+    const nutrition = first.payload.nutritionPer100g;
+    const postconditions = [
+      { success: true, results: decisionRows },
+      { success: true, results: [{
+        product_id: first.productId,
+        source_record_id: first.sourceRecordId,
+        status: "verified",
+        authority: 100,
+        calories: nutrition.calories,
+        protein_grams: nutrition.proteinGrams,
+        carbohydrate_grams: nutrition.carbohydrateGrams,
+        sugar_grams: nutrition.sugarGrams,
+        fat_grams: nutrition.fatGrams,
+        saturated_fat_grams: nutrition.saturatedFatGrams,
+        fibre_grams: nutrition.fibreGrams,
+        sodium_mg: nutrition.sodiumMg,
+        label_verified_at: first.decidedAt,
+        observed_at: first.payload.observedAt,
+      }] },
+      { success: true, results: [{
+        product_id: first.productId,
+        outcome: "verified",
+        source_record_id: first.sourceRecordId,
+        evidence_url: first.evidenceUrl,
+        observed_at: first.payload.observedAt,
+        verified_at: first.decidedAt,
+        decided_by: first.decidedBy,
+      }] },
+      { success: true, results: [] },
+    ];
+    expect(validateReviewPostconditions(parsed, postconditions)).toMatchObject({
+      decisions: 2,
+      verifiedFacts: 1,
+      verifiedOutcomes: 1,
+      unresolvedCandidates: 0,
+    });
+    expect(() => validateReviewPostconditions(parsed, [
+      postconditions[0], postconditions[1], postconditions[2],
+      { success: true, results: [{ id: "rev_still_open" }] },
+    ])).toThrow("remain unresolved");
   });
 
   it("refuses empty, invalid, tampered, and unsafe review bundles", async () => {

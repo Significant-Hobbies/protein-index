@@ -45,6 +45,19 @@ export interface ReviewDecisionSqlPlan {
   expectedResolvedCandidates: number;
 }
 
+interface D1JsonResult {
+  success?: boolean;
+  results?: Array<Record<string, unknown>>;
+}
+
+export interface ReviewPublicationPostconditions {
+  ledgerSha256: string;
+  decisions: number;
+  verifiedFacts: number;
+  verifiedOutcomes: number;
+  unresolvedCandidates: number;
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -178,11 +191,16 @@ export async function writeReviewDecisionBundle(input: {
   if (input.decisions.length === 0) throw new Error("Refusing to create an empty review decision bundle");
   const decisions = [...input.decisions].sort((left, right) => left.id.localeCompare(right.id));
   const seen = new Set<string>();
+  const verifiedProducts = new Set<string>();
   for (const decision of decisions) {
     if (seen.has(decision.id)) throw new Error(`Duplicate decision id: ${decision.id}`);
     seen.add(decision.id);
     const errors = await validateEvidenceDecision(decision);
     if (errors.length > 0) throw new Error(`Decision ${decision.id} is invalid: ${errors.join("; ")}`);
+    if (decision.decision === "verify" && verifiedProducts.has(decision.productId)) {
+      throw new Error(`Multiple verify decisions target product ${decision.productId}`);
+    }
+    if (decision.decision === "verify") verifiedProducts.add(decision.productId);
   }
   const ledger = `${decisions.map((decision) => canonicalJson(decision)).join("\n")}\n`;
   const ledgerSha256 = sha256Text(ledger);
@@ -232,6 +250,7 @@ export async function readReviewDecisionBundle(directory: string): Promise<Revie
   const decisions: EvidenceDecisionInput[] = [];
   const ids = new Set<string>();
   const candidateKeys = new Set<string>();
+  const verifiedProducts = new Set<string>();
   for (const line of lines) {
     const parsed = parseDecision(JSON.parse(line) as unknown);
     const errors = await validateEvidenceDecision(parsed);
@@ -242,6 +261,10 @@ export async function readReviewDecisionBundle(directory: string): Promise<Revie
     const candidateKey = `${parsed.sourceId}\u0000${parsed.sourceRecordKey}\u0000${parsed.candidateHash}\u0000${parsed.fieldFamily}`;
     if (candidateKeys.has(candidateKey)) throw new Error(`Duplicate active candidate decision: ${parsed.id}`);
     candidateKeys.add(candidateKey);
+    if (parsed.decision === "verify" && verifiedProducts.has(parsed.productId)) {
+      throw new Error(`Multiple verify decisions target product ${parsed.productId}`);
+    }
+    if (parsed.decision === "verify") verifiedProducts.add(parsed.productId);
     decisions.push(parsed);
   }
   const sortedIds = [...ids].sort();
@@ -396,5 +419,126 @@ export async function emitReviewDecisionSql(
     verifyCount: bundle.manifest.verifyCount,
     rejectCount: bundle.manifest.rejectCount,
     expectedResolvedCandidates: bundle.manifest.decisionCount,
+  };
+}
+
+function sqlList(values: string[]): string {
+  if (values.length === 0) return "NULL";
+  return [...new Set(values)].sort().map(sql).join(", ");
+}
+
+export async function emitReviewPublicationStateQuery(bundle: ReviewDecisionBundle, outputPath: string): Promise<void> {
+  const statements = reviewPublicationStateStatements(bundle);
+  await writeFile(outputPath, `${statements.join("\n")}\n`, "utf8");
+}
+
+function reviewPublicationStateStatements(bundle: ReviewDecisionBundle): [string, string] {
+  const sourceRecordIds = sqlList(bundle.decisions.map(({ sourceRecordId }) => sourceRecordId));
+  const decisionIds = sqlList(bundle.decisions.map(({ id }) => id));
+  return [
+    `SELECT s.source_id, s.source_record_id AS source_record_key, s.id AS source_record_id, s.content_hash, s.product_id, p.gtin AS product_gtin FROM source_records s LEFT JOIN products p ON p.id = s.product_id WHERE s.id IN (${sourceRecordIds}) ORDER BY s.id;`,
+    `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id, candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at FROM evidence_decisions WHERE active = 1 AND (id IN (${decisionIds}) OR source_record_id IN (${sourceRecordIds})) ORDER BY id;`,
+  ];
+}
+
+export async function emitReviewSourceStateQuery(bundle: ReviewDecisionBundle, outputPath: string): Promise<void> {
+  await writeFile(outputPath, `${reviewPublicationStateStatements(bundle)[0]}\n`, "utf8");
+}
+
+export async function emitReviewExistingDecisionQuery(bundle: ReviewDecisionBundle, outputPath: string): Promise<void> {
+  await writeFile(outputPath, `${reviewPublicationStateStatements(bundle)[1]}\n`, "utf8");
+}
+
+function d1Results(value: unknown, expected: number): Array<Array<Record<string, unknown>>> {
+  if (!Array.isArray(value) || value.length !== expected) throw new Error(`Expected ${expected} D1 query results`);
+  return value.map((item, index) => {
+    const result = record(item) as D1JsonResult | null;
+    if (result?.success !== true || !Array.isArray(result.results)) throw new Error(`D1 query result ${index + 1} failed or is malformed`);
+    return result.results;
+  });
+}
+
+export function validateReviewPublicationState(bundle: ReviewDecisionBundle, value: unknown): void {
+  const [sourceRows, existingRows] = d1Results(value, 2);
+  if (!sourceRows || !existingRows) throw new Error("D1 publication-state query is incomplete");
+  validateSourceRows(bundle, sourceRows);
+  validateExistingEvidenceDecisions(bundle, existingRows.map(evidenceDecisionFromDatabaseRow));
+}
+
+function validateSourceRows(bundle: ReviewDecisionBundle, sourceRows: Array<Record<string, unknown>>): void {
+  const sources: DecisionSourceRecord[] = sourceRows.map((row) => ({
+    sourceId: requiredString(row.source_id, "source source_id"),
+    sourceRecordKey: requiredString(row.source_record_key, "source source_record_key"),
+    sourceRecordId: requiredString(row.source_record_id, "source source_record_id"),
+    contentHash: requiredString(row.content_hash, "source content_hash"),
+    productId: requiredString(row.product_id, "source product_id"),
+    productGtin: typeof row.product_gtin === "string" ? row.product_gtin : null,
+  }));
+  validateReviewDecisionSources(bundle, sources);
+}
+
+export function validateReviewSourceState(bundle: ReviewDecisionBundle, value: unknown): void {
+  const [sourceRows] = d1Results(value, 1);
+  if (!sourceRows) throw new Error("D1 source-state query is incomplete");
+  validateSourceRows(bundle, sourceRows);
+}
+
+export function validateReviewExistingDecisionState(bundle: ReviewDecisionBundle, value: unknown): void {
+  const [existingRows] = d1Results(value, 1);
+  if (!existingRows) throw new Error("D1 decision-state query is incomplete");
+  validateExistingEvidenceDecisions(bundle, existingRows.map(evidenceDecisionFromDatabaseRow));
+}
+
+export async function emitReviewPostconditionQuery(bundle: ReviewDecisionBundle, outputPath: string): Promise<void> {
+  const decisionIds = sqlList(bundle.decisions.map(({ id }) => id));
+  const verifyProducts = sqlList(bundle.decisions.filter(({ decision }) => decision === "verify").map(({ productId }) => productId));
+  const candidateHashes = sqlList(bundle.decisions.map(({ candidateHash }) => candidateHash));
+  const statements = [
+    `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id, candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at FROM evidence_decisions WHERE active = 1 AND id IN (${decisionIds}) ORDER BY id;`,
+    `SELECT product_id, source_record_id, status, authority, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at FROM nutrition_facts WHERE product_id IN (${verifyProducts}) ORDER BY product_id;`,
+    `SELECT product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by FROM evidence_outcomes WHERE field_family = 'nutrition' AND product_id IN (${verifyProducts}) ORDER BY product_id;`,
+    `SELECT id, source_record_id, json_extract(evidence_json, '$.details.candidateHash') AS candidate_hash FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes}) ORDER BY id;`,
+  ];
+  await writeFile(outputPath, `${statements.join("\n")}\n`, "utf8");
+}
+
+function sameNumber(actual: unknown, expected: number | null): boolean {
+  return expected === null ? actual === null : typeof actual === "number" && Math.abs(actual - expected) < 1e-9;
+}
+
+export function validateReviewPostconditions(bundle: ReviewDecisionBundle, value: unknown): ReviewPublicationPostconditions {
+  const [decisionRows, factRows, outcomeRows, unresolvedRows] = d1Results(value, 4);
+  if (!decisionRows || !factRows || !outcomeRows || !unresolvedRows) throw new Error("D1 postcondition query is incomplete");
+  const existing = decisionRows.map(evidenceDecisionFromDatabaseRow);
+  validateExistingEvidenceDecisions(bundle, existing);
+  if (existing.length !== bundle.manifest.decisionCount) throw new Error("Applied decision count does not match the reviewed bundle");
+  const facts = new Map(factRows.map((row) => [row.product_id, row]));
+  const outcomes = new Map(outcomeRows.map((row) => [row.product_id, row]));
+  const verified = bundle.decisions.filter(({ decision }) => decision === "verify");
+  for (const decision of verified) {
+    const fact = facts.get(decision.productId);
+    const nutrition = decision.payload.nutritionPer100g;
+    if (
+      !fact || fact.source_record_id !== decision.sourceRecordId || fact.status !== "verified" || fact.authority !== 100 ||
+      !sameNumber(fact.calories, nutrition.calories) || !sameNumber(fact.protein_grams, nutrition.proteinGrams) ||
+      !sameNumber(fact.carbohydrate_grams, nutrition.carbohydrateGrams) || !sameNumber(fact.sugar_grams, nutrition.sugarGrams) ||
+      !sameNumber(fact.fat_grams, nutrition.fatGrams) || !sameNumber(fact.saturated_fat_grams, nutrition.saturatedFatGrams) ||
+      !sameNumber(fact.fibre_grams, nutrition.fibreGrams) || !sameNumber(fact.sodium_mg, nutrition.sodiumMg) ||
+      fact.label_verified_at !== decision.decidedAt || fact.observed_at !== decision.payload.observedAt
+    ) throw new Error(`Verified nutrition postcondition failed for ${decision.id}`);
+    const outcome = outcomes.get(decision.productId);
+    if (
+      !outcome || outcome.outcome !== "verified" || outcome.source_record_id !== decision.sourceRecordId ||
+      outcome.evidence_url !== decision.evidenceUrl || outcome.observed_at !== decision.payload.observedAt ||
+      outcome.verified_at !== decision.decidedAt || outcome.decided_by !== decision.decidedBy
+    ) throw new Error(`Verified evidence outcome postcondition failed for ${decision.id}`);
+  }
+  if (unresolvedRows.length > 0) throw new Error(`Reviewed candidates remain unresolved: ${unresolvedRows.map((row) => row.id).join(", ")}`);
+  return {
+    ledgerSha256: bundle.manifest.ledgerSha256,
+    decisions: existing.length,
+    verifiedFacts: verified.length,
+    verifiedOutcomes: verified.length,
+    unresolvedCandidates: 0,
   };
 }

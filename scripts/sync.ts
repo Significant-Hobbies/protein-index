@@ -10,7 +10,20 @@ import { extractRobotoffApi } from "./adapters/robotoff-api";
 import { buildFixtureStage } from "./fixtures";
 import { emitImportSql } from "./reconcile";
 import { validatePublicationSnapshot } from "./publication";
-import { evidenceDecisionFromDatabaseRow, writeReviewDecisionBundle } from "./review-bundles";
+import {
+  emitReviewDecisionSql,
+  emitReviewExistingDecisionQuery,
+  emitReviewPostconditionQuery,
+  emitReviewPublicationStateQuery,
+  emitReviewSourceStateQuery,
+  evidenceDecisionFromDatabaseRow,
+  readReviewDecisionBundle,
+  validateReviewPostconditions,
+  validateReviewExistingDecisionState,
+  validateReviewPublicationState,
+  validateReviewSourceState,
+  writeReviewDecisionBundle,
+} from "./review-bundles";
 
 function option(name: string): string | null {
   const index = process.argv.indexOf(`--${name}`);
@@ -253,6 +266,52 @@ async function reviewExportCommand(): Promise<void> {
   }, null, 2)}\n`);
 }
 
+async function reviewBundleCommand(command: "review-query" | "review-source-check" | "review-prepare" | "review-postquery" | "review-postcheck"): Promise<void> {
+  const directory = option("input");
+  const output = option("output");
+  if (!directory || !output) throw new Error("--input and --output are required for review publication commands.");
+  const bundle = await readReviewDecisionBundle(directory);
+  const expectedLedgerHash = option("expected-ledger-hash");
+  if (expectedLedgerHash !== null && bundle.manifest.ledgerSha256 !== expectedLedgerHash) {
+    throw new Error("Review bundle ledger hash differs from the explicitly requested hash");
+  }
+  if (command === "review-query") {
+    const kind = option("kind") ?? "combined";
+    if (kind === "source") await emitReviewSourceStateQuery(bundle, output);
+    else if (kind === "decisions") await emitReviewExistingDecisionQuery(bundle, output);
+    else if (kind === "combined") await emitReviewPublicationStateQuery(bundle, output);
+    else throw new Error("--kind must be source, decisions, or combined");
+  } else if (command === "review-source-check") {
+    const statePath = option("state");
+    if (!statePath) throw new Error("--state is required for review-source-check.");
+    validateReviewSourceState(bundle, JSON.parse(await readFile(statePath, "utf8")) as unknown);
+    await writeFile(output, `${JSON.stringify({ ledgerSha256: bundle.manifest.ledgerSha256, sourceRecords: bundle.manifest.sourceRecordCount }, null, 2)}\n`, "utf8");
+  } else if (command === "review-prepare") {
+    const statePath = option("state");
+    const sourceStatePath = option("source-state");
+    const decisionStatePath = option("decision-state");
+    if (statePath) {
+      validateReviewPublicationState(bundle, JSON.parse(await readFile(statePath, "utf8")) as unknown);
+    } else if (sourceStatePath && decisionStatePath) {
+      validateReviewSourceState(bundle, JSON.parse(await readFile(sourceStatePath, "utf8")) as unknown);
+      validateReviewExistingDecisionState(bundle, JSON.parse(await readFile(decisionStatePath, "utf8")) as unknown);
+    } else {
+      throw new Error("review-prepare requires --state or both --source-state and --decision-state.");
+    }
+    const plan = await emitReviewDecisionSql(bundle, output, false);
+    const planPath = option("plan");
+    if (planPath) await writeFile(planPath, `${JSON.stringify({ ...plan, ledgerSha256: bundle.manifest.ledgerSha256 }, null, 2)}\n`, "utf8");
+  } else if (command === "review-postquery") {
+    await emitReviewPostconditionQuery(bundle, output);
+  } else {
+    const statePath = option("state");
+    if (!statePath) throw new Error("--state is required for review-postcheck.");
+    const report = validateReviewPostconditions(bundle, JSON.parse(await readFile(statePath, "utf8")) as unknown);
+    await writeFile(output, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  }
+  process.stdout.write(`${JSON.stringify({ command, bundleId: bundle.manifest.bundleId, ledgerSha256: bundle.manifest.ledgerSha256, output }, null, 2)}\n`);
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (command === "stage") return stageCommand();
@@ -262,11 +321,14 @@ async function main(): Promise<void> {
   if (command === "coverage") return coverageCommand();
   if (command === "publish") return publishCommand();
   if (command === "review-export") return reviewExportCommand();
+  if (command === "review-query" || command === "review-source-check" || command === "review-prepare" || command === "review-postquery" || command === "review-postcheck") {
+    return reviewBundleCommand(command);
+  }
   if (command === "datakart-status") {
     process.stdout.write(`${JSON.stringify(DATAKART_ADAPTER_STATUS, null, 2)}\n`);
     return;
   }
-  throw new Error("Usage: sync.ts <stage|enrich|extract|seed|coverage|publish|review-export|datakart-status> [options]");
+  throw new Error("Usage: sync.ts <stage|enrich|extract|seed|coverage|publish|review-export|review-query|review-source-check|review-prepare|review-postquery|review-postcheck|datakart-status> [options]");
 }
 
 main().catch((error: unknown) => {

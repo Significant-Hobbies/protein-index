@@ -21,10 +21,10 @@
 
 ## 4. Guarded production publication
 
-- [ ] 4.1 Add a manual protected GitHub workflow pinned to a bundle commit, path, and expected ledger hash
-- [ ] 4.2 Require the bundle commit to be an ancestor of main and extract bundle data without executing code from that commit
-- [ ] 4.3 Validate current remote source evidence before D1 writes and fail the entire publication on drift or count mismatch
-- [ ] 4.4 Query durable decisions, verified facts, evidence outcomes, and unresolved candidates after publication and upload checksummed diagnostics
+- [x] 4.1 Add a manual protected GitHub workflow pinned to a bundle commit, path, and expected ledger hash
+- [x] 4.2 Require the bundle commit to be an ancestor of main and extract bundle data without executing code from that commit
+- [x] 4.3 Validate current remote source evidence before D1 writes and fail the entire publication on drift or count mismatch
+- [x] 4.4 Query durable decisions, verified facts, evidence outcomes, and unresolved candidates after publication and upload checksummed diagnostics
 
 ## 5. Verification and rollout
 
