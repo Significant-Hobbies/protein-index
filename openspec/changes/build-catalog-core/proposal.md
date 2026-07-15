@@ -18,10 +18,10 @@ can scale, or the product will produce precise-looking but invalid comparisons.
 - Add raw and normalized ingredient statements, ordered ingredients,
   sub-ingredients, declared percentages, allergens, additives, and ingredient
   verification/provenance.
-- Add Open Food Facts JSONL ingestion for all India-tagged food records where
-  practical, including validation, normalization, idempotency, and review-queue
-  creation; ingestion does not depend on a record already being classified as
-  protein.
+- Add streaming Open Food Facts bulk-export ingestion (tab-separated and JSONL)
+  for all India-tagged food records where practical, including validation,
+  normalization, idempotency, and review-queue creation; ingestion does not
+  depend on a record already being classified as protein.
 - Add a provider-neutral official-source adapter contract, with DataKart as the
   authoritative planned implementation once commercial API access is granted.
 - Add a scheduled GitHub Action that stages fresh source records and an import
@@ -73,7 +73,7 @@ can scale, or the product will produce precise-looking but invalid comparisons.
 
 - Introduces the Vite/React web application and Cloudflare Worker runtime.
 - Introduces a versioned D1-compatible SQL schema and local D1 development data.
-- Introduces an offline TypeScript importer for Open Food Facts JSONL records.
+- Introduces an offline TypeScript importer for Open Food Facts bulk exports.
 - Introduces a weekly/manual GitHub Actions sync workflow. Open Food Facts is the
   credential-free bootstrap source; GS1 India DataKart is the preferred
   brand-owner source but remains disabled until access and license terms exist.

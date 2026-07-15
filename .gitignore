@@ -8,4 +8,4 @@ dist/
 *.db
 *.db-journal
 coverage/
-
+.data/

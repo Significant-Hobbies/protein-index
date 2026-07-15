@@ -1,11 +1,50 @@
 # Protein Index
 
-A normalized Indian protein-product intelligence database with source-aware
-nutrition, offers, ratings, confidence, and protein-value metrics.
+A normalized Indian food-product intelligence database with protein discovery,
+source-aware nutrition and ingredients, and evidence-first comparisons.
 
 The product record is canonical. Retailer listings are observations attached to
-that record, never the source of identity by themselves.
+that record, never the source of identity by themselves. Broad imports ingest
+all India-tagged foods first and classify protein products afterward.
+
+## Local development
+
+Requirements: Node.js 22+ and pnpm 10.
+
+```bash
+pnpm install
+pnpm data:seed
+pnpm dev
+```
+
+The seed is intentionally synthetic and provides verified, unverified, missing,
+and conflict states without presenting test products as real market data.
+
+Run the complete local check with:
+
+```bash
+pnpm check
+```
+
+## Source staging
+
+Stage a bounded local Open Food Facts sample:
+
+```bash
+pnpm data:stage -- \
+  --input path/to/open-food-facts-sample.jsonl \
+  --output .data/sample \
+  --mode sample \
+  --limit 100
+```
+
+Production mode rejects every record cap. The weekly/manual GitHub workflow
+downloads the complete official TSV export, identifies this client, reaches
+end-of-file, compares counts and record hashes with the last good run, and
+uploads reviewable artifacts. It never writes to production.
+
+See [docs/SOURCES.md](docs/SOURCES.md) for trust states, coverage semantics, the
+DataKart integration checklist, and the protected future hosted-apply design.
 
 Implementation work is tracked in `openspec/changes/build-catalog-core/` and
 durable product status lives in `PROJECT_STATUS.md`.
-

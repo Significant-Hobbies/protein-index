@@ -177,11 +177,14 @@ emits:
 - a validation and classification report;
 - a D1-compatible staged import file for later application.
 
-Open Food Facts daily export is the credential-free adapter. It is open and
-current enough to exercise the pipeline, but remains medium confidence. DataKart
-is a separate adapter contract and is disabled with an actionable status until
-commercial credentials, schema documentation, and permitted retention behavior
-are known.
+Open Food Facts daily export is the credential-free adapter. Scheduled runs use
+the complete tab-separated gzip export because it includes the identity,
+ingredient, classification, image, and broad nutrient columns required here at
+roughly one tenth the compressed size of the current JSONL export. The adapter
+also accepts JSONL for richer local inputs. Open Food Facts remains medium
+confidence. DataKart is a separate adapter contract and is disabled with an
+actionable status until commercial credentials, schema documentation, and
+permitted retention behavior are known.
 
 The workflow does not directly mutate the production database. This avoids
 turning an upstream error or compromised source into an irreversible publish.

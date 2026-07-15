@@ -1,0 +1,67 @@
+import type { MetricResult, NutritionPer100g, ProductMetrics } from "./types";
+
+const unavailable = (reason: string): MetricResult => ({ value: null, reason });
+const available = (value: number): MetricResult => ({ value, reason: null });
+
+function ratio(numerator: number | null, denominator: number | null, multiplier: number, reason: string): MetricResult {
+  if (numerator === null || denominator === null) return unavailable(reason);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || numerator < 0 || denominator <= 0) {
+    return unavailable("invalid_input");
+  }
+  return available((numerator / denominator) * multiplier);
+}
+
+export function calculateMetrics(input: {
+  nutrition: NutritionPer100g;
+  netQuantityGrams: number | null;
+  servingSizeGrams: number | null;
+  sellingPrice: number | null;
+}): ProductMetrics {
+  const { nutrition, netQuantityGrams, servingSizeGrams, sellingPrice } = input;
+  const proteinPer100Calories = ratio(nutrition.proteinGrams, nutrition.calories, 100, "missing_protein_or_calories");
+  const proteinCaloriePercentage = ratio(
+    nutrition.proteinGrams === null ? null : nutrition.proteinGrams * 4,
+    nutrition.calories,
+    100,
+    "missing_protein_or_calories",
+  );
+  const totalProtein =
+    nutrition.proteinGrams !== null && netQuantityGrams !== null && netQuantityGrams > 0
+      ? available((netQuantityGrams * nutrition.proteinGrams) / 100)
+      : unavailable("missing_protein_or_pack_weight");
+  const costPer25 = ratio(sellingPrice, totalProtein.value, 25, "missing_price_or_pack_protein");
+  const proteinPerInr100 = ratio(totalProtein.value, sellingPrice, 100, "missing_price_or_pack_protein");
+  const caloriesFor25 = ratio(nutrition.calories, nutrition.proteinGrams, 25, "missing_protein_or_calories");
+  const sugarPer25 = ratio(nutrition.sugarGrams, nutrition.proteinGrams, 25, "missing_sugar_or_protein");
+  const saturatedFatPer25 = ratio(
+    nutrition.saturatedFatGrams,
+    nutrition.proteinGrams,
+    25,
+    "missing_saturated_fat_or_protein",
+  );
+  const fibrePer100Calories = ratio(nutrition.fibreGrams, nutrition.calories, 100, "missing_fibre_or_calories");
+  const servings =
+    netQuantityGrams !== null && servingSizeGrams !== null && servingSizeGrams > 0
+      ? netQuantityGrams / servingSizeGrams
+      : null;
+  const pricePerServing = ratio(sellingPrice, servings, 1, "missing_price_or_serving_data");
+
+  return {
+    proteinPer100Calories,
+    proteinCaloriePercentage,
+    costPer25gProtein: costPer25,
+    proteinPerInr100,
+    caloriesFor25gProtein: caloriesFor25,
+    sugarPer25gProtein: sugarPer25,
+    saturatedFatPer25gProtein: saturatedFatPer25,
+    fibrePer100Calories,
+    pricePerServing,
+    totalProteinInPack: totalProtein,
+  };
+}
+
+export function calculateCompleteness(input: Record<string, unknown>): { score: number; missing: string[] } {
+  const required = ["gtin", "brand", "name", "netQuantityGrams", "nutrition", "ingredients", "evidence", "offer"];
+  const missing = required.filter((key) => input[key] === null || input[key] === undefined || input[key] === "");
+  return { score: Math.round(((required.length - missing.length) / required.length) * 100), missing };
+}

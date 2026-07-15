@@ -1,0 +1,36 @@
+import type {
+  CatalogResponse,
+  CoverageResponse,
+  ProductDetailResponse,
+  ReviewResponse,
+} from "../shared/api";
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...init?.headers },
+  });
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const message =
+      typeof body === "object" && body !== null && !Array.isArray(body)
+        ? ((body as { error?: { message?: string } }).error?.message ?? `Request failed (${response.status})`)
+        : `Request failed (${response.status})`;
+    throw new Error(message);
+  }
+  return body as T;
+}
+
+export const api = {
+  catalog: (params: URLSearchParams, signal?: AbortSignal) =>
+    request<CatalogResponse>(`/api/products?${params}`, { signal }),
+  product: (id: string, signal?: AbortSignal) =>
+    request<ProductDetailResponse>(`/api/products/${encodeURIComponent(id)}`, { signal }),
+  reviews: () => request<ReviewResponse>("/api/reviews?status=open&limit=100"),
+  coverage: () => request<CoverageResponse>("/api/coverage"),
+  resolveReview: (id: string, decision: string, rationale: string, evidenceUrl: string | null) =>
+    request<{ status: string }>(`/api/reviews/${encodeURIComponent(id)}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ decision, rationale, evidenceUrl }),
+    }),
+};

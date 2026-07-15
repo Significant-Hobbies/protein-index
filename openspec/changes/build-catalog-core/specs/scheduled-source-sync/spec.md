@@ -46,3 +46,6 @@ as repeated search API calls.
 - **WHEN** Open Food Facts is selected for an all-India sync
 - **THEN** the adapter streams an official export and reports export freshness and processing volume
 
+#### Scenario: Complete tab-separated export is selected
+- **WHEN** the tab-separated export contains all fields required for the scheduled catalog sync
+- **THEN** scheduled mode may use it instead of the materially larger JSONL export while still traversing every source row

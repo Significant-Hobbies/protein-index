@@ -1,0 +1,88 @@
+import { Hono } from "hono";
+import { getProductDetail, searchProducts, validateSearch } from "./catalog";
+import { getCoverage } from "./coverage";
+import { listReviews, resolveReview, type ReviewDecision } from "./reviews";
+
+export const app = new Hono<{ Bindings: Env }>();
+
+function errorBody(code: string, message: string, details?: Record<string, unknown>) {
+  return { error: { code, message, ...(details ? { details } : {}) } };
+}
+
+app.get("/api/health", async (c) => {
+  const result = await c.env.DB.prepare("SELECT COUNT(*) AS products FROM products").first<{ products: number }>();
+  return c.json({ status: "ok", products: result?.products ?? 0, environment: "local-first" });
+});
+
+app.get("/api/products", async (c) => {
+  const parsed = validateSearch(new URL(c.req.url).searchParams);
+  if (!parsed.value) return c.json(errorBody("validation_error", parsed.error ?? "Invalid query"), 400);
+  return c.json(await searchProducts(c.env.DB, parsed.value));
+});
+
+app.get("/api/products/:id", async (c) => {
+  const product = await getProductDetail(c.env.DB, c.req.param("id"));
+  return product ? c.json(product) : c.json(errorBody("not_found", "Product not found"), 404);
+});
+
+app.get("/api/coverage", async (c) => c.json(await getCoverage(c.env.DB)));
+
+app.get("/api/reviews", async (c) => {
+  const status = c.req.query("status") ?? "open";
+  const limit = Number(c.req.query("limit") ?? 50);
+  if (!["open", "resolved", "dismissed"].includes(status) || !Number.isInteger(limit) || limit < 1 || limit > 100) {
+    return c.json(errorBody("validation_error", "Invalid review filters"), 400);
+  }
+  return c.json(await listReviews(c.env.DB, status, limit));
+});
+
+app.post("/api/reviews/:id/resolve", async (c) => {
+  const hostname = new URL(c.req.url).hostname;
+  if (!["localhost", "127.0.0.1", "::1"].includes(hostname)) {
+    return c.json(errorBody("mutations_disabled", "Review mutations are local-only until operator authentication is configured"), 403);
+  }
+  const body: unknown = await c.req.json().catch(() => null);
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return c.json(errorBody("validation_error", "Expected a JSON object"), 400);
+  }
+  const input = body as Record<string, unknown>;
+  const decisions: ReviewDecision[] = ["verify_nutrition", "reject_nutrition", "dismiss"];
+  if (typeof input.decision !== "string" || !decisions.includes(input.decision as ReviewDecision)) {
+    return c.json(errorBody("validation_error", "Invalid review decision"), 400);
+  }
+  if (typeof input.rationale !== "string" || input.rationale.trim().length < 3) {
+    return c.json(errorBody("validation_error", "A rationale of at least 3 characters is required"), 400);
+  }
+  let evidenceUrl: string | null = null;
+  if (input.evidenceUrl !== undefined && input.evidenceUrl !== null && input.evidenceUrl !== "") {
+    if (typeof input.evidenceUrl !== "string") return c.json(errorBody("validation_error", "Evidence URL must be a string"), 400);
+    try {
+      const parsed = new URL(input.evidenceUrl);
+      if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("unsupported protocol");
+      evidenceUrl = parsed.toString();
+    } catch {
+      return c.json(errorBody("validation_error", "Evidence URL must be a valid HTTP(S) URL"), 400);
+    }
+  }
+  if (input.decision === "verify_nutrition" && evidenceUrl === null) {
+    return c.json(errorBody("validation_error", "Verification requires a current label or authoritative-source evidence URL"), 400);
+  }
+  const result = await resolveReview(c.env.DB, c.req.param("id"), input.decision as ReviewDecision, input.rationale.trim(), evidenceUrl);
+  if (result === "not_found") return c.json(errorBody("not_found", "Review item not found"), 404);
+  if (result === "conflict") return c.json(errorBody("conflict", "Review item was already resolved"), 409);
+  if (result === "invalid_decision") return c.json(errorBody("validation_error", "Decision is not valid for this review type"), 400);
+  return c.json({ status: "resolved", id: c.req.param("id"), decision: input.decision });
+});
+
+app.notFound((c) => c.json(errorBody("not_found", "Route not found"), 404));
+
+app.onError((error, c) => {
+  console.error(JSON.stringify({ message: "request_failed", error: error.message, path: c.req.path }));
+  return c.json(errorBody("internal_error", "The request could not be completed"), 500);
+});
+
+export default {
+  fetch(request, env, ctx) {
+    return app.fetch(request, env, ctx);
+  },
+} satisfies ExportedHandler<Env>;

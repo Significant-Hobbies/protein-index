@@ -1,0 +1,228 @@
+name: Source sync
+
+on:
+  schedule:
+    - cron: "23 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      maximum_drop_percent:
+        description: Maximum unexplained source-count drop before failing closed
+        required: true
+        default: "20"
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: open-food-facts-source-sync
+  cancel-in-progress: false
+
+jobs:
+  open-food-facts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      EXPORT_URL: https://static.openfoodfacts.org/data/en.openfoodfacts.org.products.csv.gz
+      EXPORT_PATH: .data/source/en.openfoodfacts.org.products.csv.gz
+      OUTPUT_PATH: .data/current
+      MAXIMUM_DROP_PERCENT: ${{ inputs.maximum_drop_percent || '20' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Restore latest cached export
+        uses: actions/cache/restore@v4
+        with:
+          path: .data/source
+          key: open-food-facts-export-bootstrap
+          restore-keys: open-food-facts-export-
+
+      - name: Download official bulk export
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .data/source
+          curl_args=(
+            --fail
+            --location
+            --retry 5
+            --retry-all-errors
+            --connect-timeout 30
+            --user-agent "protein-index/0.1 (+https://github.com/${GITHUB_REPOSITORY}; source-sync)"
+            --dump-header .data/source/response-headers.txt
+            --output "$EXPORT_PATH"
+          )
+          if [[ -s "$EXPORT_PATH" ]]; then
+            curl_args+=(--time-cond "$EXPORT_PATH")
+          fi
+          curl "${curl_args[@]}" "$EXPORT_URL"
+          test -s "$EXPORT_PATH"
+          gzip --test "$EXPORT_PATH"
+          source_hash="$(sha256sum "$EXPORT_PATH" | cut -d ' ' -f 1)"
+          source_updated_at="$(awk 'BEGIN { IGNORECASE=1 } /^last-modified:/ { sub(/^[^:]*:[[:space:]]*/, ""); gsub(/\r/, ""); print }' .data/source/response-headers.txt | tail -n 1)"
+          if [[ -n "$source_updated_at" ]]; then
+            printf '%s\n' "$source_updated_at" > .data/source/last-modified.txt
+          elif [[ -s .data/source/last-modified.txt ]]; then
+            source_updated_at="$(<.data/source/last-modified.txt)"
+          fi
+          echo "sha256=$source_hash" >> "$GITHUB_OUTPUT"
+          echo "source_updated_at=$source_updated_at" >> "$GITHUB_OUTPUT"
+          printf '%s  %s\n' "$source_hash" "$EXPORT_PATH" > .data/source/checksums.sha256
+
+      - name: Save content-addressed export cache
+        uses: actions/cache/save@v4
+        with:
+          path: .data/source
+          key: open-food-facts-export-${{ steps.source.outputs.sha256 }}
+
+      - name: Download last known-good continuity artifact
+        id: previous
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const response = await github.rest.actions.listArtifactsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'open-food-facts-continuity',
+              per_page: 100,
+            });
+            const artifact = response.data.artifacts
+              .filter((candidate) => !candidate.expired)
+              .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))[0];
+            if (!artifact) {
+              core.notice('No prior continuity artifact exists; this will establish the first baseline.');
+              core.setOutput('available', 'false');
+              return;
+            }
+            const download = await github.rest.actions.downloadArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: artifact.id,
+              archive_format: 'zip',
+            });
+            fs.mkdirSync('.data/previous', { recursive: true });
+            fs.writeFileSync('.data/previous.zip', Buffer.from(download.data));
+            core.setOutput('available', 'true');
+
+      - name: Expand continuity artifact
+        if: steps.previous.outputs.available == 'true'
+        run: unzip -q .data/previous.zip -d .data/previous
+
+      - name: Stage and validate complete India snapshot
+        id: stage
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p "$OUTPUT_PATH"
+          args=(
+            scripts/sync.ts stage
+            --source open-food-facts
+            --input "$EXPORT_PATH"
+            --output "$OUTPUT_PATH"
+            --mode production
+            --format tsv
+            --maximum-drop-percent "$MAXIMUM_DROP_PERCENT"
+          )
+          if [[ -n "${{ steps.source.outputs.source_updated_at }}" ]]; then
+            args+=(--source-updated-at "${{ steps.source.outputs.source_updated_at }}")
+          fi
+          if [[ -f .data/previous/manifest.json && -f .data/previous/source-index.jsonl ]]; then
+            args+=(
+              --previous-manifest .data/previous/manifest.json
+              --previous-index .data/previous/source-index.jsonl
+            )
+          fi
+          set +e
+          pnpm exec tsx "${args[@]}" 2>&1 | tee "$OUTPUT_PATH/stage.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          printf '{"exitCode":%s,"workflowRunId":"%s","maximumDropPercent":%s}\n' \
+            "$status" "$GITHUB_RUN_ID" "$MAXIMUM_DROP_PERCENT" > "$OUTPUT_PATH/workflow-result.json"
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Verify production traversal evidence
+        if: steps.stage.outputs.exit_code == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile('.data/current/manifest.json', 'utf8'));
+          const failures = [];
+          if (manifest.mode !== 'production') failures.push('mode is not production');
+          if (manifest.sourceComplete !== true) failures.push('sourceComplete is not true');
+          if (manifest.terminalEvidence !== 'end_of_file') failures.push('terminalEvidence is not end_of_file');
+          if (manifest.inputHash !== process.env.SOURCE_HASH) failures.push('manifest input hash differs from downloaded export');
+          if (manifest.stagedRecords <= 0 || manifest.indiaRecords <= 0) failures.push('snapshot is empty');
+          if (failures.length) throw new Error(failures.join('; '));
+          NODE
+        env:
+          SOURCE_HASH: ${{ steps.source.outputs.sha256 }}
+
+      - name: Record artifact checksums
+        if: steps.stage.outputs.exit_code == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum \
+            "$OUTPUT_PATH/manifest.json" \
+            "$OUTPUT_PATH/report.json" \
+            "$OUTPUT_PATH/source-index.jsonl" \
+            "$OUTPUT_PATH/staged-products.jsonl" \
+            > "$OUTPUT_PATH/checksums.sha256"
+
+      - name: Upload sync diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-food-facts-diagnostics-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            .data/current/manifest.json
+            .data/current/report.json
+            .data/current/stage.log
+            .data/current/workflow-result.json
+            .data/source/response-headers.txt
+            .data/source/checksums.sha256
+
+      - name: Upload reviewable staged snapshot
+        if: steps.stage.outputs.exit_code == '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-food-facts-snapshot-${{ github.run_id }}
+          compression-level: 9
+          retention-days: 30
+          path: |
+            .data/current/manifest.json
+            .data/current/report.json
+            .data/current/source-index.jsonl
+            .data/current/staged-products.jsonl
+            .data/current/checksums.sha256
+
+      - name: Save continuity baseline
+        if: steps.stage.outputs.exit_code == '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-food-facts-continuity
+          compression-level: 9
+          retention-days: 90
+          path: |
+            .data/current/manifest.json
+            .data/current/source-index.jsonl
+
+      - name: Fail closed after preserving diagnostics
+        if: steps.stage.outputs.exit_code != '0'
+        run: exit 1
