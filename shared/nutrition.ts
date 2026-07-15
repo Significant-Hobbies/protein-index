@@ -48,6 +48,19 @@ export function validateNutrition(nutrition: NutritionPer100g): ValidationIssue[
     issues.push({ code: "non_positive_energy", message: "Calories must be positive", severity: "error", field: "calories" });
   }
   if (
+    nutrition.calories !== null &&
+    nutrition.calories > 0 &&
+    nutrition.proteinGrams !== null &&
+    nutrition.proteinGrams * 4 > nutrition.calories * 1.1
+  ) {
+    issues.push({
+      code: "protein_energy_exceeds_total",
+      message: "Calories from protein exceed declared total calories",
+      severity: "error",
+      field: "calories",
+    });
+  }
+  if (
     nutrition.saturatedFatGrams !== null &&
     nutrition.fatGrams !== null &&
     nutrition.saturatedFatGrams > nutrition.fatGrams

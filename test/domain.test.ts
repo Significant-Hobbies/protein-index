@@ -63,7 +63,8 @@ describe("GTIN and identity normalization", () => {
 describe("nutrition accuracy and classification", () => {
   it("rejects impossible nutrition and flags calorie disagreement", () => {
     const impossible = { ...emptyNutrition(), calories: 100, proteinGrams: 120, carbohydrateGrams: 20, fatGrams: 5 };
-    expect(validateNutrition(impossible).map(({ code }) => code)).toEqual(expect.arrayContaining(["nutrient_over_100g", "macro_total_impossible", "calorie_macro_mismatch"]));
+    expect(validateNutrition(impossible).map(({ code }) => code)).toEqual(expect.arrayContaining(["nutrient_over_100g", "protein_energy_exceeds_total", "macro_total_impossible", "calorie_macro_mismatch"]));
+    expect(validateNutrition({ ...emptyNutrition(), calories: 0.25, proteinGrams: 10.8 })).toContainEqual(expect.objectContaining({ code: "protein_energy_exceeds_total", severity: "error" }));
   });
 
   it("normalizes a per-serving label only when serving mass exists", () => {

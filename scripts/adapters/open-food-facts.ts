@@ -10,7 +10,7 @@ import { classifyProtein } from "../../shared/classification";
 import { normalizeGtin, normalizeText, parseQuantity } from "../../shared/gtin";
 import { invalidIngredientPercentages, parseAdditives, parseAllergens, parseIngredients } from "../../shared/ingredients";
 import { calculateCompleteness } from "../../shared/metrics";
-import { emptyNutrition, finiteNumber, validateNutrition } from "../../shared/nutrition";
+import { emptyNutrition, finiteNumber, hasNutritionErrors, validateNutrition } from "../../shared/nutrition";
 import type {
   GenericNutrientValue,
   NutritionPer100g,
@@ -184,7 +184,8 @@ export function normalizeOpenFoodFactsRecord(
     issues.push({ code: "invalid_gtin", message: "Product code is not a valid GTIN", severity: "error", field: "gtin" });
   }
   const nutritionPer100g = parseCoreNutrition(record);
-  issues.push(...validateNutrition(nutritionPer100g));
+  const nutritionIssues = validateNutrition(nutritionPer100g);
+  issues.push(...nutritionIssues);
   const quantity = parseQuantity(stringValue(record.quantity));
   const numericQuantity = finiteNumber(record.product_quantity);
   const netQuantityGrams = quantity?.grams ?? (numericQuantity !== null && numericQuantity > 0 ? numericQuantity : null);
@@ -214,7 +215,9 @@ export function normalizeOpenFoodFactsRecord(
     servingSizeGrams,
     basis,
     preparationState: "as_sold" as const,
-    status: nutritionPer100g.proteinGrams === null && nutritionPer100g.calories === null ? "missing" as const : "unverified" as const,
+    status: nutritionPer100g.proteinGrams === null && nutritionPer100g.calories === null
+      ? "missing" as const
+      : hasNutritionErrors(nutritionIssues) ? "conflict" as const : "unverified" as const,
     confidence: "medium" as const,
     source: source.source,
     observedAt,

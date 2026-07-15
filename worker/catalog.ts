@@ -1,5 +1,6 @@
 import type { CatalogProduct, CatalogResponse, ProductDetailResponse } from "../shared/api";
 import { calculateMetrics } from "../shared/metrics";
+import { hasNutritionErrors, validateNutrition } from "../shared/nutrition";
 import { PRODUCT_CATEGORIES, type EvidenceStatus, type NormalizedIngredient, type ProductCategory } from "../shared/types";
 
 interface ProductRow {
@@ -54,7 +55,7 @@ function parseJson<T>(value: string, fallback: T): T {
 }
 
 function mapProduct(row: ProductRow): CatalogProduct {
-  const nutrition = {
+  const nutritionPer100g = {
     calories: row.calories,
     proteinGrams: row.protein_grams,
     carbohydrateGrams: row.carbohydrate_grams,
@@ -63,6 +64,9 @@ function mapProduct(row: ProductRow): CatalogProduct {
     saturatedFatGrams: row.saturated_fat_grams,
     fibreGrams: row.fibre_grams,
     sodiumMg: row.sodium_mg,
+  };
+  const nutrition = {
+    ...nutritionPer100g,
     observedAt: row.nutrition_observed_at,
     labelVerifiedAt: row.label_verified_at,
     basis: row.nutrition_basis ?? "unknown",
@@ -73,19 +77,20 @@ function mapProduct(row: ProductRow): CatalogProduct {
     servingSizeGrams: row.serving_size_grams,
     sellingPrice: row.selling_price,
   });
-  const metrics = row.nutrition_status === "verified" || row.nutrition_status === "unverified"
+  const nutritionPassesValidation = !hasNutritionErrors(validateNutrition(nutritionPer100g));
+  const metrics = (row.nutrition_status === "verified" || row.nutrition_status === "unverified") && nutritionPassesValidation
     ? calculatedMetrics
     : {
-        proteinPer100Calories: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
-        proteinCaloriePercentage: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
-        costPer25gProtein: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
-        proteinPerInr100: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
-        caloriesFor25gProtein: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
-        sugarPer25gProtein: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
-        saturatedFatPer25gProtein: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
-        fibrePer100Calories: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
-        pricePerServing: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
-        totalProteinInPack: { value: null, reason: `nutrition_${row.nutrition_status ?? "missing"}` },
+        proteinPer100Calories: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
+        proteinCaloriePercentage: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
+        costPer25gProtein: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
+        proteinPerInr100: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
+        caloriesFor25gProtein: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
+        sugarPer25gProtein: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
+        saturatedFatPer25gProtein: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
+        fibrePer100Calories: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
+        pricePerServing: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
+        totalProteinInPack: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
       };
   return {
     id: row.id,
@@ -205,7 +210,7 @@ function filtersFor(input: SearchInput): { sql: string; bindings: Array<string |
 export async function searchProducts(db: D1Database, input: SearchInput): Promise<CatalogResponse> {
   const filters = filtersFor(input);
   const order = {
-    protein_density: "CASE WHEN n.status IN ('verified', 'unverified') AND n.calories > 0 THEN n.protein_grams * 100.0 / n.calories END DESC, p.name_normalized",
+    protein_density: "CASE WHEN n.status IN ('verified', 'unverified') AND n.calories > 0 AND n.protein_grams >= 0 AND n.protein_grams * 4.0 <= n.calories * 1.1 THEN n.protein_grams * 100.0 / n.calories END DESC, p.name_normalized",
     cost: "CASE WHEN n.status IN ('verified', 'unverified') AND n.protein_grams > 0 AND p.net_quantity_grams > 0 THEN o.selling_price * 2500.0 / (p.net_quantity_grams * n.protein_grams) END ASC NULLS LAST, p.name_normalized",
     completeness: "p.completeness DESC, p.name_normalized",
     name: "p.name_normalized, p.brand_normalized",
