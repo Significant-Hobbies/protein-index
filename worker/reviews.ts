@@ -62,16 +62,26 @@ function validHttpsUrl(value: unknown): value is string {
   try { return new URL(value).protocol === "https:"; } catch { return false; }
 }
 
+function nutritionValue(value: unknown): number | null {
+  return value === null || (typeof value === "number" && Number.isFinite(value)) ? value : Number.NaN;
+}
+
 function robotoffCandidate(evidenceJson: string, productGtin: string | null): RobotoffCandidate | null {
   const evidence = record(parsed(evidenceJson));
   if (evidence?.code !== "robotoff_nutrition_candidate") return null;
   const candidate = record(record(evidence.details)?.candidate);
   const nutrition = record(candidate?.nutritionPer100g);
   if (!candidate || !nutrition) return null;
-  const normalized = Object.fromEntries(NUTRITION_FIELDS.map(([field]) => {
-    const value = nutrition[field];
-    return [field, value === null || (typeof value === "number" && Number.isFinite(value)) ? value : Number.NaN];
-  })) as unknown as NutritionPer100g;
+  const normalized: NutritionPer100g = {
+    calories: nutritionValue(nutrition.calories),
+    proteinGrams: nutritionValue(nutrition.proteinGrams),
+    carbohydrateGrams: nutritionValue(nutrition.carbohydrateGrams),
+    sugarGrams: nutritionValue(nutrition.sugarGrams),
+    fatGrams: nutritionValue(nutrition.fatGrams),
+    saturatedFatGrams: nutritionValue(nutrition.saturatedFatGrams),
+    fibreGrams: nutritionValue(nutrition.fibreGrams),
+    sodiumMg: nutritionValue(nutrition.sodiumMg),
+  };
   const observedAt = typeof candidate.observedAt === "string" ? new Date(candidate.observedAt) : new Date(Number.NaN);
   const barcode = typeof candidate.barcode === "string" ? normalizeGtin(candidate.barcode) : null;
   if (
