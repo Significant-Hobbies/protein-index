@@ -16,6 +16,12 @@ async function replaySeed(): Promise<void> {
   }
 }
 
+async function applyQueries(queries: string[]): Promise<void> {
+  for (let index = 0; index < queries.length; index += 50) {
+    await env.DB.batch(queries.slice(index, index + 50).map((query) => env.DB.prepare(query)));
+  }
+}
+
 async function identityReview(sourceRecordId: string): Promise<ReviewResponse["items"][number]> {
   const source = await env.DB.prepare("SELECT id FROM source_records WHERE source_record_id = ?")
     .bind(sourceRecordId).first<{ id: string }>();
@@ -384,6 +390,86 @@ describe("Worker catalog API", () => {
     const current = await env.DB.prepare("SELECT COUNT(*) AS count FROM evidence_decisions WHERE id = ?")
       .bind(`evd_${review.reviewId}`).first<{ count: number }>();
     expect(current?.count).toBe(0);
+  });
+
+  it("replays unchanged verify/reject decisions and reopens changed candidate evidence", async () => {
+    await applyQueries(env.TEST_ROBOTOFF_REPLAY_QUERIES);
+    const reviews = await env.DB.prepare(`SELECT r.id, s.source_record_id
+      FROM review_items r JOIN source_records s ON s.id = r.source_record_id
+      WHERE s.source_id = 'open_food_facts_robotoff' AND s.source_record_id IN ('8900000000012:901', '8900000000012:902')
+      AND r.status = 'open' ORDER BY s.source_record_id`).all<{ id: string; source_record_id: string }>();
+    expect(reviews.results).toHaveLength(2);
+    const verifyReview = reviews.results.find(({ source_record_id }) => source_record_id.endsWith(":901"));
+    const rejectReview = reviews.results.find(({ source_record_id }) => source_record_id.endsWith(":902"));
+    if (!verifyReview || !rejectReview) throw new Error("Expected both replay candidate reviews");
+    const verifyResponse = await worker.fetch(`http://localhost/api/reviews/${verifyReview.id}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "verify_nutrition",
+        rationale: "Synthetic current-label replay verification",
+        evidenceUrl: "https://images.openfoodfacts.org/images/products/890/000/000/0012/901.jpg",
+      }),
+    });
+    expect(verifyResponse.status).toBe(200);
+    const rejectResponse = await worker.fetch(`http://localhost/api/reviews/${rejectReview.id}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "reject_nutrition", rationale: "Synthetic candidate rejection" }),
+    });
+    expect(rejectResponse.status).toBe(200);
+
+    const source = await env.DB.prepare("SELECT product_id FROM source_records WHERE source_record_id = '8900000000012:901'")
+      .first<{ product_id: string }>();
+    if (!source?.product_id) throw new Error("Expected replay source product");
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM nutrition_facts WHERE product_id = ?").bind(source.product_id),
+      env.DB.prepare("DELETE FROM nutrient_values WHERE product_id = ? AND source_record_id IN (SELECT id FROM source_records WHERE source_id = 'open_food_facts_robotoff')").bind(source.product_id),
+      env.DB.prepare("DELETE FROM field_observations WHERE product_id = ? AND field_path LIKE 'nutrition.%'").bind(source.product_id),
+      env.DB.prepare("DELETE FROM evidence_outcomes WHERE product_id = ? AND field_family = 'nutrition'").bind(source.product_id),
+    ]);
+    await applyQueries(env.TEST_ROBOTOFF_REPLAY_QUERIES);
+
+    const reconstructed = await env.DB.prepare(`SELECT status, confidence, authority, calories, protein_grams,
+      carbohydrate_grams, fat_grams, label_verified_at FROM nutrition_facts WHERE product_id = ?`)
+      .bind(source.product_id).first<Record<string, unknown>>();
+    expect(reconstructed).toMatchObject({
+      status: "verified",
+      confidence: "high",
+      authority: 100,
+      calories: 365,
+      protein_grams: 25,
+      carbohydrate_grams: 46.5,
+      fat_grams: 8.9,
+    });
+    expect(reconstructed?.label_verified_at).toEqual(expect.any(String));
+    const unresolved = await env.DB.prepare(`SELECT COUNT(*) AS count FROM review_items r
+      JOIN source_records s ON s.id = r.source_record_id
+      WHERE s.source_record_id IN ('8900000000012:901', '8900000000012:902') AND r.status = 'open'`)
+      .first<{ count: number }>();
+    expect(unresolved?.count).toBe(0);
+    const decisions = await env.DB.prepare(`SELECT decision, COUNT(*) AS count FROM evidence_decisions
+      WHERE source_record_key IN ('8900000000012:901', '8900000000012:902') GROUP BY decision ORDER BY decision`)
+      .all<{ decision: string; count: number }>();
+    expect(decisions.results).toEqual([{ decision: "reject", count: 1 }, { decision: "verify", count: 1 }]);
+
+    await applyQueries(env.TEST_ROBOTOFF_DRIFT_QUERIES);
+    const drifted = await env.DB.prepare(`SELECT r.status, r.evidence_json FROM review_items r
+      JOIN source_records s ON s.id = r.source_record_id
+      WHERE s.source_record_id = '8900000000012:901' AND r.status = 'open' ORDER BY r.created_at DESC LIMIT 1`)
+      .first<{ status: string; evidence_json: string }>();
+    expect(drifted?.status).toBe("open");
+    const driftEvidence = JSON.parse(drifted?.evidence_json ?? "null") as { details?: { candidateHash?: string } };
+    const oldHash = await env.DB.prepare("SELECT candidate_hash FROM evidence_decisions WHERE source_record_key = '8900000000012:901'")
+      .first<{ candidate_hash: string }>();
+    expect(driftEvidence.details?.candidateHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(driftEvidence.details?.candidateHash).not.toBe(oldHash?.candidate_hash);
+    const staleFact = await env.DB.prepare("SELECT status, label_verified_at FROM nutrition_facts WHERE product_id = ?")
+      .bind(source.product_id).first<{ status: string; label_verified_at: string | null }>();
+    expect(staleFact).toEqual({ status: "conflict", label_verified_at: null });
+    const staleOutcome = await env.DB.prepare("SELECT COUNT(*) AS count FROM evidence_outcomes WHERE product_id = ? AND field_family = 'nutrition'")
+      .bind(source.product_id).first<{ count: number }>();
+    expect(staleOutcome?.count).toBe(0);
   });
 
   it("fails closed when Robotoff review evidence is incomplete", async () => {

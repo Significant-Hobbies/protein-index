@@ -121,7 +121,7 @@ export async function sha256Hex(value: unknown): Promise<string> {
 export function canonicalNutritionCandidate(candidate: NutritionCandidate): NutritionCandidate {
   return {
     predictionId: candidate.predictionId,
-    barcode: candidate.barcode,
+    barcode: normalizeGtin(candidate.barcode) ?? candidate.barcode,
     imageId: candidate.imageId,
     imageUrl: candidate.imageUrl,
     modelName: candidate.modelName,

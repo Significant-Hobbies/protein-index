@@ -7,10 +7,10 @@
 
 ## 2. Reconciliation and replay
 
-- [ ] 2.1 Include the canonical candidate hash in Robotoff staged evidence and review records
-- [ ] 2.2 Reuse matching active verify decisions during import and reconstruct verified nutrition, nutrient values, field observations, and evidence outcomes
-- [ ] 2.3 Reuse matching active reject decisions without reopening the candidate or creating terminal unavailable nutrition
-- [ ] 2.4 Add replay tests for unchanged verified/rejected evidence and changed source or candidate hashes
+- [x] 2.1 Include the canonical candidate hash in Robotoff staged evidence and review records
+- [x] 2.2 Reuse matching active verify decisions during import and reconstruct verified nutrition, nutrient values, field observations, and evidence outcomes
+- [x] 2.3 Reuse matching active reject decisions without reopening the candidate or creating terminal unavailable nutrition
+- [x] 2.4 Add replay tests for unchanged verified/rejected evidence and changed source or candidate hashes
 
 ## 3. Portable review bundles
 

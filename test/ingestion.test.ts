@@ -530,7 +530,11 @@ describe("Robotoff label evidence", () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]).toMatchObject({ basis: "per_100g", modelVersion: "nutrition_extractor-2.0", nutritionPer100g: { calories: 365, proteinGrams: 25 } });
     expect(result.staged[0]?.nutrition.status).toBe("missing");
-    expect(result.staged[0]?.rawEvidence).toMatchObject({ candidate: { imageId: "7" } });
+    expect(result.staged[0]?.rawEvidence).toMatchObject({ candidate: { imageId: "7" }, candidateHash: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(result.staged[0]?.validationIssues).toContainEqual(expect.objectContaining({
+      code: "robotoff_nutrition_candidate",
+      details: expect.objectContaining({ candidateHash: expect.stringMatching(/^[a-f0-9]{64}$/) }),
+    }));
     expect(result.staged[0]?.validationIssues.some(({ code }) => code === "robotoff_nutrition_candidate")).toBe(true);
   });
 
@@ -581,7 +585,10 @@ describe("Robotoff label evidence", () => {
     const sql = await readFile(sqlPath, "utf8");
     expect(sql).toContain("'nutrition_validation'");
     expect(sql).toContain("robotoff_nutrition_candidate");
-    expect(sql).not.toContain("INSERT INTO nutrition_facts");
+    expect(sql).toContain("evidence_decisions");
+    expect(sql).toContain("candidate_hash");
+    expect(sql).toContain("INSERT INTO nutrition_facts");
+    expect(sql).toContain("d.decision = 'verify'");
     expect(result.staged[0]?.nutrition.status).toBe("missing");
   });
 

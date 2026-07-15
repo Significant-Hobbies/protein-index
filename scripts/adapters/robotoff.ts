@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { classifyProtein } from "../../shared/classification";
+import { canonicalJson, canonicalNutritionCandidate } from "../../shared/evidence-decisions";
 import { normalizeGtin } from "../../shared/gtin";
 import { calculateCompleteness } from "../../shared/metrics";
 import { emptyNutrition, normalizePerServing, validateNutrition } from "../../shared/nutrition";
@@ -236,6 +237,9 @@ function stagedReview(
   const predictionId = text(parsed.prediction.id) ?? createHash("sha256").update(JSON.stringify(parsed.prediction)).digest("hex").slice(0, 16);
   const observedAt = parsed.candidate?.observedAt ?? predictionTime(parsed.prediction);
   const sourceUrl = `https://robotoff.openfoodfacts.org/api/v1/image_predictions?barcode=${encodeURIComponent(context.code)}&model_name=nutrition_extractor`;
+  const candidateHash = parsed.candidate
+    ? createHash("sha256").update(canonicalJson(canonicalNutritionCandidate(parsed.candidate))).digest("hex")
+    : null;
   const candidateIssue: ValidationIssue[] = parsed.candidate ? [{
     code: crossImageConflict ? "robotoff_image_conflict" : "robotoff_nutrition_candidate",
     message: crossImageConflict
@@ -243,7 +247,7 @@ function stagedReview(
       : "Robotoff produced a plausible nutrition candidate that requires label verification.",
     severity: crossImageConflict ? "error" : "warning",
     field: "nutrition",
-    details: { candidate: parsed.candidate },
+    details: { candidate: parsed.candidate, candidateHash },
   }] : [];
   const issues = [...parsed.issues, ...candidateIssue];
   const nutrition = {
@@ -258,7 +262,7 @@ function stagedReview(
     labelVerifiedAt: null,
   };
   const classification = classifyProtein({ name: context.name, categories: context.categoryRaw ?? context.category, labels: "", nutrition });
-  const rawEvidence = { prediction: parsed.prediction, candidate: parsed.candidate, crossImageConflict };
+  const rawEvidence = { prediction: parsed.prediction, candidate: parsed.candidate, candidateHash, crossImageConflict };
   const completeness = calculateCompleteness({
     gtin: normalizeGtin(context.code),
     brand: context.brand,
