@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { normalizeOpenFoodFactsRecord, stageOpenFoodFacts } from "../scripts/adapters/open-food-facts";
 import { enrichOpenFoodFactsApi } from "../scripts/adapters/open-food-facts-api";
+import { extractRobotoffApi } from "../scripts/adapters/robotoff-api";
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "../scripts/adapters/robotoff";
 import { assertPublicationEvidence } from "../scripts/publication";
 import { emitImportSql } from "../scripts/reconcile";
@@ -63,6 +64,28 @@ describe("Open Food Facts bulk staging", () => {
       sourceComplete: true,
       terminalEvidence: "end_of_file",
       stagedRecords: 8,
+      indiaRecords: 10,
+    } as SourceManifest;
+    const report = {
+      sourceComplete: true,
+      marketComplete: false,
+      requestedBarcodes: 10,
+      accountedBarcodes: 10,
+      outcomes: { failed: 0 },
+      exclusions: { records: 2, reconcilesIndiaSlice: true },
+    };
+    expect(() => assertPublicationEvidence(manifest, report)).not.toThrow();
+    expect(() => assertPublicationEvidence(manifest, { ...report, accountedBarcodes: 9 })).toThrow("barcode accounting");
+    expect(() => assertPublicationEvidence(manifest, { ...report, outcomes: { failed: 1 } })).toThrow("failed barcodes");
+  });
+
+  it("requires terminal barcode accounting for multi-prediction Robotoff evidence", () => {
+    const manifest = {
+      source: "open_food_facts_robotoff",
+      mode: "production",
+      sourceComplete: true,
+      terminalEvidence: "end_of_file",
+      stagedRecords: 14,
       indiaRecords: 10,
     } as SourceManifest;
     const report = {
@@ -487,6 +510,15 @@ describe("Robotoff label evidence", () => {
 
   const nutrient = (value: number, unit: string, score = 0.98) => ({ value: String(value), unit, score });
 
+  async function sourceWithNutritionImage(directory: string) {
+    const input = join(directory, "source.jsonl");
+    await writeFile(input, `${JSON.stringify({
+      ...indiaProduct,
+      image_nutrition_url: context.nutritionImageUrl,
+    })}\n`, "utf8");
+    return stageOpenFoodFacts({ input, outputDirectory: join(directory, "source"), mode: "sample", limit: null });
+  }
+
   it("retains a plausible per-100-g prediction as review evidence only", () => {
     const response = { image_predictions: [prediction(1, "7", {
       "energy-kcal_100g": nutrient(365, "kcal"),
@@ -590,5 +622,81 @@ describe("Robotoff label evidence", () => {
     })] }, context, 0.85);
     expect(result.candidates).toHaveLength(0);
     expect(result.issues.some(({ code }) => code === "robotoff_low_confidence_nutrient")).toBe(true);
+  });
+
+  it("exhausts label-image barcodes into resumable review candidates", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-api-"));
+    const source = await sourceWithNutritionImage(directory);
+    const outputDirectory = join(directory, "robotoff");
+    let requests = 0;
+    const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
+      requests += 1;
+      const url = new URL(input.toString());
+      expect(url.origin + url.pathname).toBe("https://robotoff.openfoodfacts.org/api/v1/image_predictions");
+      expect(url.searchParams.get("barcode")).toBe("08900000000012");
+      expect(url.searchParams.get("model_name")).toBe("nutrition_extractor");
+      expect(url.searchParams.get("type")).toBe("nutrition_extraction");
+      expect(new Headers(init?.headers).get("user-agent")).toContain("protein-index");
+      return new Response(JSON.stringify({ image_predictions: [prediction(9, "15", {
+        "energy-kcal_100g": nutrient(365, "kcal"),
+        proteins_100g: nutrient(25, "g"),
+      })] }), { status: 200 });
+    };
+    const result = await extractRobotoffApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      fetcher,
+    });
+    expect(requests).toBe(1);
+    expect(result.outcomes).toEqual({ candidate: 1, no_prediction: 0, rejected: 0, failed: 0 });
+    expect(result.manifest).toMatchObject({
+      source: "open_food_facts_robotoff",
+      sourceComplete: true,
+      recordsRead: 1,
+      indiaRecords: 1,
+      stagedRecords: 1,
+    });
+    const staged = JSON.parse((await readFile(result.stagedPath, "utf8")).trim()) as {
+      nutrition: { status: string };
+      validationIssues: Array<{ code: string }>;
+    };
+    expect(staged.nutrition.status).toBe("missing");
+    expect(staged.validationIssues).toContainEqual(expect.objectContaining({ code: "robotoff_nutrition_candidate" }));
+    const report = JSON.parse(await readFile(result.reportPath, "utf8")) as Record<string, unknown>;
+    expect(report).toMatchObject({ requestedBarcodes: 1, accountedBarcodes: 1, fetchedBarcodes: 1, resumedBarcodes: 0 });
+
+    const resumed = await extractRobotoffApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      fetcher: async () => { throw new Error("resume should not fetch"); },
+    });
+    const resumedReport = JSON.parse(await readFile(resumed.reportPath, "utf8")) as Record<string, unknown>;
+    expect(resumedReport).toMatchObject({ requestedBarcodes: 1, accountedBarcodes: 1, fetchedBarcodes: 0, resumedBarcodes: 1 });
+  });
+
+  it("accounts for absent predictions without inventing nutrition", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-empty-"));
+    const source = await sourceWithNutritionImage(directory);
+    const result = await extractRobotoffApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory: join(directory, "robotoff"),
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      fetcher: async () => new Response(JSON.stringify({ image_predictions: [] }), { status: 200 }),
+    });
+    expect(result.outcomes).toEqual({ candidate: 0, no_prediction: 1, rejected: 0, failed: 0 });
+    expect(await readFile(result.stagedPath, "utf8")).toBe("");
+    const exclusion = JSON.parse((await readFile(result.exclusionsPath, "utf8")).trim()) as { status: string; reasons: string[] };
+    expect(exclusion).toEqual(expect.objectContaining({ status: "no_prediction", reasons: ["no_nutrition_extraction_prediction"] }));
   });
 });

@@ -26,6 +26,61 @@ async function identityReview(sourceRecordId: string): Promise<ReviewResponse["i
   return review;
 }
 
+async function insertRobotoffReview(input: {
+  suffix: string;
+  evidence: unknown;
+}): Promise<{ reviewId: string; productId: string; sourceRecordId: string }> {
+  const product = await env.DB.prepare("SELECT id, gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+    .first<{ id: string; gtin: string }>();
+  const run = await env.DB.prepare("SELECT id FROM ingestion_runs ORDER BY started_at LIMIT 1").first<{ id: string }>();
+  if (!product || !run) throw new Error("Expected seeded product and ingestion run");
+  const sourceRecordId = `src_robotoff_${input.suffix}`;
+  const reviewId = `rev_robotoff_${input.suffix}`;
+  const observedAt = "2026-07-15T00:00:00.000Z";
+  await env.DB.batch([
+    env.DB.prepare(`INSERT OR IGNORE INTO sources
+      (id, name, kind, identity_authority, nutrition_authority, ingredient_authority,
+        license_url, retention_notes, credential_requirement, created_at)
+      VALUES ('open_food_facts_robotoff', 'Open Food Facts Robotoff', 'open_data', 0, 20, 0,
+        'https://opendatacommons.org/licenses/odbl/1-0/', 'Review evidence only', NULL, ?)`)
+      .bind(observedAt),
+    env.DB.prepare(`INSERT INTO source_records
+      (id, source_id, source_record_id, product_id, source_url, content_hash, identity_hash,
+        observed_at, first_seen_run_id, last_seen_run_id, raw_evidence_json, resolution_rule)
+      VALUES (?, 'open_food_facts_robotoff', ?, ?, ?, ?, ?, ?, ?, ?, '{}', 'exact_gtin')`)
+      .bind(sourceRecordId, `${product.gtin}:${input.suffix}`, product.id,
+        `https://robotoff.openfoodfacts.org/api/v1/image_predictions?barcode=${product.gtin}`,
+        `hash_${input.suffix}`, `identity_${input.suffix}`, observedAt, run.id, run.id),
+    env.DB.prepare(`INSERT INTO review_items
+      (id, type, priority, status, source_record_id, product_id, candidate_product_ids_json,
+        evidence_json, created_at)
+      VALUES (?, 'nutrition_validation', 50, 'open', ?, ?, '[]', ?, ?)`)
+      .bind(reviewId, sourceRecordId, product.id, JSON.stringify(input.evidence), observedAt),
+  ]);
+  return { reviewId, productId: product.id, sourceRecordId };
+}
+
+function robotoffEvidence(barcode: string, nutritionPer100g: Record<string, number | null>): unknown {
+  return {
+    code: "robotoff_nutrition_candidate",
+    severity: "warning",
+    field: "nutrition",
+    details: {
+      candidate: {
+        predictionId: "prediction-1",
+        barcode,
+        imageId: "image-1",
+        imageUrl: "https://images.openfoodfacts.org/images/products/label.jpg",
+        modelName: "nutrition_extractor",
+        modelVersion: "nutrition_extractor-2.0",
+        observedAt: "2026-07-14T00:00:00.000Z",
+        minimumConfidence: 0.93,
+        nutritionPer100g,
+      },
+    },
+  };
+}
+
 describe("Worker catalog API", () => {
   it("reports seeded health and configured-source coverage", async () => {
     const healthResponse = await worker.fetch("http://localhost/api/health");
@@ -160,6 +215,106 @@ describe("Worker catalog API", () => {
       decisionEvidenceUrl: "https://example.invalid/label-proof",
       decidedBy: "local_operator",
     });
+  });
+
+  it("applies the exact reviewed Robotoff candidate and records its evidence atomically", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const nutrition = {
+      calories: 400,
+      proteinGrams: 40,
+      carbohydrateGrams: 30,
+      sugarGrams: 5,
+      fatGrams: 10,
+      saturatedFatGrams: 3,
+      fibreGrams: 4,
+      sodiumMg: 250,
+    };
+    const review = await insertRobotoffReview({ suffix: "verify", evidence: robotoffEvidence(product.gtin, nutrition) });
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "verify_nutrition",
+        rationale: "Reviewed against the current package label",
+        evidenceUrl: "https://images.openfoodfacts.org/images/products/label.jpg",
+      }),
+    });
+    expect(response.status).toBe(200);
+    const fact = await env.DB.prepare(`SELECT source_record_id, status, confidence, authority, basis,
+      preparation_state, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams,
+      saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at
+      FROM nutrition_facts WHERE product_id = ?`).bind(review.productId).first<Record<string, unknown>>();
+    expect(fact).toMatchObject({
+      source_record_id: review.sourceRecordId,
+      status: "verified",
+      confidence: "high",
+      authority: 100,
+      basis: "per_100g",
+      preparation_state: "as_sold",
+      calories: 400,
+      protein_grams: 40,
+      carbohydrate_grams: 30,
+      sugar_grams: 5,
+      fat_grams: 10,
+      saturated_fat_grams: 3,
+      fibre_grams: 4,
+      sodium_mg: 250,
+      observed_at: "2026-07-14T00:00:00.000Z",
+    });
+    expect(fact?.label_verified_at).toEqual(expect.any(String));
+    const outcome = await env.DB.prepare("SELECT outcome, source_record_id, evidence_url, decided_by FROM evidence_outcomes WHERE product_id = ? AND field_family = 'nutrition'")
+      .bind(review.productId).first<Record<string, unknown>>();
+    expect(outcome).toEqual({
+      outcome: "verified",
+      source_record_id: review.sourceRecordId,
+      evidence_url: "https://images.openfoodfacts.org/images/products/label.jpg",
+      decided_by: "local_operator",
+    });
+    const selected = await env.DB.prepare("SELECT COUNT(*) AS count FROM field_observations WHERE product_id = ? AND field_path LIKE 'nutrition.%' AND selected = 1")
+      .bind(review.productId).first<{ count: number }>();
+    expect(selected?.count).toBe(8);
+  });
+
+  it("rejects a Robotoff candidate without clearing independently sourced nutrition", async () => {
+    const product = await env.DB.prepare(`SELECT p.gtin, nf.calories, nf.protein_grams
+      FROM products p JOIN nutrition_facts nf ON nf.product_id = p.id
+      WHERE p.is_active = 1 AND p.gtin IS NOT NULL ORDER BY p.id LIMIT 1`)
+      .first<{ gtin: string; calories: number; protein_grams: number }>();
+    if (!product) throw new Error("Expected seeded nutrition");
+    const review = await insertRobotoffReview({ suffix: "reject", evidence: robotoffEvidence(product.gtin, {
+      calories: 400, proteinGrams: 40, carbohydrateGrams: 30, sugarGrams: 5,
+      fatGrams: 10, saturatedFatGrams: 3, fibreGrams: 4, sodiumMg: 250,
+    }) });
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "reject_nutrition", rationale: "Label values do not match the current pack" }),
+    });
+    expect(response.status).toBe(200);
+    const unchanged = await env.DB.prepare("SELECT calories, protein_grams FROM nutrition_facts WHERE product_id = ?")
+      .bind(review.productId).first<{ calories: number; protein_grams: number }>();
+    expect(unchanged).toEqual({ calories: product.calories, protein_grams: product.protein_grams });
+  });
+
+  it("fails closed when Robotoff review evidence is incomplete", async () => {
+    const review = await insertRobotoffReview({
+      suffix: "invalid",
+      evidence: { code: "robotoff_nutrition_candidate", details: { candidate: { minimumConfidence: 0.99 } } },
+    });
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "verify_nutrition",
+        rationale: "Attempted verification",
+        evidenceUrl: "https://images.openfoodfacts.org/images/products/label.jpg",
+      }),
+    });
+    expect(response.status).toBe(400);
+    const stillOpen = await env.DB.prepare("SELECT status FROM review_items WHERE id = ?").bind(review.reviewId).first<{ status: string }>();
+    expect(stillOpen?.status).toBe("open");
   });
 
   it("persists a manual identity match and reuses it on replay", async () => {

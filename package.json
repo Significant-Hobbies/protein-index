@@ -20,6 +20,7 @@
     "db:migrate": "wrangler d1 migrations apply protein-index --local",
     "data:stage": "tsx scripts/sync.ts stage",
     "data:enrich": "tsx scripts/sync.ts enrich",
+    "data:extract": "tsx scripts/sync.ts extract",
     "data:seed": "tsx scripts/sync.ts seed",
     "data:coverage": "tsx scripts/sync.ts coverage",
     "data:publish": "tsx scripts/sync.ts publish",

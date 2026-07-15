@@ -60,6 +60,18 @@ export function validateNutrition(nutrition: NutritionPer100g): ValidationIssue[
       field: "calories",
     });
   }
+  if (nutrition.calories !== null && nutrition.calories > 0) {
+    const minimumMacroCalories = (nutrition.proteinGrams ?? 0) * 4
+      + (nutrition.fatGrams ?? 0) * 9;
+    if (minimumMacroCalories > nutrition.calories * 1.1) {
+      issues.push({
+        code: "macro_energy_exceeds_total",
+        message: "Calories implied by declared protein and fat exceed total calories",
+        severity: "error",
+        field: "calories",
+      });
+    }
+  }
   if (
     nutrition.saturatedFatGrams !== null &&
     nutrition.fatGrams !== null &&

@@ -61,6 +61,8 @@ must pass desktop/mobile verification.
 - 2026-07-15 — reviewed enrichment published with 34,971 retained source records; calories-plus-protein coverage increased from 1,688 to 7,247 products and marketed-protein coverage from 190 to 708 of 778 products
 - 2026-07-16 — evidence-aware dashboard release `2e8d315d-eca7-4dcb-a009-aab051d9b233` deployed; live health, exact default query, descending protein-density order, completion gate, mutation denial, security headers, and provider-neutral consumer copy verified
 - 2026-07-16 — live ranking audit caught contradictory community energy values; protein-energy and severe full-macro conflicts are now withheld from metrics and future ingestion marks them as conflicts
+- 2026-07-16 — review decisions now apply the exact validated label candidate atomically, retain field-level provenance and terminal evidence, and reject malformed candidates without overwriting independently sourced nutrition
+- 2026-07-16 — resumable Robotoff extraction and weekly GitHub automation implemented for every source product with a nutrition-label image; a five-barcode live sample reconciled all outcomes and rejected a physically impossible partial-macro prediction
 
 ## Products
 
@@ -99,6 +101,11 @@ must pass desktop/mobile verification.
   label-image coverage, extraction candidates, and verified product coverage
 - Checksummed richer-source backfill with exact barcode accounting, zero-failure
   publication guard, and resumable per-batch response evidence
+- Scheduled, identified, rate-limited Robotoff extraction across the complete
+  nutrition-label-image cohort, with per-barcode checkpoints and candidate,
+  no-prediction, rejection, and failure accounting
+- Evidence-specific label review that promotes only the reviewed candidate's
+  validated values and leaves rejected candidates isolated from existing facts
 
 ## Todo / Planned / Deferred / Blocked
 
@@ -109,7 +116,7 @@ must pass desktop/mobile verification.
 3. Apply for GS1 India DataKart access and map its commercial/licensing constraints.
 4. Validate Amazon and Flipkart affiliate integrations against current India terms.
 5. Evaluate one quick-commerce provider using a coverage, freshness, legality, and cost scorecard.
-6. Add label-image OCR extraction with anomaly validation and human review.
+6. Add ingredient-label OCR extraction with anomaly validation and human review.
 7. Deferred: ONDC offer ingestion until the core catalog and retailer reconciliation are stable.
 8. Deferred: expand the generic nutrient/product-kind model into full macros,
    micronutrients, raw foods, foodservice, prepared dishes, and recipes after the

@@ -65,6 +65,7 @@ describe("nutrition accuracy and classification", () => {
     const impossible = { ...emptyNutrition(), calories: 100, proteinGrams: 120, carbohydrateGrams: 20, fatGrams: 5 };
     expect(validateNutrition(impossible).map(({ code }) => code)).toEqual(expect.arrayContaining(["nutrient_over_100g", "protein_energy_exceeds_total", "macro_total_impossible", "calorie_macro_mismatch"]));
     expect(validateNutrition({ ...emptyNutrition(), calories: 0.25, proteinGrams: 10.8 })).toContainEqual(expect.objectContaining({ code: "protein_energy_exceeds_total", severity: "error" }));
+    expect(validateNutrition({ ...emptyNutrition(), calories: 274, proteinGrams: 15.9, fatGrams: 69.1 })).toContainEqual(expect.objectContaining({ code: "macro_energy_exceeds_total", severity: "error" }));
     expect(validateNutrition({ ...emptyNutrition(), calories: 33, proteinGrams: 8.59, carbohydrateGrams: 28.1, fatGrams: 1.2 })).toContainEqual(expect.objectContaining({ code: "calorie_macro_mismatch", severity: "error" }));
   });
 

@@ -76,6 +76,23 @@ accounts for enriched, unchanged, not-found, rejected, and failed barcodes. The
 weekly enrichment workflow creates a reviewable artifact; publication remains
 manual.
 
+Extract review-gated nutrition candidates from every available label image:
+
+```bash
+pnpm data:extract -- \
+  --source robotoff \
+  --input .data/sample/staged-products.jsonl \
+  --manifest .data/sample/manifest.json \
+  --output .data/robotoff \
+  --mode production
+```
+
+The Robotoff job is resumable per barcode, identifies the client, observes the
+documented request limit, and records every eligible barcode as candidate,
+no-prediction, rejected, or failed. Model output never becomes verified
+nutrition automatically; an operator must review the current label image, and
+verification applies that exact candidate with its provenance.
+
 ## Reviewed catalog publication
 
 Validate and publish an existing source-complete snapshot locally:

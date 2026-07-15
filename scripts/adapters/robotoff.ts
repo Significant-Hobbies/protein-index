@@ -66,7 +66,7 @@ function number(value: unknown): number | null {
 }
 
 function predictionTime(prediction: RawRecord): string {
-  for (const value of [prediction.timestamp, isRecord(prediction.image) ? prediction.image.uploaded_at : null]) {
+  for (const value of [isRecord(prediction.image) ? prediction.image.uploaded_at : null, prediction.timestamp]) {
     const raw = text(value);
     if (!raw) continue;
     const parsed = new Date(raw.endsWith("Z") ? raw : `${raw}Z`);
