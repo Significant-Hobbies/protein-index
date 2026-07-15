@@ -125,6 +125,9 @@ must pass desktop/mobile verification.
   model output enters the review queue and never becomes verified nutrition by itself
 - Ingredient-label extraction retains exact model, image, text, language,
   bounding-box, parsed-tree, and count evidence without auto-verification
+- Successful weekly source snapshots automatically trigger both nutrition- and
+  ingredient-label candidate extraction; publication and verification remain
+  separately guarded
 - Reviewer-confirmed ingredient transcription atomically rebuilds normalized
   ingredient rows and exact provenance, while source drift revokes verified trust
 - Nutrition and ingredient decisions share a checksum-validated, commit-pinned,
