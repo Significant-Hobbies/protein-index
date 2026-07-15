@@ -176,12 +176,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          cd "$OUTPUT_PATH"
           sha256sum \
-            "$OUTPUT_PATH/manifest.json" \
-            "$OUTPUT_PATH/report.json" \
-            "$OUTPUT_PATH/source-index.jsonl" \
-            "$OUTPUT_PATH/staged-products.jsonl" \
-            > "$OUTPUT_PATH/checksums.sha256"
+            manifest.json \
+            report.json \
+            source-index.jsonl \
+            staged-products.jsonl \
+            > checksums.sha256
 
       - name: Upload sync diagnostics
         if: always()

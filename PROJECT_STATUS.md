@@ -44,12 +44,13 @@ ONDC integration; purchasing or checkout.
 - 2026-07-15 — local catalog, D1 ingestion, Worker API, operator UI, source-complete Open Food Facts adapter, and scheduled sync workflow implemented
 - 2026-07-15 — durable match/create-new/keep-unmatched identity decisions implemented and proven across import replay
 - 2026-07-15 — 19 domain/ingestion tests and 7 Worker+D1 integration tests passing; live three-record India sample staged without inventing missing nutrition
+- 2026-07-15 — first exhaustive Open Food Facts workflow completed: 4,535,553 rows traversed, 21,188 India-tagged rows found, and 17,732 valid product records staged
 
 ## Products
 
 - `protein-index` web application and Worker API — implemented locally, not deployed
 - Offline Open Food Facts ingestion and reconciliation CLI — implemented
-- Weekly/manual Open Food Facts source-sync workflow — implemented, pending first full GitHub run
+- Weekly/manual Open Food Facts source-sync workflow — implemented; first full continuity baseline completed in GitHub Actions run `29419259301`
 
 ## Features (shipped)
 
@@ -68,8 +69,7 @@ ONDC integration; purchasing or checkout.
 
 ## Todo / Planned / Deferred / Blocked
 
-1. Run and inspect the first full scheduled source-sync workflow and manually verify the first 500
-   high-demand Indian products.
+1. Manually verify the first 500 high-demand Indian products against current package labels or authoritative brand-owner evidence.
 2. Complete desktop/mobile browser verification; the in-app browser was unavailable during the implementation run.
 3. Apply for GS1 India DataKart access and map its commercial/licensing constraints.
 4. Validate Amazon and Flipkart affiliate integrations against current India terms.
