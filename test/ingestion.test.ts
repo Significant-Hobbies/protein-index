@@ -8,6 +8,14 @@ import { extractRobotoffApi } from "../scripts/adapters/robotoff-api";
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "../scripts/adapters/robotoff";
 import { assertPublicationEvidence } from "../scripts/publication";
 import { emitImportSql } from "../scripts/reconcile";
+import {
+  emitReviewDecisionSql,
+  readReviewDecisionBundle,
+  validateExistingEvidenceDecisions,
+  validateReviewDecisionSources,
+  writeReviewDecisionBundle,
+} from "../scripts/review-bundles";
+import { nutritionCandidateFromEvidence, nutritionCandidateHash, type EvidenceDecisionInput } from "../shared/evidence-decisions";
 import type { SourceManifest } from "../shared/types";
 
 const indiaProduct = {
@@ -33,6 +41,111 @@ const indiaProduct = {
   },
   last_modified_t: 1_752_537_600,
 };
+
+async function reviewDecision(id: string, decision: "verify" | "reject" = "verify"): Promise<EvidenceDecisionInput> {
+  const evidence = {
+    code: "robotoff_nutrition_candidate",
+    details: { candidate: {
+      predictionId: `prediction-${id}`,
+      barcode: "8900000000012",
+      imageId: `image-${id}`,
+      imageUrl: `https://images.openfoodfacts.org/${id}.jpg`,
+      modelName: "nutrition_extractor",
+      modelVersion: "nutrition_extractor-2.0",
+      observedAt: "2026-07-15T00:00:00.000Z",
+      basis: "per_100g",
+      minimumConfidence: 0.95,
+      nutritionPer100g: {
+        calories: 365, proteinGrams: 25, carbohydrateGrams: 46.5, sugarGrams: 4,
+        fatGrams: 8.9, saturatedFatGrams: 2, fibreGrams: 5, sodiumMg: 250,
+      },
+    } },
+  };
+  const candidate = nutritionCandidateFromEvidence(evidence, "08900000000012");
+  if (!candidate) throw new Error("Expected valid review fixture candidate");
+  return {
+    id,
+    sourceId: "open_food_facts_robotoff",
+    sourceRecordKey: `8900000000012:prediction-${id}`,
+    sourceRecordId: `src_${id}`,
+    sourceContentHash: `source_${id}`,
+    productId: "prd_fixture",
+    candidateHash: await nutritionCandidateHash(candidate),
+    fieldFamily: "nutrition",
+    decision,
+    payload: candidate,
+    evidenceUrl: candidate.imageUrl,
+    rationale: `Reviewed decision ${id}`,
+    decidedBy: "local_operator",
+    decidedAt: "2026-07-15T01:00:00.000Z",
+  };
+}
+
+describe("Reviewed evidence bundles", () => {
+  it("exports deterministic sorted ledgers and validates exact source linkage", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-review-bundle-"));
+    const second = await reviewDecision("evd_b", "reject");
+    const first = await reviewDecision("evd_a", "verify");
+    const left = await writeReviewDecisionBundle({
+      decisions: [second, first],
+      outputRoot: join(directory, "left"),
+      createdAt: "2026-07-15T02:00:00.000Z",
+    });
+    const right = await writeReviewDecisionBundle({
+      decisions: [first, second],
+      outputRoot: join(directory, "right"),
+      createdAt: "2026-07-15T03:00:00.000Z",
+    });
+    expect(left.ledger).toBe(right.ledger);
+    expect(left.manifest.ledgerSha256).toBe(right.manifest.ledgerSha256);
+    expect(left.manifest.createdAt).not.toBe(right.manifest.createdAt);
+    expect(left.manifest).toMatchObject({ decisionCount: 2, verifyCount: 1, rejectCount: 1, sourceRecordCount: 2 });
+    const parsed = await readReviewDecisionBundle(left.directory);
+    expect(parsed.decisions.map(({ id }) => id)).toEqual(["evd_a", "evd_b"]);
+    expect(() => validateReviewDecisionSources(parsed, parsed.decisions.map((item) => ({
+      sourceId: item.sourceId,
+      sourceRecordKey: item.sourceRecordKey,
+      sourceRecordId: item.sourceRecordId,
+      contentHash: item.sourceContentHash,
+      productId: item.productId,
+      productGtin: item.payload.barcode,
+    })))).not.toThrow();
+    expect(() => validateReviewDecisionSources(parsed, parsed.decisions.map((item, index) => ({
+      sourceId: item.sourceId,
+      sourceRecordKey: item.sourceRecordKey,
+      sourceRecordId: item.sourceRecordId,
+      contentHash: index === 0 ? "drifted" : item.sourceContentHash,
+      productId: item.productId,
+      productGtin: item.payload.barcode,
+    })))).toThrow("source evidence has drifted");
+    expect(() => validateExistingEvidenceDecisions(parsed, [{ ...first, rationale: "Conflicting edit" }]))
+      .toThrow("conflicts with an existing decision id");
+    expect(() => validateExistingEvidenceDecisions(parsed, [first, second])).not.toThrow();
+    const sqlPath = join(directory, "review-decisions.sql");
+    const plan = await emitReviewDecisionSql(parsed, sqlPath);
+    const sql = await readFile(sqlPath, "utf8");
+    expect(plan).toMatchObject({ decisionCount: 2, verifyCount: 1, rejectCount: 1, expectedResolvedCandidates: 2 });
+    expect(sql).toContain("WHERE NOT EXISTS (SELECT 1 FROM evidence_decisions WHERE id = 'evd_a')");
+    expect(sql).toContain("INSERT INTO nutrition_facts");
+    expect(sql).toContain("SELECT COUNT(*) AS applied_decisions");
+    expect(sql).toContain("SELECT COUNT(*) AS unresolved_candidates");
+  });
+
+  it("refuses empty, invalid, tampered, and unsafe review bundles", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-review-invalid-"));
+    await expect(writeReviewDecisionBundle({ decisions: [], outputRoot: directory })).rejects.toThrow("empty");
+    const decision = await reviewDecision("evd_valid");
+    await expect(writeReviewDecisionBundle({
+      decisions: [{ ...decision, candidateHash: "0".repeat(64) }],
+      outputRoot: directory,
+    })).rejects.toThrow("candidateHash does not match payload");
+    const bundle = await writeReviewDecisionBundle({ decisions: [decision], outputRoot: directory });
+    await writeFile(join(bundle.directory, "decisions.jsonl"), `${bundle.ledger} `, "utf8");
+    await expect(readReviewDecisionBundle(bundle.directory)).rejects.toThrow("checksum mismatch");
+    await writeFile(join(bundle.directory, "checksums.sha256"), `${"0".repeat(64)}  ../decisions.jsonl\n`, "utf8");
+    await expect(readReviewDecisionBundle(bundle.directory)).rejects.toThrow("safe portable relative path");
+  });
+});
 
 describe("Open Food Facts bulk staging", () => {
   it("accepts only source-complete, reconciled production snapshots for publication", () => {

@@ -472,6 +472,51 @@ describe("Worker catalog API", () => {
     expect(staleOutcome?.count).toBe(0);
   });
 
+  it("applies a review bundle idempotently and exposes partial-application postcondition failure", async () => {
+    await applyQueries(env.TEST_REVIEW_BUNDLE_SOURCE_QUERIES);
+    const source = await env.DB.prepare(`SELECT id, product_id FROM source_records
+      WHERE source_id = 'open_food_facts_robotoff' AND source_record_id = '8900000000012:903'`)
+      .first<{ id: string; product_id: string }>();
+    if (!source?.product_id) throw new Error("Expected review bundle source record");
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM nutrition_facts WHERE product_id = ?").bind(source.product_id),
+      env.DB.prepare("DELETE FROM evidence_outcomes WHERE product_id = ? AND field_family = 'nutrition'").bind(source.product_id),
+    ]);
+    const applyStatements = env.TEST_REVIEW_BUNDLE_APPLY_QUERIES.filter((query) => !query.startsWith("SELECT "));
+    expect(applyStatements.length).toBeGreaterThan(3);
+    const first = applyStatements[0];
+    if (!first) throw new Error("Expected a decision insert statement");
+    await env.DB.prepare(first).run();
+    const partial = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE id = 'evd_bundle_fixture') AS decisions,
+      (SELECT COUNT(*) FROM nutrition_facts WHERE product_id = ? AND source_record_id = ? AND status = 'verified') AS verified,
+      (SELECT COUNT(*) FROM review_items WHERE source_record_id = ? AND status = 'open') AS unresolved`)
+      .bind(source.product_id, source.id, source.id).first<{ decisions: number; verified: number; unresolved: number }>();
+    expect(partial).toEqual({ decisions: 1, verified: 0, unresolved: 1 });
+
+    await applyQueries(applyStatements);
+    const applied = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE id = 'evd_bundle_fixture') AS decisions,
+      (SELECT COUNT(*) FROM nutrition_facts WHERE product_id = ? AND source_record_id = ? AND status = 'verified') AS verified,
+      (SELECT COUNT(*) FROM review_items WHERE source_record_id = ? AND status = 'open') AS unresolved,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE product_id = ? AND field_family = 'nutrition' AND outcome = 'verified') AS outcomes`)
+      .bind(source.product_id, source.id, source.id, source.product_id)
+      .first<{ decisions: number; verified: number; unresolved: number; outcomes: number }>();
+    expect(applied).toEqual({ decisions: 1, verified: 1, unresolved: 0, outcomes: 1 });
+    const fact = await env.DB.prepare("SELECT calories, protein_grams, status, authority FROM nutrition_facts WHERE product_id = ?")
+      .bind(source.product_id).first<Record<string, unknown>>();
+    expect(fact).toEqual({ calories: 365, protein_grams: 25, status: "verified", authority: 100 });
+
+    await applyQueries(applyStatements);
+    const replayed = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE id = 'evd_bundle_fixture') AS decisions,
+      (SELECT COUNT(*) FROM field_observations WHERE product_id = ? AND source_record_id = ? AND field_path LIKE 'nutrition.%' AND selected = 1) AS selected,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND source_record_id = ? AND status = 'verified') AS nutrients`)
+      .bind(source.product_id, source.id, source.product_id, source.id)
+      .first<{ decisions: number; selected: number; nutrients: number }>();
+    expect(replayed).toEqual({ decisions: 1, selected: 4, nutrients: 4 });
+  });
+
   it("fails closed when Robotoff review evidence is incomplete", async () => {
     const review = await insertRobotoffReview({
       suffix: "invalid",

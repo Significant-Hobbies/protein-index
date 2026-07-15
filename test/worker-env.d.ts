@@ -5,6 +5,8 @@ declare global {
       TEST_SEED_QUERIES: string[];
       TEST_ROBOTOFF_REPLAY_QUERIES: string[];
       TEST_ROBOTOFF_DRIFT_QUERIES: string[];
+      TEST_REVIEW_BUNDLE_SOURCE_QUERIES: string[];
+      TEST_REVIEW_BUNDLE_APPLY_QUERIES: string[];
     }
 
     interface GlobalProps {

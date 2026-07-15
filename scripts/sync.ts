@@ -10,6 +10,7 @@ import { extractRobotoffApi } from "./adapters/robotoff-api";
 import { buildFixtureStage } from "./fixtures";
 import { emitImportSql } from "./reconcile";
 import { validatePublicationSnapshot } from "./publication";
+import { evidenceDecisionFromDatabaseRow, writeReviewDecisionBundle } from "./review-bundles";
 
 function option(name: string): string | null {
   const index = process.argv.indexOf(`--${name}`);
@@ -228,6 +229,30 @@ async function publishCommand(): Promise<void> {
   }, null, 2)}\n`);
 }
 
+async function reviewExportCommand(): Promise<void> {
+  const raw = await runCapture("pnpm", [
+    "exec", "wrangler", "d1", "execute", "protein-index", "--local", "--json", "--command",
+    `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+      candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at
+      FROM evidence_decisions WHERE active = 1 ORDER BY id;`,
+  ]);
+  const response = JSON.parse(raw) as Array<{ success?: boolean; results?: Array<Record<string, unknown>> }>;
+  if (response[0]?.success !== true || !Array.isArray(response[0].results)) {
+    throw new Error("Local evidence decision query did not return a valid result");
+  }
+  const decisions = response[0].results.map(evidenceDecisionFromDatabaseRow);
+  const bundle = await writeReviewDecisionBundle({
+    decisions,
+    outputRoot: option("output") ?? "review-decisions",
+  });
+  process.stdout.write(`${JSON.stringify({
+    directory: bundle.directory,
+    bundleId: bundle.manifest.bundleId,
+    decisionCount: bundle.manifest.decisionCount,
+    ledgerSha256: bundle.manifest.ledgerSha256,
+  }, null, 2)}\n`);
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (command === "stage") return stageCommand();
@@ -236,11 +261,12 @@ async function main(): Promise<void> {
   if (command === "seed") return seedCommand();
   if (command === "coverage") return coverageCommand();
   if (command === "publish") return publishCommand();
+  if (command === "review-export") return reviewExportCommand();
   if (command === "datakart-status") {
     process.stdout.write(`${JSON.stringify(DATAKART_ADAPTER_STATUS, null, 2)}\n`);
     return;
   }
-  throw new Error("Usage: sync.ts <stage|enrich|extract|seed|coverage|publish|datakart-status> [options]");
+  throw new Error("Usage: sync.ts <stage|enrich|extract|seed|coverage|publish|review-export|datakart-status> [options]");
 }
 
 main().catch((error: unknown) => {

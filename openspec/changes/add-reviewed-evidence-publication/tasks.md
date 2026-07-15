@@ -14,10 +14,10 @@
 
 ## 3. Portable review bundles
 
-- [ ] 3.1 Implement deterministic local decision export with sorted JSONL, schema-versioned manifest, portable checksums, and empty-export refusal
-- [ ] 3.2 Implement bundle parsing and fail-closed validation for paths, checksums, ids, URLs, nutrition, source linkage, and duplicate/conflicting decisions
-- [ ] 3.3 Generate idempotent decision SQL only from a validated bundle and include explicit expected postcondition counts
-- [ ] 3.4 Add fixtures and tests for deterministic export, checksum tampering, unsafe paths, invalid nutrition, evidence drift, replay, and partial application
+- [x] 3.1 Implement deterministic local decision export with sorted JSONL, schema-versioned manifest, portable checksums, and empty-export refusal
+- [x] 3.2 Implement bundle parsing and fail-closed validation for paths, checksums, ids, URLs, nutrition, source linkage, and duplicate/conflicting decisions
+- [x] 3.3 Generate idempotent decision SQL only from a validated bundle and include explicit expected postcondition counts
+- [x] 3.4 Add fixtures and tests for deterministic export, checksum tampering, unsafe paths, invalid nutrition, evidence drift, replay, and partial application
 
 ## 4. Guarded production publication
 

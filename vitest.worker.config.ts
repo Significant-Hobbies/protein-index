@@ -1,10 +1,13 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
 import { defineConfig } from "vitest/config";
 import { buildFixtureStage } from "./scripts/fixtures";
 import { parseRobotoffNutritionEvidence } from "./scripts/adapters/robotoff";
 import { emitImportSql } from "./scripts/reconcile";
+import { emitReviewDecisionSql, writeReviewDecisionBundle } from "./scripts/review-bundles";
+import { nutritionCandidateFromEvidence, nutritionCandidateHash } from "./shared/evidence-decisions";
 import type { SourceManifest } from "./shared/types";
 
 function sqlQueries(sql: string): string[] {
@@ -114,6 +117,55 @@ export default defineConfig({
       } satisfies SourceManifest), "utf8");
       await emitImportSql({ stagedPath: driftStagedPath, manifestPath: driftManifestPath, outputPath: driftSqlPath });
       const robotoffDriftQueries = sqlQueries(await readFile(driftSqlPath, "utf8"));
+      const bundleProduct = parseRobotoffNutritionEvidence({ image_predictions: [prediction(903, "903")] }, context).staged[0];
+      if (!bundleProduct) throw new Error("Expected synthetic bundle product");
+      const bundleIssue = bundleProduct.validationIssues.find(({ code }) => code === "robotoff_nutrition_candidate");
+      const bundleCandidate = nutritionCandidateFromEvidence(bundleIssue, bundleProduct.gtin);
+      if (!bundleCandidate) throw new Error("Expected synthetic bundle candidate");
+      const stableId = (prefix: string, value: string) => `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 24)}`;
+      const bundleStagedPath = join(outputDirectory, "review-bundle-staged.jsonl");
+      const bundleManifestPath = join(outputDirectory, "review-bundle-source-manifest.json");
+      const bundleSourceSqlPath = join(outputDirectory, "review-bundle-source.sql");
+      await writeFile(bundleStagedPath, `${JSON.stringify(bundleProduct)}\n`, "utf8");
+      await writeFile(bundleManifestPath, JSON.stringify({
+        ...robotoffManifest,
+        input: "synthetic-review-bundle",
+        inputHash: "d".repeat(64),
+        inputBytes: 1,
+        advertisedTotal: 1,
+        recordsRead: 1,
+        indiaRecords: 1,
+        stagedRecords: 1,
+        newRecords: 1,
+      } satisfies SourceManifest), "utf8");
+      await emitImportSql({ stagedPath: bundleStagedPath, manifestPath: bundleManifestPath, outputPath: bundleSourceSqlPath });
+      const reviewBundleSourceQueries = sqlQueries(await readFile(bundleSourceSqlPath, "utf8"));
+      const candidateHash = await nutritionCandidateHash(bundleCandidate);
+      const sourceRecordId = stableId("src", `${bundleProduct.source}:${bundleProduct.sourceRecordId}`);
+      const productId = stableId("prd", `gtin:${bundleProduct.gtin}`);
+      const reviewBundle = await writeReviewDecisionBundle({
+        outputRoot: join(outputDirectory, "review-decisions"),
+        createdAt: observedAt,
+        decisions: [{
+          id: "evd_bundle_fixture",
+          sourceId: bundleProduct.source,
+          sourceRecordKey: bundleProduct.sourceRecordId,
+          sourceRecordId,
+          sourceContentHash: bundleProduct.contentHash,
+          productId,
+          candidateHash,
+          fieldFamily: "nutrition",
+          decision: "verify",
+          payload: bundleCandidate,
+          evidenceUrl: bundleCandidate.imageUrl,
+          rationale: "Synthetic bundle review",
+          decidedBy: "test_operator",
+          decidedAt: observedAt,
+        }],
+      });
+      const reviewBundleSqlPath = join(outputDirectory, "review-bundle-apply.sql");
+      await emitReviewDecisionSql(reviewBundle, reviewBundleSqlPath, false);
+      const reviewBundleApplyQueries = sqlQueries(await readFile(reviewBundleSqlPath, "utf8"));
       const migrations = await readD1Migrations("migrations");
       return {
         main: "./worker/index.ts",
@@ -124,6 +176,8 @@ export default defineConfig({
             TEST_SEED_QUERIES: seedQueries,
             TEST_ROBOTOFF_REPLAY_QUERIES: robotoffReplayQueries,
             TEST_ROBOTOFF_DRIFT_QUERIES: robotoffDriftQueries,
+            TEST_REVIEW_BUNDLE_SOURCE_QUERIES: reviewBundleSourceQueries,
+            TEST_REVIEW_BUNDLE_APPLY_QUERIES: reviewBundleApplyQueries,
           },
         },
       };
