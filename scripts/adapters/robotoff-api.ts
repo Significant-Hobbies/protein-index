@@ -118,6 +118,7 @@ async function readContexts(path: string, limit: number | null): Promise<Robotof
       netQuantityGrams: product.netQuantityGrams,
       servingSizeGrams: explicitServingMass(product),
       nutritionBasis: explicitNutritionBasis(product),
+      sourceNutritionPer100g: product.nutrition.basis === "per_100g" ? product.nutrition.per100g : null,
       imageUrl: product.imageUrl,
       nutritionImageUrl: product.nutritionImageUrl,
     });

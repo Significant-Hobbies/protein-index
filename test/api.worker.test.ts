@@ -365,6 +365,44 @@ describe("Worker catalog API", () => {
       .bind(first.nutrition.calories, first.nutrition.proteinGrams, first.nutrition.carbohydrateGrams, first.nutrition.fatGrams, first.id).run();
   });
 
+  it("deduplicates logical detail values while retaining source-specific evidence", async () => {
+    const product = await env.DB.prepare(`SELECT p.id
+      FROM products p
+      WHERE (SELECT COUNT(*) FROM source_records s WHERE s.product_id = p.id) >= 2
+      ORDER BY p.id LIMIT 1`).first<{ id: string }>();
+    if (!product) throw new Error("Expected a product with multiple source records");
+    const sources = (await env.DB.prepare("SELECT id FROM source_records WHERE product_id = ? ORDER BY id LIMIT 2")
+      .bind(product.id).all<{ id: string }>()).results;
+    if (sources.length !== 2 || !sources[0] || !sources[1]) throw new Error("Expected two source records");
+    const observedAt = "2026-07-16T00:00:00.000Z";
+    await env.DB.batch([
+      ...sources.map(({ id }) => env.DB.prepare(`INSERT INTO product_allergens
+        (product_id, name, declaration, source_record_id) VALUES (?, 'detail-dedup-allergen', 'contains', ?)`)
+        .bind(product.id, id)),
+      ...sources.map(({ id }) => env.DB.prepare(`INSERT INTO product_additives
+        (product_id, identifier, source_record_id, confidence) VALUES (?, 'INS 999', ?, 'medium')`)
+        .bind(product.id, id)),
+      ...sources.map(({ id }, index) => env.DB.prepare(`INSERT INTO nutrient_values
+        (id, product_id, source_record_id, nutrient_code, quantity, unit, basis,
+          preparation_state, status, observed_at)
+        VALUES (?, ?, ?, 'test-micronutrient', 12, 'mg', 'per_100g', 'as_sold', 'unverified', ?)`)
+        .bind(`nutrient_detail_dedup_${index}`, product.id, id, observedAt)),
+    ]);
+
+    const response = await worker.fetch(`http://localhost/api/products/${product.id}`);
+    expect(response.status).toBe(200);
+    const detail = await json<ProductDetailResponse>(response);
+    expect(detail.allergens.filter((item) => item.name === "detail-dedup-allergen" && item.declaration === "contains")).toHaveLength(1);
+    expect(detail.additives.filter((item) => item === "INS 999")).toHaveLength(1);
+    expect(detail.nutrients.filter((item) => item.code === "test-micronutrient")).toHaveLength(1);
+    const retained = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM product_allergens WHERE product_id = ? AND name = 'detail-dedup-allergen' AND declaration = 'contains') AS allergens,
+      (SELECT COUNT(*) FROM product_additives WHERE product_id = ? AND identifier = 'INS 999') AS additives,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND nutrient_code = 'test-micronutrient') AS nutrients`)
+      .bind(product.id, product.id, product.id).first<{ allergens: number; additives: number; nutrients: number }>();
+    expect(retained).toEqual({ allergens: 2, additives: 2, nutrients: 2 });
+  });
+
   it("validates bounded search and missing records", async () => {
     const combinedSearch = await worker.fetch("http://localhost/api/products?q=Atlas+Cocoa+Whey");
     expect(combinedSearch.status).toBe(200);

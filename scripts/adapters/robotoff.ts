@@ -18,6 +18,7 @@ export interface RobotoffProductContext {
   netQuantityGrams: number | null;
   servingSizeGrams: number | null;
   nutritionBasis: "per_100g" | "per_100ml" | "per_serving" | "unknown";
+  sourceNutritionPer100g?: NutritionPer100g | null;
   imageUrl: string | null;
   nutritionImageUrl: string | null;
 }
@@ -242,8 +243,19 @@ function parsePrediction(
         normalized.calories = converted.calories;
       }
     } else if (!normalized) {
-      normalized = converted;
-      basis = "per_serving";
+      const sourceAnchor = context.sourceNutritionPer100g ?? null;
+      if (sourceAnchor && !differs(perServing, sourceAnchor, 0.05) && differs(converted, sourceAnchor, 0.15)) {
+        issues.push({
+          code: "robotoff_serving_basis_conflicts_source_anchor",
+          message: "Values labeled as serving data match the source per-100-g row before conversion and materially disagree after conversion.",
+          severity: "error",
+          field: "nutrition",
+          details: { predictionId, perServing, convertedServing: converted, sourceNutritionPer100g: sourceAnchor },
+        });
+      } else {
+        normalized = converted;
+        basis = "per_serving";
+      }
     }
   } else if (normalized) {
     const converted = normalizePerServing(perServing, context.servingSizeGrams);

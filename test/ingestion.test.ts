@@ -1810,6 +1810,30 @@ describe("Robotoff label evidence", () => {
     expect(result.issues).toContainEqual(expect.objectContaining({ code: "robotoff_ambiguous_total_sugar_basis" }));
   });
 
+  it("rejects serving conversion when raw values match a per-100-g source anchor", () => {
+    const result = parseRobotoffNutritionEvidence({ image_predictions: [prediction(24, "22", {
+      "energy-kcal_serving": nutrient(312, "kcal"),
+      proteins_serving: nutrient(20, "g"),
+      carbohydrates_serving: nutrient(4, "g"),
+      fat_serving: nutrient(24, "g"),
+    })] }, {
+      ...context,
+      servingSizeGrams: 50,
+      sourceNutritionPer100g: {
+        calories: 312,
+        proteinGrams: 20,
+        carbohydrateGrams: 4,
+        sugarGrams: 4,
+        fatGrams: 24,
+        saturatedFatGrams: 14.4,
+        fibreGrams: null,
+        sodiumMg: 24,
+      },
+    });
+    expect(result.candidates).toHaveLength(0);
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "robotoff_serving_basis_conflicts_source_anchor" }));
+  });
+
   it("does not assume grams for unitless sodium", () => {
     const response = { image_predictions: [prediction(21, "19", {
       "energy-kcal_100g": nutrient(316, "kcal"),
