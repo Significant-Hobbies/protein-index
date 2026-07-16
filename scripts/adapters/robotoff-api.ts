@@ -10,7 +10,7 @@ import { finiteNumber } from "../../shared/nutrition";
 import type { SourceManifest, StagedProduct } from "../../shared/types";
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "./robotoff";
 
-export const ROBOTOFF_API_ADAPTER_VERSION = "robotoff-api-v2";
+export const ROBOTOFF_API_ADAPTER_VERSION = "robotoff-api-v3";
 export const ROBOTOFF_IMAGE_PREDICTIONS_URL = "https://robotoff.openfoodfacts.org/api/v1/image_predictions";
 const PAGE_SIZE = 50;
 export const ROBOTOFF_API_REQUEST_SCHEMA = createHash("sha256")
@@ -79,6 +79,17 @@ function explicitServingMass(product: StagedProduct): number | null {
   return unit ? null : value;
 }
 
+function explicitNutritionBasis(product: StagedProduct): RobotoffProductContext["nutritionBasis"] {
+  const evidence = isRecord(product.rawEvidence) ? product.rawEvidence : null;
+  const declared = typeof evidence?.nutrition_data_per === "string" ? normalizeText(evidence.nutrition_data_per) : "";
+  const quantity = parseQuantity(typeof evidence?.quantity === "string" ? evidence.quantity : null);
+  const serving = parseQuantity(typeof evidence?.serving_size === "string" ? evidence.serving_size : null);
+  if (declared === "100ml" || declared === "per 100ml" || quantity?.millilitres != null || serving?.millilitres != null) {
+    return "per_100ml";
+  }
+  return product.nutrition.basis;
+}
+
 async function hashFile(path: string): Promise<string> {
   const hash = createHash("sha256");
   const stream = createReadStream(path);
@@ -106,6 +117,7 @@ async function readContexts(path: string, limit: number | null): Promise<Robotof
       categoryRaw: product.categoryRaw,
       netQuantityGrams: product.netQuantityGrams,
       servingSizeGrams: explicitServingMass(product),
+      nutritionBasis: explicitNutritionBasis(product),
       imageUrl: product.imageUrl,
       nutritionImageUrl: product.nutritionImageUrl,
     });

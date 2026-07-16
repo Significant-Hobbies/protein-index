@@ -17,6 +17,7 @@ export interface RobotoffProductContext {
   categoryRaw: string | null;
   netQuantityGrams: number | null;
   servingSizeGrams: number | null;
+  nutritionBasis: "per_100g" | "per_100ml" | "per_serving" | "unknown";
   imageUrl: string | null;
   nutritionImageUrl: string | null;
 }
@@ -153,6 +154,16 @@ function parsePrediction(
       severity: "error",
       field: "nutrition",
       details: { predictionId, modelName, modelVersion, imageId, evidenceImageUrl },
+    });
+    return { candidate: null, issues, prediction };
+  }
+  if (context.nutritionBasis === "per_100ml") {
+    issues.push({
+      code: "robotoff_unsupported_volume_basis",
+      message: "Robotoff volume-label output cannot be represented as per-100-g nutrition without density evidence.",
+      severity: "error",
+      field: "nutrition",
+      details: { predictionId, nutritionBasis: context.nutritionBasis, servingSizeGrams: context.servingSizeGrams },
     });
     return { candidate: null, issues, prediction };
   }

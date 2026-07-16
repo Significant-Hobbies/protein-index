@@ -1090,6 +1090,7 @@ describe("Robotoff label evidence", () => {
     categoryRaw: "Protein bars",
     netQuantityGrams: 40,
     servingSizeGrams: 40,
+    nutritionBasis: "per_100g",
     imageUrl: null,
     nutritionImageUrl: "https://images.openfoodfacts.org/images/products/890/000/000/0012/nutrition_en.2.400.jpg",
   };
@@ -1235,13 +1236,13 @@ describe("Robotoff label evidence", () => {
       limit: null,
       minimumIntervalMs: 0,
       fetcher: async () => new Response(JSON.stringify({ image_predictions: [prediction(22, "20", {
-        "energy-kcal_serving": nutrient(155, "kcal"),
-        proteins_serving: nutrient(4.5, "g"),
+        "energy-kcal_100g": nutrient(155, "kcal"),
+        proteins_100g: nutrient(4.5, "g"),
       })] }), { status: 200 }),
     });
     expect(result.outcomes).toEqual({ candidate: 0, no_prediction: 0, rejected: 1, failed: 0 });
     const staged = JSON.parse((await readFile(result.stagedPath, "utf8")).trim()) as { validationIssues: Array<{ code: string }> };
-    expect(staged.validationIssues).toContainEqual(expect.objectContaining({ code: "robotoff_ambiguous_serving_basis" }));
+    expect(staged.validationIssues).toContainEqual(expect.objectContaining({ code: "robotoff_unsupported_volume_basis" }));
   });
 
   it("merges supplementary serving values only when both core bases agree", () => {

@@ -42,6 +42,7 @@ export default defineConfig({
         categoryRaw: "Soy products",
         netQuantityGrams: 500,
         servingSizeGrams: 50,
+        nutritionBasis: "per_100g" as const,
         imageUrl: null,
         nutritionImageUrl: "https://images.openfoodfacts.org/images/products/label.jpg",
       };
