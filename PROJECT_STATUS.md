@@ -72,6 +72,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — first source-matched nutrition rejection published after exact remote source/hash validation; postconditions recorded one durable decision, promoted zero facts, and resolved only the rejected candidate
 - 2026-07-16 — full ingredient-image extraction completed in GitHub Actions run `29450296658`: all 5,196 eligible GTINs reconciled to 3,358 candidate, 1,739 no-prediction, 99 rejected, and zero failed outcomes; 5,661 image-level candidates were validated and published review-only, leaving verified ingredients at zero
 - 2026-07-16 — first exact source-matched ingredient rejection published for a Threptin label with visibly unsupported OCR fragments; postconditions resolved one candidate, kept verified ingredients at zero, reduced the open ingredient queue from 5,661 to 5,660, and preserved independent community ingredients
+- 2026-07-16 — production coverage timeout traced to a correlated full review-queue scan; the endpoint now batches a single source-bounded candidate aggregate while preserving exact per-product counts and response semantics
 
 ## Products
 

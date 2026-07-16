@@ -279,6 +279,19 @@ describe("Worker catalog API", () => {
     expect(coverage.disconnectedSources).toContain("gs1_india_datakart");
   });
 
+  it("counts Robotoff extraction candidates once per product", async () => {
+    const product = await env.DB.prepare("SELECT id, gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ id: string; gtin: string }>();
+    if (!product) throw new Error("Expected a seeded product");
+    await insertRobotoffReview({ suffix: "coverage-first", evidence: robotoffEvidence(product.gtin, { calories: 360, proteinGrams: 25 }) });
+    await insertRobotoffReview({ suffix: "coverage-second", evidence: robotoffEvidence(product.gtin, { calories: 365, proteinGrams: 26 }) });
+
+    const response = await worker.fetch("http://localhost/api/coverage");
+    expect(response.status).toBe(200);
+    const coverage = await json<CoverageResponse>(response);
+    expect(coverage.catalog.extractionCandidates).toBe(1);
+  });
+
   it("reports production runtime and rejects anonymous production mutations", async () => {
     const health = await worker.fetch("https://protein-index.example/api/health");
     expect(await json<HealthResponse>(health)).toMatchObject({ runtime: "production", mutations: "local_only" });

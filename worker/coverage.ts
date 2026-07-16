@@ -6,7 +6,6 @@ interface CatalogCountRow {
   missing_nutrition: number;
   structured_nutrition: number;
   nutrition_label_images: number;
-  extraction_candidates: number;
   verified_nutrition: number;
   unverified_nutrition: number;
   conflicting_nutrition: number;
@@ -19,6 +18,10 @@ interface CatalogCountRow {
   outstanding_identity: number;
   outstanding_nutrition: number;
   outstanding_ingredients: number;
+}
+
+interface ExtractionCandidateCountRow {
+  extraction_candidates: number;
 }
 
 interface SourceCoverageRow {
@@ -53,12 +56,6 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
       SUM(CASE WHEN n.status IS NULL OR n.status = 'missing' THEN 1 ELSE 0 END) AS missing_nutrition,
       SUM(CASE WHEN n.status IS NOT NULL AND n.status <> 'missing' THEN 1 ELSE 0 END) AS structured_nutrition,
       SUM(CASE WHEN p.nutrition_image_url IS NOT NULL THEN 1 ELSE 0 END) AS nutrition_label_images,
-      SUM(CASE WHEN EXISTS (
-        SELECT 1 FROM review_items candidate
-        JOIN source_records candidate_source ON candidate_source.id = candidate.source_record_id
-        WHERE candidate.product_id = p.id AND candidate_source.source_id = 'open_food_facts_robotoff'
-          AND candidate.type = 'nutrition_validation'
-      ) THEN 1 ELSE 0 END) AS extraction_candidates,
       SUM(CASE WHEN n.status = 'verified' THEN 1 ELSE 0 END) AS verified_nutrition,
       SUM(CASE WHEN n.status = 'unverified' THEN 1 ELSE 0 END) AS unverified_nutrition,
       SUM(CASE WHEN n.status = 'conflict' THEN 1 ELSE 0 END) AS conflicting_nutrition,
@@ -84,9 +81,16 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
         SELECT latest.id FROM ingestion_runs latest WHERE latest.source_id = s.id
         ORDER BY latest.started_at DESC LIMIT 1
       ) ORDER BY s.name`),
+    db.prepare(`SELECT COUNT(DISTINCT product_id) AS extraction_candidates
+      FROM review_items
+      WHERE type = 'nutrition_validation'
+        AND source_record_id IN (
+          SELECT id FROM source_records WHERE source_id = 'open_food_facts_robotoff'
+        )`),
   ]);
   const counts = batch[0]?.results[0] as CatalogCountRow | undefined;
   const sourceRows = (batch[1]?.results ?? []) as SourceCoverageRow[];
+  const extractionCounts = batch[2]?.results[0] as ExtractionCandidateCountRow | undefined;
   const disconnectedSources = [...new Set(sourceRows.flatMap((row) => disconnected(row.manifest_json)))];
   const sourceCoverageComplete = sourceRows.length > 0 && sourceRows.every((row) => row.status === "completed" && row.source_complete === 1);
   const outstandingIdentity = counts?.outstanding_identity ?? 0;
@@ -99,7 +103,7 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
       missingNutrition: counts?.missing_nutrition ?? 0,
       structuredNutrition: counts?.structured_nutrition ?? 0,
       nutritionLabelImages: counts?.nutrition_label_images ?? 0,
-      extractionCandidates: counts?.extraction_candidates ?? 0,
+      extractionCandidates: extractionCounts?.extraction_candidates ?? 0,
       verifiedNutrition: counts?.verified_nutrition ?? 0,
       unverifiedNutrition: counts?.unverified_nutrition ?? 0,
       conflictingNutrition: counts?.conflicting_nutrition ?? 0,
