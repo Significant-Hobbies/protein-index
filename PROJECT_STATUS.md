@@ -87,6 +87,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — retained Robotoff responses proved that its model can encode a photographed per-100-ml column with `_100g` keys; because the current verified-candidate schema is mass-based, all volume-label model candidates now fail closed, and replacement exhaustive run `29478936206` started from the source-complete snapshot on commit `02bae53`
 - 2026-07-16 — live review-queue audit found 271 open nutrition candidates across 218 products with current volume evidence; corrected source replay now deterministically dismisses any open Robotoff nutrition or ingredient candidate whose exact source prediction no longer produces the same candidate hash
 - 2026-07-16 — live candidate discovery exposed a D1 CPU reset while filtering the growing JSON-backed review ledger; migration `0007_review_queue_indexes.sql` adds the status/type/priority and product/source indexes used by operator queues and exact evidence joins, and local migration plus the full 85-test check passed
+- 2026-07-16 — review-only Source sync run `29479707727` started on commit `a580a08` to materialize the corrected quantity/basis rules against the latest official Open Food Facts export; it remains fail-closed on continuity and only emits checksummed snapshots plus downstream evidence jobs, never an automatic production write
 
 ## Products
 
