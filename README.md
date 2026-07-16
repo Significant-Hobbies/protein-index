@@ -56,7 +56,7 @@ downloads the complete official TSV export, identifies this client, reaches
 end-of-file, compares counts and record hashes with the last good run, and
 uploads reviewable artifacts. Every India-tagged source row is represented by
 either a staged product or an auditable exclusion-ledger entry. The workflow
-never writes to production by itself.
+then fans out richer API and label-evidence jobs from the exact snapshot.
 
 Enrich the exact source-complete barcode set with the richer documented product
 response:
@@ -73,8 +73,7 @@ Enrichment uses multi-code batches, identifies this client, stays within the
 documented search limit, retries transient failures, splits persistently
 unavailable batches, and resumes from saved response artifacts. It separately
 accounts for enriched, unchanged, not-found, rejected, and failed barcodes. The
-weekly enrichment workflow creates a reviewable artifact; publication remains
-manual.
+weekly enrichment workflow creates a source-complete reviewable artifact.
 
 Extract review-gated nutrition candidates from every available label image:
 
@@ -92,6 +91,33 @@ documented request limit, and records every eligible barcode as candidate,
 no-prediction, rejected, or failed. Model output never becomes verified
 nutrition automatically; an operator must review the current label image, and
 verification applies that exact candidate with its provenance.
+
+## Automatic fresh-evidence publication
+
+Successful default-branch runs of `Source sync`, API enrichment, nutrition-label
+extraction, and ingredient-label extraction automatically enter one serialized,
+protected publication path. The path accepts only the exact run artifact and
+head commit from its four-workflow allowlist. It verifies portable checksums,
+source/cohort accounting, the fixed 20% discovery-drop ceiling, and every staged
+record before generating SQL.
+
+Automatic publication has a deliberately narrower authority boundary than
+manual publication:
+
+- Open Food Facts values remain unverified community evidence.
+- Robotoff records remain review-only candidates with no selected facts.
+- Existing verified rows cannot be overwritten by automatic evidence, and
+  verified counts cannot increase.
+- Pending D1 migrations stop the run; this path cannot apply schema changes.
+- DataKart, retailer offers/ratings, review decisions, and Worker deployment are
+  excluded.
+
+Every attempt retains the trigger identity, artifact/manifest hashes,
+publication log, exact D1 pre/post state, and live health/catalog checks for 90
+days. If a write or postcondition fails, the workflow makes no success claim.
+The same checksummed artifact remains replayable through the protected manual
+workflow after investigation. The scheduled cadence remains weekly; manual
+producer runs use the same automatic evidence boundary.
 
 ## Reviewed catalog publication
 
@@ -115,7 +141,10 @@ India-row reconciliation, continuity limits, and non-empty counts before it
 writes. It then applies migrations, performs an idempotent D1 import, and
 queries product, run, and source-record counts. The manual `Publish reviewed
 catalog` GitHub workflow adds a protected environment gate and pins both the
-source workflow run and reviewed input hash.
+source workflow run and reviewed input hash. Manual publication remains the
+recovery path and is the only catalog path allowed to apply reviewed schema
+migrations; exact nutrition/ingredient decisions use their dedicated protected
+workflow.
 
 ## Cloudflare release
 

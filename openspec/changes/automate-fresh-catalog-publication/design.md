@@ -28,6 +28,13 @@ Production D1 already contains a 716 MB append/reconciliation-oriented evidence 
 
 Add a dedicated workflow triggered by successful completion of `Source sync`, `Enrich Open Food Facts evidence`, `Extract label evidence with Robotoff`, and `Extract ingredient label evidence`. A small fail-closed mapping selects the only permitted artifact name and manifest source for each upstream workflow. The job checks out the exact upstream head SHA, requires the default branch, downloads the exact run artifact, and uses the existing protected `production` environment for credentials and audit history.
 
+Because `workflow_run` can deliver a late success event after this router is
+introduced, the checked-out upstream commit must itself contain the automatic
+publication validator, migration-skip contract, and no-promotion SQL mode. A
+pre-feature `main` commit therefore fails before dependency installation,
+credentialed commands, or D1 access instead of falling back to its older manual
+publication behavior.
+
 Alternative considered: make each producer write D1 directly. That duplicates credentialed logic and allows several uncoordinated write paths. Alternative considered: publish only bulk discovery. That leaves the materially richer API nutrition/ingredient evidence and review candidate queues stale.
 
 ### Add an explicit automatic-evidence publication mode

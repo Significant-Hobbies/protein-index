@@ -10,7 +10,15 @@ import { extractRobotoffApi } from "./adapters/robotoff-api";
 import { extractRobotoffIngredientApi, validateRobotoffIngredientArtifact } from "./adapters/robotoff-ingredients-api";
 import { buildFixtureStage } from "./fixtures";
 import { emitImportSql } from "./reconcile";
-import { validatePublicationSnapshot } from "./publication";
+import {
+  assertAutomaticPublicationPostconditions,
+  assertNoPendingD1Migrations,
+  parsePublicationState,
+  publicationStateQuery,
+  validateAutomaticPublicationSnapshot,
+  validatePublicationSnapshot,
+  type PublicationState,
+} from "./publication";
 import {
   emitReviewDecisionSql,
   emitReviewExistingDecisionQuery,
@@ -219,42 +227,87 @@ async function publishCommand(): Promise<void> {
   const directory = option("input");
   if (!directory) throw new Error("--input is required for publish.");
   const remote = hasFlag("remote");
+  const automatic = hasFlag("automatic");
+  const skipMigrations = hasFlag("skip-migrations");
   if (remote && !hasFlag("confirm-remote")) {
     throw new Error("Remote publication requires both --remote and --confirm-remote.");
   }
-  const snapshot = await validatePublicationSnapshot(directory);
+  if (automatic && (!remote || !skipMigrations)) {
+    throw new Error("Automatic publication requires --remote, --confirm-remote, and --skip-migrations.");
+  }
+  if (skipMigrations && !automatic) {
+    throw new Error("--skip-migrations is restricted to the validated automatic publication mode.");
+  }
+  const snapshot = automatic
+    ? await validateAutomaticPublicationSnapshot(directory, {
+      workflowName: option("workflow-name") ?? "",
+      runId: Number(option("upstream-run-id")),
+      headSha: option("upstream-head-sha") ?? "",
+      headBranch: option("upstream-head-branch") ?? "",
+      artifactName: option("artifact-name") ?? "",
+    })
+    : await validatePublicationSnapshot(directory);
+  const automaticContract = "contract" in snapshot ? snapshot.contract : null;
   const importSqlPath = join(directory, "import.sql");
   const generated = await emitImportSql({
     stagedPath: snapshot.stagedPath,
     manifestPath: snapshot.manifestPath,
     outputPath: importSqlPath,
     includeTransaction: !remote,
+    applyEvidenceDecisions: !automatic,
   });
   const target = remote ? "--remote" : "--local";
-  await run("pnpm", ["exec", "wrangler", "d1", "migrations", "apply", "protein-index", target]);
+  let before: PublicationState | null = null;
+  if (automatic) {
+    const migrationState = await runCapture("pnpm", ["exec", "wrangler", "d1", "migrations", "list", "protein-index", "--remote"]);
+    assertNoPendingD1Migrations(migrationState);
+    before = parsePublicationState(await runCapture("pnpm", [
+      "exec", "wrangler", "d1", "execute", "protein-index", "--remote", "--json", "--command", publicationStateQuery(snapshot.manifest),
+    ]));
+  } else {
+    await run("pnpm", ["exec", "wrangler", "d1", "migrations", "apply", "protein-index", target]);
+  }
   if (remote) {
     await run("pnpm", ["exec", "wrangler", "d1", "execute", "protein-index", "--remote", "--yes", "--file", importSqlPath]);
   } else {
     const chunks = await splitSqlFile(importSqlPath);
     for (const chunk of chunks) await run("pnpm", ["exec", "wrangler", "d1", "execute", "protein-index", "--local", "--file", chunk]);
   }
-  const rawVerification = await runCapture("pnpm", [
-    "exec", "wrangler", "d1", "execute", "protein-index", target, "--json", "--command",
-    "SELECT COUNT(*) AS products FROM products WHERE is_active = 1; SELECT COUNT(*) AS completed_runs FROM ingestion_runs WHERE status = 'completed'; SELECT COUNT(*) AS source_records FROM source_records;",
-  ]);
-  const verification = JSON.parse(rawVerification) as Array<{ success?: boolean; results?: Array<Record<string, number>> }>;
-  const products = verification[0]?.results?.[0]?.products ?? 0;
-  const completedRuns = verification[1]?.results?.[0]?.completed_runs ?? 0;
-  const sourceRecords = verification[2]?.results?.[0]?.source_records ?? 0;
-  if (products <= 0 || completedRuns <= 0 || sourceRecords <= 0) throw new Error("Post-publication D1 verification returned an empty catalog or evidence ledger.");
+  let automaticEvidence: Record<string, unknown> | null = null;
+  let products: number;
+  let sourceRecords: number;
+  let completedRuns: number | null = null;
+  if (automatic && before) {
+    const after = parsePublicationState(await runCapture("pnpm", [
+      "exec", "wrangler", "d1", "execute", "protein-index", "--remote", "--json", "--command", publicationStateQuery(snapshot.manifest),
+    ]));
+    const postconditions = assertAutomaticPublicationPostconditions(before, after, snapshot.manifest);
+    products = after.products;
+    sourceRecords = after.sourceRecords;
+    if (!automaticContract) throw new Error("Automatic publication contract was not retained after validation");
+    automaticEvidence = { contract: automaticContract, before, after, postconditions };
+  } else {
+    const rawVerification = await runCapture("pnpm", [
+      "exec", "wrangler", "d1", "execute", "protein-index", target, "--json", "--command",
+      "SELECT COUNT(*) AS products FROM products WHERE is_active = 1; SELECT COUNT(*) AS completed_runs FROM ingestion_runs WHERE status = 'completed'; SELECT COUNT(*) AS source_records FROM source_records;",
+    ]);
+    const verification = JSON.parse(rawVerification) as Array<{ success?: boolean; results?: Array<Record<string, number>> }>;
+    products = verification[0]?.results?.[0]?.products ?? 0;
+    completedRuns = verification[1]?.results?.[0]?.completed_runs ?? 0;
+    sourceRecords = verification[2]?.results?.[0]?.source_records ?? 0;
+    if (products <= 0 || completedRuns <= 0 || sourceRecords <= 0) throw new Error("Post-publication D1 verification returned an empty catalog or evidence ledger.");
+  }
   process.stdout.write(`${JSON.stringify({
     target: remote ? "remote" : "local",
+    mode: automatic ? "automatic_evidence" : "manual",
     snapshot: snapshot.manifest.inputHash,
+    runId: generated.runId,
     stagedRecords: snapshot.manifest.stagedRecords,
     generatedProducts: generated.products,
     products,
     completedRuns,
     sourceRecords,
+    automaticEvidence,
   }, null, 2)}\n`);
 }
 

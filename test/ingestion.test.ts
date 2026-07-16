@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { normalizeOpenFoodFactsRecord, stageOpenFoodFacts } from "../scripts/adapters/open-food-facts";
 import { enrichOpenFoodFactsApi } from "../scripts/adapters/open-food-facts-api";
@@ -9,7 +10,19 @@ import { extractRobotoffApi } from "../scripts/adapters/robotoff-api";
 import { extractRobotoffIngredientApi, validateRobotoffIngredientArtifact } from "../scripts/adapters/robotoff-ingredients-api";
 import { parseRobotoffIngredientEvidence } from "../scripts/adapters/robotoff-ingredients";
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "../scripts/adapters/robotoff";
-import { assertPublicationEvidence } from "../scripts/publication";
+import {
+  AUTOMATIC_PUBLICATION_FAMILIES,
+  automaticPublicationContract,
+  assertAutomaticPublicationPostconditions,
+  assertIdempotentPublicationReplay,
+  assertNoPendingD1Migrations,
+  assertPublicationEvidence,
+  parsePublicationState,
+  publicationStateQuery,
+  validateAutomaticPublicationSnapshot,
+  type AutomaticPublicationInput,
+  type PublicationState,
+} from "../scripts/publication";
 import { emitImportSql } from "../scripts/reconcile";
 import {
   emitReviewDecisionSql,
@@ -48,6 +61,81 @@ const indiaProduct = {
   },
   last_modified_t: 1_752_537_600,
 };
+
+const automaticInput = (overrides: Partial<AutomaticPublicationInput> = {}): AutomaticPublicationInput => ({
+  workflowName: "Source sync",
+  runId: 123,
+  headSha: "a".repeat(40),
+  headBranch: "main",
+  artifactName: "open-food-facts-snapshot-123",
+  ...overrides,
+});
+
+async function writeAutomaticArtifact(input: {
+  directory: string;
+  source?: SourceManifest["source"];
+  product?: Record<string, unknown>;
+  report?: Record<string, unknown>;
+}): Promise<void> {
+  const normalized = normalizeOpenFoodFactsRecord(indiaProduct).staged;
+  if (!normalized) throw new Error("Expected the Open Food Facts fixture to normalize");
+  const product: Record<string, unknown> = input.product ?? { ...normalized };
+  const source = input.source ?? "open_food_facts";
+  product.source = source;
+  const now = "2026-07-16T10:00:00.000Z";
+  const manifest: SourceManifest = {
+    schemaVersion: 1,
+    source,
+    sourceKind: "open_data",
+    sourceAuthority: source === "open_food_facts_robotoff"
+      ? { identity: 0, nutrition: 20, ingredients: 0 }
+      : { identity: 40, nutrition: 35, ingredients: 35 },
+    sourceLicenseUrl: "https://opendatacommons.org/licenses/odbl/1-0/",
+    sourceRetentionNotes: "Automatic publication test fixture",
+    adapterVersion: "test-v1",
+    input: "fixture",
+    inputHash: "b".repeat(64),
+    inputBytes: 1,
+    sourceUpdatedAt: now,
+    startedAt: now,
+    completedAt: now,
+    mode: "production",
+    terminalEvidence: "end_of_file",
+    sourceComplete: true,
+    marketComplete: false,
+    advertisedTotal: 1,
+    recordsRead: 1,
+    indiaRecords: 1,
+    stagedRecords: 1,
+    invalidRecords: 0,
+    duplicateRecords: 0,
+    newRecords: 1,
+    changedRecords: 0,
+    unchangedRecords: 0,
+    missingSinceRecords: 0,
+    knownExclusions: [],
+    disconnectedSources: [],
+  };
+  const barcodeAccounted = source !== "open_food_facts";
+  const report = input.report ?? {
+    sourceComplete: true,
+    marketComplete: false,
+    ...(barcodeAccounted ? { requestedBarcodes: 1, accountedBarcodes: 1, outcomes: { failed: 0 } } : {}),
+    continuity: { currentStagedRecords: 1, previousStagedRecords: 1, missingSinceRecords: 0, maximumDropRatio: 0.2 },
+    exclusions: { records: 0, reconcilesIndiaSlice: true },
+  };
+  const files = new Map<string, string>([
+    ["manifest.json", `${JSON.stringify(manifest, null, 2)}\n`],
+    ["report.json", `${JSON.stringify(report, null, 2)}\n`],
+    ["source-index.jsonl", `${JSON.stringify({ sourceRecordId: product.sourceRecordId, contentHash: product.contentHash })}\n`],
+    ["exclusions.jsonl", ""],
+    ["staged-products.jsonl", `${JSON.stringify(product)}\n`],
+  ]);
+  if (barcodeAccounted) files.set("outcomes.jsonl", `${JSON.stringify({ requestedCode: product.sourceRecordId, status: "enriched" })}\n`);
+  for (const [name, contents] of files) await writeFile(join(input.directory, name), contents, "utf8");
+  const checksums = [...files].map(([name, contents]) => `${createHash("sha256").update(contents).digest("hex")}  ${name}`);
+  await writeFile(join(input.directory, "checksums.sha256"), `${checksums.join("\n")}\n`, "utf8");
+}
 
 const ingredientPrediction = {
   id: 10477207,
@@ -590,6 +678,297 @@ describe("Reviewed evidence bundles", () => {
 });
 
 describe("Open Food Facts bulk staging", () => {
+  it("pins automatic publication to the exact workflow, artifact, branch, run, and head SHA", () => {
+    expect(automaticPublicationContract(automaticInput())).toMatchObject({
+      workflowName: "Source sync",
+      expectedSource: "open_food_facts",
+      discoveryDropCeiling: 0.2,
+    });
+    expect(() => automaticPublicationContract(automaticInput({ workflowName: "Unknown workflow" }))).toThrow("unsupported workflow");
+    expect(() => automaticPublicationContract(automaticInput({ artifactName: "open-food-facts-snapshot-999" }))).toThrow("expected artifact");
+    expect(() => automaticPublicationContract(automaticInput({ headBranch: "feature" }))).toThrow("default-branch");
+    expect(() => automaticPublicationContract(automaticInput({ headSha: "abc" }))).toThrow("head SHA");
+    expect(() => automaticPublicationContract(automaticInput({ runId: 0 }))).toThrow("run ID");
+  });
+
+  it("accepts checksummed unverified community evidence and review-only label candidates", async () => {
+    const communityDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-community-"));
+    await writeAutomaticArtifact({ directory: communityDirectory });
+    await expect(validateAutomaticPublicationSnapshot(communityDirectory, automaticInput())).resolves.toMatchObject({
+      validatedStagedRecords: 1,
+      contract: { expectedSource: "open_food_facts", evidenceKind: "community" },
+    });
+
+    const normalized = normalizeOpenFoodFactsRecord(indiaProduct).staged;
+    if (!normalized) throw new Error("Expected the Open Food Facts fixture to normalize");
+    const reviewProduct: Record<string, unknown> = {
+      ...structuredClone(normalized),
+      source: "open_food_facts_robotoff",
+      sourceAuthority: { identity: 0, nutrition: 20, ingredients: 0 },
+      nutrients: [],
+      nutrition: {
+        ...normalized.nutrition,
+        per100g: {
+          calories: null,
+          proteinGrams: null,
+          carbohydrateGrams: null,
+          sugarGrams: null,
+          fatGrams: null,
+          saturatedFatGrams: null,
+          fibreGrams: null,
+          sodiumMg: null,
+        },
+        status: "missing",
+        confidence: "low",
+        source: "open_food_facts_robotoff",
+        labelVerifiedAt: null,
+      },
+      ingredients: {
+        ...normalized.ingredients,
+        raw: null,
+        normalized: [],
+        allergens: [],
+        additives: [],
+        status: "missing",
+        confidence: "low",
+        source: "open_food_facts_robotoff",
+      },
+      validationIssues: [{ code: "robotoff_nutrition_candidate", severity: "warning", field: "nutrition" }],
+      rawEvidence: { candidate: { calories: 345, proteinGrams: 52 } },
+    };
+    const reviewDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-review-"));
+    await writeAutomaticArtifact({ directory: reviewDirectory, source: "open_food_facts_robotoff", product: reviewProduct });
+    await expect(validateAutomaticPublicationSnapshot(reviewDirectory, automaticInput({
+      workflowName: "Extract label evidence with Robotoff",
+      artifactName: "robotoff-label-candidates-123",
+    }))).resolves.toMatchObject({
+      validatedStagedRecords: 1,
+      contract: { expectedSource: "open_food_facts_robotoff", evidenceKind: "review_only" },
+    });
+
+    const rejectedDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-rejected-review-"));
+    const rejectedReview = structuredClone(reviewProduct);
+    rejectedReview.validationIssues = [{ code: "robotoff_unsupported_volume_basis", severity: "error", field: "nutrition" }];
+    await writeAutomaticArtifact({ directory: rejectedDirectory, source: "open_food_facts_robotoff", product: rejectedReview });
+    await expect(validateAutomaticPublicationSnapshot(rejectedDirectory, automaticInput({
+      workflowName: "Extract label evidence with Robotoff",
+      artifactName: "robotoff-label-candidates-123",
+    }))).resolves.toMatchObject({ validatedStagedRecords: 1 });
+
+    const emptyReviewDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-empty-review-"));
+    const emptyReview = structuredClone(reviewProduct);
+    emptyReview.validationIssues = [];
+    await writeAutomaticArtifact({ directory: emptyReviewDirectory, source: "open_food_facts_robotoff", product: emptyReview });
+    await expect(validateAutomaticPublicationSnapshot(emptyReviewDirectory, automaticInput({
+      workflowName: "Extract label evidence with Robotoff",
+      artifactName: "robotoff-label-candidates-123",
+    }))).rejects.toThrow("no validation evidence");
+  });
+
+  it("rejects verified facts, decision payloads, source drift, excessive discovery drops, and checksum drift", async () => {
+    const verifiedDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-verified-"));
+    const verified = normalizeOpenFoodFactsRecord(indiaProduct).staged;
+    if (!verified) throw new Error("Expected the Open Food Facts fixture to normalize");
+    verified.nutrition.status = "verified";
+    verified.nutrition.labelVerifiedAt = "2026-07-16T10:00:00.000Z";
+    await writeAutomaticArtifact({ directory: verifiedDirectory, product: { ...verified } });
+    await expect(validateAutomaticPublicationSnapshot(verifiedDirectory, automaticInput())).rejects.toThrow("verified nutrition");
+
+    const decisionDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-decision-"));
+    const decisionProduct = normalizeOpenFoodFactsRecord(indiaProduct).staged;
+    if (!decisionProduct) throw new Error("Expected the Open Food Facts fixture to normalize");
+    await writeAutomaticArtifact({ directory: decisionDirectory, product: { ...decisionProduct, verificationDecision: { decision: "verify" } } });
+    await expect(validateAutomaticPublicationSnapshot(decisionDirectory, automaticInput())).rejects.toThrow("decision payloads");
+
+    const sourceDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-source-"));
+    await writeAutomaticArtifact({ directory: sourceDirectory, source: "open_food_facts_api" });
+    await expect(validateAutomaticPublicationSnapshot(sourceDirectory, automaticInput())).rejects.toThrow("does not match");
+
+    const dropDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-drop-"));
+    await writeAutomaticArtifact({
+      directory: dropDirectory,
+      report: {
+        sourceComplete: true,
+        marketComplete: false,
+        continuity: { currentStagedRecords: 1, previousStagedRecords: 10, missingSinceRecords: 3, maximumDropRatio: 0.5 },
+        exclusions: { records: 0, reconcilesIndiaSlice: true },
+      },
+    });
+    await expect(validateAutomaticPublicationSnapshot(dropDirectory, automaticInput())).rejects.toThrow("20 percent");
+
+    const checksumDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-checksum-"));
+    await writeAutomaticArtifact({ directory: checksumDirectory });
+    await writeFile(join(checksumDirectory, "staged-products.jsonl"), "{}\n", "utf8");
+    await expect(validateAutomaticPublicationSnapshot(checksumDirectory, automaticInput())).rejects.toThrow("checksum mismatch");
+  });
+
+  it("retains richer equal-authority nutrition while preserving source records and replay idempotence", async () => {
+    const database = new DatabaseSync(":memory:");
+    for (const migration of (await readdir("migrations")).filter((name) => name.endsWith(".sql")).sort()) {
+      database.exec(await readFile(join("migrations", migration), "utf8"));
+    }
+    const normalized = normalizeOpenFoodFactsRecord(indiaProduct).staged;
+    if (!normalized) throw new Error("Expected the Open Food Facts fixture to normalize");
+    const writeImport = async (source: string, product: typeof normalized, timestamp: string, suffix: string, automatic = false): Promise<string> => {
+      const directory = await mkdtemp(join(tmpdir(), `protein-index-monotonic-${suffix}-`));
+      const staged = structuredClone(product);
+      staged.source = source;
+      staged.sourceAuthority.nutrition = 40;
+      staged.observedAt = timestamp;
+      staged.nutrition.observedAt = timestamp;
+      staged.contentHash = createHash("sha256").update(`${source}:${timestamp}:${JSON.stringify(staged.nutrition.per100g)}`).digest("hex");
+      await writeAutomaticArtifact({ directory, source, product: { ...staged } });
+      const manifestPath = join(directory, "manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as SourceManifest;
+      manifest.startedAt = timestamp;
+      manifest.completedAt = timestamp;
+      await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`, "utf8");
+      const outputPath = join(directory, "import.sql");
+      await emitImportSql({ stagedPath: join(directory, "staged-products.jsonl"), manifestPath, outputPath, applyEvidenceDecisions: !automatic });
+      return readFile(outputPath, "utf8");
+    };
+
+    const rich = structuredClone(normalized);
+    const richSql = await writeImport("open_food_facts_api", rich, "2026-07-16T10:00:00.000Z", "rich");
+    const sparse = structuredClone(normalized);
+    sparse.nutrition.per100g = {
+      calories: 350,
+      proteinGrams: 50,
+      carbohydrateGrams: null,
+      sugarGrams: null,
+      fatGrams: null,
+      saturatedFatGrams: null,
+      fibreGrams: null,
+      sodiumMg: null,
+    };
+    const sparseSql = await writeImport("open_food_facts", sparse, "2026-07-16T11:00:00.000Z", "sparse");
+    database.exec(richSql);
+    database.exec(sparseSql);
+    expect(database.prepare("SELECT source_id, calories, protein_grams, sugar_grams FROM nutrition_facts JOIN source_records ON source_records.id = nutrition_facts.source_record_id").get()).toMatchObject({
+      source_id: "open_food_facts_api",
+      calories: 345,
+      protein_grams: 52,
+      sugar_grams: 7,
+    });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM source_records").get()).toMatchObject({ count: 2 });
+
+    const equallyRich = structuredClone(normalized);
+    equallyRich.nutrition.per100g.calories = 360;
+    const equallyRichSql = await writeImport("open_food_facts", equallyRich, "2026-07-16T12:00:00.000Z", "equal");
+    database.exec(equallyRichSql);
+    expect(database.prepare("SELECT source_id, calories FROM nutrition_facts JOIN source_records ON source_records.id = nutrition_facts.source_record_id").get()).toMatchObject({
+      source_id: "open_food_facts",
+      calories: 360,
+    });
+    const beforeReplay = database.prepare("SELECT (SELECT COUNT(*) FROM products) AS products, (SELECT COUNT(*) FROM source_records) AS source_records, (SELECT COUNT(*) FROM review_items) AS reviews, (SELECT COUNT(*) FROM evidence_decisions) AS decisions").get();
+    database.exec(equallyRichSql);
+    expect(database.prepare("SELECT (SELECT COUNT(*) FROM products) AS products, (SELECT COUNT(*) FROM source_records) AS source_records, (SELECT COUNT(*) FROM review_items) AS reviews, (SELECT COUNT(*) FROM evidence_decisions) AS decisions").get()).toEqual(beforeReplay);
+
+    database.exec("UPDATE nutrition_facts SET status = 'verified', authority = 100, calories = 999, label_verified_at = '2026-07-16T12:30:00.000Z'");
+    const newerCommunity = structuredClone(normalized);
+    newerCommunity.nutrition.per100g.calories = 370;
+    const automaticSql = await writeImport("open_food_facts", newerCommunity, "2026-07-16T13:00:00.000Z", "automatic", true);
+    database.exec(automaticSql);
+    expect(database.prepare("SELECT status, authority, calories FROM nutrition_facts").get()).toMatchObject({
+      status: "verified",
+      authority: 100,
+      calories: 999,
+    });
+    database.close();
+  });
+
+  it("fails closed on pending migrations and validates exact automatic publication postconditions", async () => {
+    expect(() => assertNoPendingD1Migrations("No migrations to apply!\n")).not.toThrow();
+    expect(() => assertNoPendingD1Migrations("Migrations to be applied:\n0008_new.sql\n")).toThrow("no pending migrations");
+    expect(() => assertNoPendingD1Migrations("")).toThrow("no pending migrations");
+
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-auto-state-"));
+    await writeAutomaticArtifact({ directory });
+    const manifest = JSON.parse(await readFile(join(directory, "manifest.json"), "utf8")) as SourceManifest;
+    const query = publicationStateQuery(manifest);
+    expect(query).toContain(manifest.inputHash);
+    expect(query).toContain("exact_run_status");
+    const runId = /run_[a-f0-9]{24}/.exec(query)?.[0];
+    expect(runId).toBeTruthy();
+    const before: PublicationState = {
+      products: 10,
+      sourceRecords: 20,
+      openReviews: 2,
+      decisions: 3,
+      verifiedNutrition: 4,
+      verifiedIngredients: 5,
+      exactRunId: null,
+      exactRunStatus: null,
+      exactRunInputHash: null,
+      exactRunSourceComplete: null,
+      exactRunStagedRecords: null,
+    };
+    const after: PublicationState = {
+      ...before,
+      products: 11,
+      sourceRecords: 21,
+      openReviews: 3,
+      exactRunId: runId ?? null,
+      exactRunStatus: "completed",
+      exactRunInputHash: manifest.inputHash,
+      exactRunSourceComplete: 1,
+      exactRunStagedRecords: manifest.stagedRecords,
+    };
+    const parsed = parsePublicationState([{ success: true, results: [{
+      products: after.products,
+      source_records: after.sourceRecords,
+      open_reviews: after.openReviews,
+      decisions: after.decisions,
+      verified_nutrition: after.verifiedNutrition,
+      verified_ingredients: after.verifiedIngredients,
+      exact_run_id: after.exactRunId,
+      exact_run_status: after.exactRunStatus,
+      exact_run_input_hash: after.exactRunInputHash,
+      exact_run_source_complete: after.exactRunSourceComplete,
+      exact_run_staged_records: after.exactRunStagedRecords,
+    }] }]);
+    expect(parsed).toEqual(after);
+    expect(assertAutomaticPublicationPostconditions(before, after, manifest)).toMatchObject({
+      productDelta: 1,
+      sourceRecordDelta: 1,
+      openReviewDelta: 1,
+      verifiedNutritionDelta: 0,
+      verifiedIngredientDelta: 0,
+    });
+    expect(() => assertAutomaticPublicationPostconditions(before, { ...after, verifiedNutrition: 5 }, manifest)).toThrow("increased verified nutrition");
+    expect(() => assertAutomaticPublicationPostconditions(before, { ...after, exactRunInputHash: "wrong" }, manifest)).toThrow("input hash");
+    expect(() => assertIdempotentPublicationReplay(after, { ...after })).not.toThrow();
+    expect(() => assertIdempotentPublicationReplay(after, { ...after, sourceRecords: 22 })).toThrow("sourceRecords");
+  });
+
+  it("keeps the automatic workflow router pinned, serialized, migration-free, and auditable", async () => {
+    const workflow = await readFile(".github/workflows/publish-automatic-evidence.yml", "utf8");
+    for (const [name, family] of Object.entries(AUTOMATIC_PUBLICATION_FAMILIES)) {
+      expect(workflow).toContain(`- ${name}`);
+      expect(workflow).toContain(`'${name}': Object.freeze({ source: '${family.source}', artifactPrefix: '${family.artifactPrefix}' })`);
+    }
+    expect(workflow).toContain("actions: read");
+    expect(workflow).toContain("contents: read");
+    expect(workflow).toContain("github.event.workflow_run.head_branch == github.event.repository.default_branch");
+    expect(workflow).toContain("github.event.workflow_run.head_repository.full_name == github.repository");
+    expect(workflow).toContain("ref: ${{ github.event.workflow_run.head_sha }}");
+    expect(workflow).toContain("persist-credentials: false");
+    expect(workflow).toContain("Require automatic-publication contract at upstream commit");
+    expect(workflow).toContain("validateAutomaticPublicationSnapshot");
+    expect(workflow).toContain("applyEvidenceDecisions: !automatic");
+    expect(workflow).toContain("group: protein-index-production-publication");
+    expect(workflow).toContain("cancel-in-progress: false");
+    expect(workflow).toContain("environment: production");
+    expect(workflow).toContain("--automatic");
+    expect(workflow).toContain("--skip-migrations");
+    expect(workflow).not.toContain("migrations apply");
+    expect(workflow).not.toContain("wrangler deploy");
+    expect(workflow).toContain("retention-days: 90");
+    expect(workflow).toContain("if: always()");
+    expect(workflow).toContain("/api/health");
+    expect(workflow).toContain("/api/products?scope=all");
+  });
+
   it("accepts only source-complete, reconciled production snapshots for publication", () => {
     const manifest = {
       mode: "production",
@@ -1313,6 +1692,17 @@ describe("Robotoff label evidence", () => {
     expect(sql).toContain("INSERT INTO nutrition_facts");
     expect(sql).toContain("d.decision = 'verify'");
     expect(result.staged[0]?.nutrition.status).toBe("missing");
+    const automaticSqlPath = join(directory, "automatic-import.sql");
+    await emitImportSql({
+      stagedPath,
+      manifestPath,
+      outputPath: automaticSqlPath,
+      applyEvidenceDecisions: false,
+    });
+    const automaticSql = await readFile(automaticSqlPath, "utf8");
+    expect(automaticSql).toContain("UPDATE nutrition_facts SET status = 'conflict'");
+    expect(automaticSql).not.toContain("SELECT d.product_id, d.source_record_id, 'verified'");
+    expect(automaticSql).not.toContain("'nutrition', 'verified', d.source_record_id");
   });
 
   it("normalizes an explicit serving basis only with serving mass", () => {

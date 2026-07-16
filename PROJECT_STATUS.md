@@ -110,6 +110,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — the final remaining direct per-100-g candidate containing all eight supported values, Lotus Biscoff, matches its exact package row; supplemental bundle `review-0a46c03cd907c101939d` and combined replacement bundle `review-a452193c2825f811882c` pass portable checksums plus every replacement-artifact source, product, GTIN, and candidate-hash check, with 134 decisions across 130 products (46 verified nutrition, 65 verified ingredients, 23 rejections)
 - 2026-07-16 — direct API verification reproduced intermittent Open Food Facts multi-code `503` responses while the single-product endpoint and successful search responses remained valid; enrichment now exhausts its bounded retry policy before recursively splitting a batch, avoiding request amplification on transient failures while preserving split recovery and fail-closed barcode accounting for persistent failures; the workflow also independently reconciles manifest, outcome, staged, index, exclusion, response-checkpoint, and source-hash evidence before artifact upload
 - 2026-07-16 — API enrichment v6 adds a bounded official single-product endpoint fallback when repeated search failures isolate to one GTIN; successful records and official not-found responses retain distinct terminal outcomes, fallback use is counted in the artifact report, and exhausted failures still prevent source-complete publication
+- 2026-07-16 — protected automatic fresh-evidence publication implemented for successful default-branch discovery, API-enrichment, nutrition-label, and ingredient-label artifacts: exact workflow/run/artifact/SHA routing, fixed 20% discovery-drop guard, streamed no-verification validation, pending-migration refusal, completeness-monotonic nutrition selection, serialized D1 writes, exact pre/postconditions, live API checks, replay evidence, and 90-day diagnostics are covered locally without granting the path schema, decision, retailer, or deployment authority
 
 ## Products
 
@@ -172,6 +173,10 @@ must pass desktop/mobile verification.
   ingredient rows and exact provenance, while source drift revokes verified trust
 - Nutrition and ingredient decisions share a checksum-validated, commit-pinned,
   idempotent publication and postcondition path
+- Successful source and label-evidence workflows route exact checksummed
+  artifacts into one protected automatic publication lock; community data stays
+  unverified, model output stays review-only, pending migrations fail closed,
+  and durable pre/post/live evidence is retained for manual recovery
 
 ## Todo / Planned / Deferred / Blocked
 

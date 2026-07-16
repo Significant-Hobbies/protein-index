@@ -1,0 +1,181 @@
+name: Publish fresh evidence automatically
+
+on:
+  workflow_run:
+    workflows:
+      - Source sync
+      - Enrich Open Food Facts evidence
+      - Extract label evidence with Robotoff
+      - Extract ingredient label evidence
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: protein-index-production-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: production
+    env:
+      UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+      UPSTREAM_WORKFLOW: ${{ github.event.workflow_run.name }}
+      UPSTREAM_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      UPSTREAM_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      LIVE_BASE_URL: https://protein-index.sarthakagrawal927.workers.dev
+    steps:
+      - name: Resolve fail-closed publication route
+        id: route
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            fs.mkdirSync('.data/publication-evidence', { recursive: true });
+            fs.writeFileSync('.data/publication-evidence/trigger.json', JSON.stringify({
+              workflow: context.payload.workflow_run?.name ?? null,
+              runId: context.payload.workflow_run?.id ?? null,
+              headSha: context.payload.workflow_run?.head_sha ?? null,
+              headBranch: context.payload.workflow_run?.head_branch ?? null,
+              status: 'routing',
+            }, null, 2));
+            const routes = Object.freeze({
+              'Source sync': Object.freeze({ source: 'open_food_facts', artifactPrefix: 'open-food-facts-snapshot' }),
+              'Enrich Open Food Facts evidence': Object.freeze({ source: 'open_food_facts_api', artifactPrefix: 'open-food-facts-enrichment' }),
+              'Extract label evidence with Robotoff': Object.freeze({ source: 'open_food_facts_robotoff', artifactPrefix: 'robotoff-label-candidates' }),
+              'Extract ingredient label evidence': Object.freeze({ source: 'open_food_facts_robotoff_ingredients', artifactPrefix: 'robotoff-ingredient-candidates' }),
+            });
+            const run = context.payload.workflow_run;
+            if (!run || run.conclusion !== 'success') throw new Error('Upstream run was not successful');
+            if (run.head_branch !== context.payload.repository.default_branch) throw new Error('Upstream run is not on the default branch');
+            if (run.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`) throw new Error('Upstream run is not from this repository');
+            if (!/^[a-f0-9]{40}$/.test(run.head_sha ?? '')) throw new Error('Upstream run does not expose an exact lowercase head SHA');
+            const route = routes[run.name];
+            if (!route) throw new Error(`Unsupported upstream workflow: ${run.name}`);
+            const artifactName = `${route.artifactPrefix}-${run.id}`;
+            core.setOutput('artifact_name', artifactName);
+            core.setOutput('expected_source', route.source);
+
+      - name: Check out exact upstream commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+          clean: false
+
+      - name: Require automatic-publication contract at upstream commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f .github/workflows/publish-automatic-evidence.yml
+          grep -F -- "validateAutomaticPublicationSnapshot" scripts/sync.ts >/dev/null
+          grep -F -- "--skip-migrations" scripts/sync.ts >/dev/null
+          grep -F -- "applyEvidenceDecisions: !automatic" scripts/sync.ts >/dev/null
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Download exact upstream artifact
+        uses: actions/github-script@v9
+        env:
+          ARTIFACT_NAME: ${{ steps.route.outputs.artifact_name }}
+        with:
+          script: |
+            const fs = require('fs');
+            const runId = Number(process.env.UPSTREAM_RUN_ID);
+            if (!Number.isSafeInteger(runId) || runId <= 0) throw new Error('Upstream run ID is invalid');
+            const response = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+              per_page: 100,
+            });
+            const matches = response.data.artifacts.filter((artifact) => artifact.name === process.env.ARTIFACT_NAME && !artifact.expired);
+            if (matches.length !== 1) throw new Error(`Expected exactly one unexpired artifact named ${process.env.ARTIFACT_NAME}`);
+            const download = await github.rest.actions.downloadArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: matches[0].id,
+              archive_format: 'zip',
+            });
+            fs.writeFileSync('.automatic-publication.zip', Buffer.from(download.data));
+
+      - name: Pin trigger and artifact evidence
+        shell: bash
+        env:
+          ARTIFACT_NAME: ${{ steps.route.outputs.artifact_name }}
+          EXPECTED_SOURCE: ${{ steps.route.outputs.expected_source }}
+        run: |
+          set -euo pipefail
+          mkdir -p .data/automatic .data/publication-evidence
+          sha256sum .automatic-publication.zip > .data/publication-evidence/artifact.zip.sha256
+          unzip -q .automatic-publication.zip -d .data/automatic
+          cd .data/automatic
+          sha256sum --check checksums.sha256
+          cd ../..
+          jq -n \
+            --arg workflow "$UPSTREAM_WORKFLOW" \
+            --arg runId "$UPSTREAM_RUN_ID" \
+            --arg headSha "$UPSTREAM_HEAD_SHA" \
+            --arg headBranch "$UPSTREAM_HEAD_BRANCH" \
+            --arg artifact "$ARTIFACT_NAME" \
+            --arg source "$EXPECTED_SOURCE" \
+            '{workflow:$workflow,runId:($runId|tonumber),headSha:$headSha,headBranch:$headBranch,artifact:$artifact,expectedSource:$source}' \
+            > .data/publication-evidence/trigger.json
+          cp .data/automatic/manifest.json .data/publication-evidence/manifest.json
+          cp .data/automatic/report.json .data/publication-evidence/report.json
+          cp .data/automatic/checksums.sha256 .data/publication-evidence/checksums.sha256
+
+      - name: Publish validated evidence without migrations
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ARTIFACT_NAME: ${{ steps.route.outputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          pnpm data:publish -- \
+            --input .data/automatic \
+            --remote \
+            --confirm-remote \
+            --automatic \
+            --skip-migrations \
+            --workflow-name "$UPSTREAM_WORKFLOW" \
+            --upstream-run-id "$UPSTREAM_RUN_ID" \
+            --upstream-head-sha "$UPSTREAM_HEAD_SHA" \
+            --upstream-head-branch "$UPSTREAM_HEAD_BRANCH" \
+            --artifact-name "$ARTIFACT_NAME" \
+            2>&1 | tee .data/publication-evidence/publication.log
+
+      - name: Verify live API after publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 30 "$LIVE_BASE_URL/api/health" -o .data/publication-evidence/live-health.json
+          curl --fail --silent --show-error --max-time 30 "$LIVE_BASE_URL/api/products?scope=all&verification=all&sort=protein_density&page=1&pageSize=1" -o .data/publication-evidence/live-catalog.json
+          jq -e '.status == "ok" and .runtime == "production" and .products > 0 and .sourceComplete == true' .data/publication-evidence/live-health.json >/dev/null
+          jq -e '.pagination.total > 0 and (.products | length) == 1' .data/publication-evidence/live-catalog.json >/dev/null
+          jq -n --arg completedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{status:"success",completedAt:$completedAt}' > .data/publication-evidence/result.json
+
+      - name: Upload durable publication evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: automatic-publication-evidence-${{ github.event.workflow_run.id }}-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: .data/publication-evidence/
