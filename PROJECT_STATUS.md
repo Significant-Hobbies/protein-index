@@ -77,6 +77,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — token-aware product search deployed after green CI; combined brand, name, flavour, and GTIN queries now match across fields and oversized queries fail with a structured validation error
 - 2026-07-16 — exact SYNTHA-6 label evidence converted and committed as checksummed verification bundle `review-492c536b4dbb0130d437`; protected publication run `29474290721` failed before its first remote read because the GitHub production environment supplied no Cloudflare credentials, leaving the review open and verified coverage unchanged
 - 2026-07-16 — eight repeated high-confidence nutrition candidates were checked against their exact Athena, Fortune, Optimum Nutrition, and RiteBite label images and rejected in bundle `review-38beed168bae9ec35cb0` for omitted or incorrect declared values; exact remote source/hash and decision-conflict validation passed without writing production data
+- 2026-07-16 — Robotoff normalization now merges supplementary serving-column nutrients only when a converted calorie or protein anchor agrees with the per-100-g row, and rejects unitless sodium instead of assuming grams; real Optimum Nutrition evidence gains the missing saturated-fat/sodium values while Fortune no longer produces an erroneous 11,100 mg sodium candidate
 
 ## Products
 

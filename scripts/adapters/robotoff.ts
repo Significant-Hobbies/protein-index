@@ -84,7 +84,7 @@ function imageUrl(image: RawRecord): string | null {
 
 function toSodiumMg(value: number, unit: string | null): number | null {
   if (unit === "mg") return value;
-  if (unit === "g" || unit === null) return value * 1000;
+  if (unit === "g") return value * 1000;
   return null;
 }
 
@@ -105,6 +105,19 @@ function completeCore(nutrition: NutritionPer100g): boolean {
   return nutrition.proteinGrams !== null && nutrition.calories !== null && nutrition.calories > 0;
 }
 
+function mergeMissingNutrition(primary: NutritionPer100g, fallback: NutritionPer100g): NutritionPer100g {
+  return {
+    calories: primary.calories ?? fallback.calories,
+    proteinGrams: primary.proteinGrams ?? fallback.proteinGrams,
+    carbohydrateGrams: primary.carbohydrateGrams ?? fallback.carbohydrateGrams,
+    sugarGrams: primary.sugarGrams ?? fallback.sugarGrams,
+    fatGrams: primary.fatGrams ?? fallback.fatGrams,
+    saturatedFatGrams: primary.saturatedFatGrams ?? fallback.saturatedFatGrams,
+    fibreGrams: primary.fibreGrams ?? fallback.fibreGrams,
+    sodiumMg: primary.sodiumMg ?? fallback.sodiumMg,
+  };
+}
+
 function differs(left: NutritionPer100g, right: NutritionPer100g, tolerance = 0.15): boolean {
   for (const field of ["calories", "proteinGrams"] as const) {
     const a = left[field];
@@ -113,6 +126,10 @@ function differs(left: NutritionPer100g, right: NutritionPer100g, tolerance = 0.
     if (Math.abs(a - b) / Math.max(Math.abs(a), Math.abs(b), 1) > tolerance) return true;
   }
   return false;
+}
+
+function hasComparableCore(left: NutritionPer100g, right: NutritionPer100g): boolean {
+  return (["calories", "proteinGrams"] as const).some((field) => left[field] !== null && right[field] !== null);
 }
 
 function parsePrediction(
@@ -160,7 +177,17 @@ function parsePrediction(
       continue;
     }
     const target = match[2] === "100g" ? per100g : perServing;
-    if (setNutritionValue(target, match[1], value, unit)) confidences.push(score);
+    if (setNutritionValue(target, match[1], value, unit)) {
+      confidences.push(score);
+    } else {
+      issues.push({
+        code: "robotoff_unsupported_nutrient_unit",
+        message: `Robotoff ${key} does not include a supported unit.`,
+        severity: "warning",
+        field: key,
+        details: { predictionId, score, value, unit },
+      });
+    }
   }
 
   let basis: RobotoffNutritionCandidate["basis"] | null = null;
@@ -189,9 +216,16 @@ function parsePrediction(
       });
       normalized = null;
       basis = null;
+    } else if (normalized) {
+      normalized = mergeMissingNutrition(normalized, converted);
     } else if (!normalized) {
       normalized = converted;
       basis = "per_serving";
+    }
+  } else if (normalized) {
+    const converted = normalizePerServing(perServing, context.servingSizeGrams);
+    if (converted && hasComparableCore(normalized, converted) && !differs(normalized, converted)) {
+      normalized = mergeMissingNutrition(normalized, converted);
     }
   }
   if (!normalized || !basis) {

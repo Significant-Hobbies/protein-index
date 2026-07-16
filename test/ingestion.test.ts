@@ -1187,6 +1187,44 @@ describe("Robotoff label evidence", () => {
     expect(ambiguous.issues.some(({ code }) => code === "robotoff_ambiguous_serving_basis")).toBe(true);
   });
 
+  it("merges supplementary serving values only when both core bases agree", () => {
+    const response = { image_predictions: [prediction(20, "18", {
+      "energy-kcal_100g": nutrient(365, "kcal"),
+      proteins_100g: nutrient(25, "g"),
+      carbohydrates_100g: nutrient(46.5, "g"),
+      fat_100g: nutrient(8.9, "g"),
+      "energy-kcal_serving": nutrient(146, "kcal"),
+      "saturated-fat_serving": nutrient(0.8, "g"),
+      sodium_serving: nutrient(100, "mg"),
+    })] };
+    const result = parseRobotoffNutritionEvidence(response, context);
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      basis: "per_100g",
+      nutritionPer100g: {
+        calories: 365,
+        proteinGrams: 25,
+        saturatedFatGrams: 2,
+        sodiumMg: 250,
+      },
+    });
+  });
+
+  it("does not assume grams for unitless sodium", () => {
+    const response = { image_predictions: [prediction(21, "19", {
+      "energy-kcal_100g": nutrient(316, "kcal"),
+      proteins_100g: nutrient(52.9, "g"),
+      sodium_100g: nutrient(11.1, ""),
+    })] };
+    const result = parseRobotoffNutritionEvidence(response, context);
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]?.nutritionPer100g.sodiumMg).toBeNull();
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_unsupported_nutrient_unit",
+      field: "sodium_100g",
+    }));
+  });
+
   it("rejects impossible nutrition and exposes multi-image disagreement", () => {
     const impossible = parseRobotoffNutritionEvidence({ image_predictions: [prediction(3, "9", {
       "energy-kcal_100g": nutrient(365, "kcal"),
