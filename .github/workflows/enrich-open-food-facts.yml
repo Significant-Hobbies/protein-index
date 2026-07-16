@@ -103,7 +103,8 @@ jobs:
               --output .data/enrichment \
               --mode production \
               --batch-size 100 \
-              --minimum-interval-ms 6500
+              --minimum-interval-ms 6500 \
+              --request-timeout-ms 30000
             status=$?
             set -e
             if [[ "$status" -eq 0 ]]; then

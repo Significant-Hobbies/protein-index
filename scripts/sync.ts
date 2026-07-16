@@ -149,6 +149,7 @@ async function enrichCommand(): Promise<void> {
   if (limit !== null && (!Number.isInteger(limit) || limit <= 0)) throw new Error("--limit must be a positive integer.");
   const batchSize = Number(option("batch-size") ?? "100");
   const minimumIntervalMs = Number(option("minimum-interval-ms") ?? "6500");
+  const requestTimeoutMs = Number(option("request-timeout-ms") ?? "30000");
   const outputDirectory = option("output") ?? ".data/enrichment";
   const result = await enrichOpenFoodFactsApi({
     input,
@@ -158,6 +159,7 @@ async function enrichCommand(): Promise<void> {
     limit,
     batchSize,
     minimumIntervalMs,
+    requestTimeoutMs,
   });
   const importSqlPath = join(outputDirectory, "import.sql");
   await emitImportSql({ stagedPath: result.stagedPath, manifestPath: result.manifestPath, outputPath: importSqlPath });

@@ -957,6 +957,36 @@ describe("Open Food Facts rich API enrichment", () => {
     expect(failedReport).toMatchObject({ sourceComplete: false, accountedBarcodes: 1, outcomes: { failed: 1 } });
   });
 
+  it("times out a hung upstream request and preserves terminal accounting", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-enrich-timeout-"));
+    const source = await sourceSnapshot(directory, 1);
+    let attempts = 0;
+    await expect(enrichOpenFoodFactsApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory: join(directory, "timed-out"),
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      maximumAttempts: 2,
+      requestTimeoutMs: 5,
+      fetcher: async (_input, init) => {
+        attempts += 1;
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+        });
+      },
+    })).rejects.toThrow("incomplete");
+    expect(attempts).toBe(2);
+    const report = JSON.parse(await readFile(join(directory, "timed-out/report.json"), "utf8")) as {
+      requestTimeoutMs: number;
+      sourceComplete: boolean;
+      outcomes: { failed: number };
+    };
+    expect(report).toMatchObject({ requestTimeoutMs: 5, sourceComplete: false, outcomes: { failed: 1 } });
+  });
+
   it("retries only failed batches on resume and clears stale failure evidence", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-enrich-partial-resume-"));
     const source = await sourceSnapshot(directory, 2);

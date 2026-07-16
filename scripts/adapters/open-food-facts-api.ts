@@ -9,7 +9,7 @@ import { normalizeGtin } from "../../shared/gtin";
 import type { SourceManifest, StagedProduct } from "../../shared/types";
 import { normalizeOpenFoodFactsRecord } from "./open-food-facts";
 
-export const OPEN_FOOD_FACTS_API_ADAPTER_VERSION = "off-api-enrichment-v4";
+export const OPEN_FOOD_FACTS_API_ADAPTER_VERSION = "off-api-enrichment-v5";
 export const OPEN_FOOD_FACTS_MULTI_PRODUCT_URL = "https://world.openfoodfacts.org/api/v2/search";
 export const OPEN_FOOD_FACTS_API_FIELDS = [
   "code",
@@ -106,6 +106,7 @@ export interface OpenFoodFactsApiEnrichmentOptions {
   minimumIntervalMs?: number;
   retryBaseMs?: number;
   maximumAttempts?: number;
+  requestTimeoutMs?: number;
   minimumSplitBatchSize?: number;
   maximumRequestBatchSize?: number;
   fetcher?: FetchLike;
@@ -212,6 +213,7 @@ async function fetchBatch(input: {
   userAgent: string;
   maximumAttempts: number;
   retryBaseMs: number;
+  requestTimeoutMs: number;
   beforeAttempt: () => Promise<void>;
 }): Promise<ApiSearchResponse> {
   let lastError: Error | null = null;
@@ -221,6 +223,7 @@ async function fetchBatch(input: {
       await input.beforeAttempt();
       response = await input.fetcher(batchUrl(input.codes), {
         headers: { Accept: "application/json", "User-Agent": input.userAgent },
+        signal: AbortSignal.timeout(input.requestTimeoutMs),
       });
       if (!response.ok) {
         if (response.status === 503 && input.codes.length > 1) {
@@ -250,6 +253,7 @@ async function fetchBatchResilient(input: {
   userAgent: string;
   maximumAttempts: number;
   retryBaseMs: number;
+  requestTimeoutMs: number;
   beforeAttempt: () => Promise<void>;
   onSplit: () => void;
   minimumSplitBatchSize: number;
@@ -297,11 +301,15 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
   const minimumIntervalMs = options.minimumIntervalMs ?? 6_500;
   const retryBaseMs = options.retryBaseMs ?? 2_000;
   const maximumAttempts = options.maximumAttempts ?? 5;
+  const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
   const minimumSplitBatchSize = options.minimumSplitBatchSize ?? 1;
   const maximumRequestBatchSize = options.maximumRequestBatchSize ?? Math.min(50, batchSize);
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 100) throw new Error("API enrichment batch size must be between 1 and 100.");
   if (!Number.isFinite(minimumIntervalMs) || minimumIntervalMs < 0) throw new Error("API enrichment interval must be non-negative.");
   if (!Number.isInteger(maximumAttempts) || maximumAttempts < 1 || maximumAttempts > 8) throw new Error("API enrichment attempts must be between 1 and 8.");
+  if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > 300_000) {
+    throw new Error("API enrichment request timeout must be between 1 and 300000 milliseconds.");
+  }
   if (!Number.isInteger(minimumSplitBatchSize) || minimumSplitBatchSize < 1 || minimumSplitBatchSize > batchSize) {
     throw new Error("API enrichment minimum split batch size must be between 1 and the batch size.");
   }
@@ -364,6 +372,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
     userAgent: options.userAgent ?? "protein-index/0.1 (+https://github.com/sarthak-fleet/protein-index; nutrition-enrichment)",
     maximumAttempts,
     retryBaseMs,
+    requestTimeoutMs,
     minimumSplitBatchSize,
     beforeAttempt: async () => {
       if (lastFetchStartedAt !== null) {
@@ -513,6 +522,9 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
           batch,
         } satisfies EnrichmentOutcome);
       }
+      if (batch === 1 || batch % 10 === 0 || offset + selected.length === summaries.length) {
+        process.stdout.write(`Enrichment progress: ${offset + selected.length}/${summaries.length} barcodes (${batch}/${Math.ceil(summaries.length / batchSize)} batches)\n`);
+      }
     }
   } finally {
     await Promise.all([closeStream(stagedOutput), closeStream(outcomeOutput), closeStream(indexOutput), closeStream(exclusionOutput)]);
@@ -581,6 +593,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
       },
     },
     minimumIntervalMs,
+    requestTimeoutMs,
     maximumRequestBatchSize,
     requestSchema: OPEN_FOOD_FACTS_API_REQUEST_SCHEMA,
     inputManifestHash: sourceManifest.inputHash,
