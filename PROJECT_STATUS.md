@@ -76,6 +76,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — calorie-derived protein rankings now withhold rounded label combinations where protein alone implies more than 100% of declared energy; raw unverified nutrition remains visible and the next valid density ceiling is exactly 25 g per 100 kcal
 - 2026-07-16 — token-aware product search deployed after green CI; combined brand, name, flavour, and GTIN queries now match across fields and oversized queries fail with a structured validation error
 - 2026-07-16 — exact SYNTHA-6 label evidence converted and committed as checksummed verification bundle `review-492c536b4dbb0130d437`; protected publication run `29474290721` failed before its first remote read because the GitHub production environment supplied no Cloudflare credentials, leaving the review open and verified coverage unchanged
+- 2026-07-16 — eight repeated high-confidence nutrition candidates were checked against their exact Athena, Fortune, Optimum Nutrition, and RiteBite label images and rejected in bundle `review-38beed168bae9ec35cb0` for omitted or incorrect declared values; exact remote source/hash and decision-conflict validation passed without writing production data
 
 ## Products
 
@@ -175,4 +176,5 @@ must pass desktop/mobile verification.
     Cloudflare publication credentials before protected catalog or reviewed-
     evidence workflows can read or write D1. Runs `29449999090` and
     `29474290721` both failed with empty credential variables before applying
-    data; the exact SYNTHA-6 verification bundle remains committed and replayable.
+    data; the exact SYNTHA-6 verification bundle and the eight-decision
+    incomplete-candidate rejection bundle remain committed and replayable.
