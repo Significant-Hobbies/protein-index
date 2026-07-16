@@ -153,6 +153,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — a third 24-record liquid-label batch was checked against the exact retained images in checksummed bundle `review-6b5e8b66259669560d75`: Mogu Mogu Lychee, Coca-Cola Original, Frantoi Cutrera olive oil, Thums Up, and Storia Pomegranate match every supported declaration, while 19 records are rejected for omitted nutrients, wrong dimensions, incorrect values, or duplicate product evidence. Across all three bundles, 62 of 258 decision-eligible records covering 57 of 209 GTINs now have exact artifact-bound decisions, including 13 pending verifications; the remaining 196 records span 166 GTINs, and live coverage is unchanged before protected publication.
 - 2026-07-16 — a fourth 24-record distinct-GTIN batch was checked against exact retained images in checksummed bundle `review-faa4134c08f801a2e6b1`: Local all-natural soda and Yakult match every supported declaration, while 22 candidates are rejected for wrong mass/volume basis, incorrect serving conversion, omitted label values, or misclassified nutrients. An obscured Amul Pineapple image was excluded rather than treated as proof of rejection. Across all four bundles, 86 of 258 decision-eligible records covering 75 of 209 GTINs now have exact artifact-bound decisions, including 15 pending verifications; the remaining 172 records span 147 GTINs, and live coverage is unchanged before protected publication.
 - 2026-07-16 — a fifth 24-record distinct-GTIN liquid batch was checked against exact retained images in checksummed bundle `review-ca0eeaed8172acd296f7`; all 24 candidates were rejected for omitted declarations, unsupported fields, wrong mass/volume basis, inexact values, or incorrect serving conversion, so verified coverage was deliberately not inflated. Across all five bundles, 110 of 258 decision-eligible records covering 99 of 209 GTINs now have exact artifact-bound decisions (15 pending verifications and 95 rejections); the remaining 148 records span 127 GTINs, and live coverage is unchanged before protected publication.
+- 2026-07-16 — a sixth 24-record distinct-GTIN liquid batch was checked against exact retained images in checksummed bundle `review-8883bc8d43df33874d89`; all 24 candidates were rejected for omitted declarations, incorrect values, wrong mass/volume or serving basis, or mismatched product evidence, including an iced-latte identity attached to a photographed Doritos label. Across all six bundles, 134 of 258 decision-eligible records covering 123 of 209 GTINs now have exact artifact-bound decisions (15 pending verifications and 119 rejections); the remaining 124 records span 106 GTINs, and live coverage is unchanged before protected publication.
 
 ## Products
 
@@ -265,9 +266,10 @@ must pass desktop/mobile verification.
     production migration is explicitly approved, then source-check and publish
     liquid bundles `review-230fca7ea00663c6c05e`,
     `review-9c7ac1f9e044ed7bce6e`,
-    `review-6b5e8b66259669560d75`, and
-    `review-faa4134c08f801a2e6b1`, and
-    `review-ca0eeaed8172acd296f7` with exact postconditions and replay. Continue
-    reviewing the remaining 148 decision-eligible records across 127 GTINs and
+    `review-6b5e8b66259669560d75`,
+    `review-faa4134c08f801a2e6b1`,
+    `review-ca0eeaed8172acd296f7`, and
+    `review-8883bc8d43df33874d89` with exact postconditions and replay. Continue
+    reviewing the remaining 124 decision-eligible records across 106 GTINs and
     resolve the two audited cross-image conflicts separately; do not claim the
     fifteen verified per-100-mL candidates until live publication proves them.
