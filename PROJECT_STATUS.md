@@ -119,6 +119,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — label normalization now refuses to backfill an absent per-100-g total-sugar field from a serving-column sugar value, preventing added sugar from masquerading as total sugar; when a consistent label supplies kcal only in its serving column and kJ in its per-100-g column, the declared kcal value takes precedence after exact mass conversion while direct per-100-g nutrients remain primary
 - 2026-07-16 — serving-only label candidates now fail closed when their unconverted calories/protein match the existing per-100-g source anchor but applying the alleged serving mass creates a material disagreement; the source anchor can only reject a suspect conversion and cannot promote or verify nutrition
 - 2026-07-16 — product detail responses collapse identical allergen, additive, and nutrient values contributed by multiple source records while retaining every source-specific database row and provenance observation
+- 2026-07-16 — live pre-publication validation rejected combined review bundle `review-a38aa3b03b96759fe54b` before any write because 76 nutrition decisions had parser-shaped source-hash drift; the 66 still-current ingredient decisions were isolated into checksummed bundle `review-2e577fd180832df5bc94`, which passes exact live source, candidate, product, and existing-decision validation with 65 verifies and one rejection
 
 ## Products
 
