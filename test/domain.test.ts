@@ -19,7 +19,7 @@ import {
   type IngredientCandidate,
 } from "../shared/ingredient-evidence";
 import { hasValidGtinCheckDigit, normalizeGtin, normalizeText, parseQuantity } from "../shared/gtin";
-import { invalidIngredientPercentages, parseAdditives, parseAllergens, parseIngredients } from "../shared/ingredients";
+import { invalidIngredientPercentages, parseAdditives, parseAllergens, parseIngredients, parseLegacyIngredients } from "../shared/ingredients";
 import { calculateCompleteness, calculateMetrics } from "../shared/metrics";
 import { emptyNutrition, nextEvidenceStatus, normalizePerServing, validateNutrition } from "../shared/nutrition";
 import type { NutritionEvidence } from "../shared/types";
@@ -367,6 +367,15 @@ describe("ingredient intelligence", () => {
       .toContain("candidateHash does not match payload");
     expect(await validateIngredientEvidenceDecision({ ...decision, evidenceUrl: "https://example.com/label.jpg" }))
       .toContain("evidenceUrl must match the candidate label image");
+    expect(await validateIngredientEvidenceDecision({
+      ...decision,
+      payload: {
+        ...decision.payload,
+        reviewedText: "Milk Solids & Vinegar",
+        normalizedIngredients: parseLegacyIngredients("Milk Solids & Vinegar"),
+      },
+      rationale: "Legacy immutable bundle replay",
+    })).toEqual([]);
     expect(await validateIngredientEvidenceDecision({ ...decision, payload: { ...decision.payload, reviewedText: null, normalizedIngredients: [] } }))
       .toContain("verify decisions require bounded reviewer-confirmed text");
     expect(await validateIngredientEvidenceDecision({

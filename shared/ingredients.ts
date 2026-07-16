@@ -1,7 +1,7 @@
 import { normalizeText } from "./gtin";
 import type { AllergenDeclaration, NormalizedIngredient } from "./types";
 
-function splitTopLevel(value: string): string[] {
+function splitTopLevel(value: string, splitAmpersands = true): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;
@@ -10,6 +10,7 @@ function splitTopLevel(value: string): string[] {
     if (char === "(" || char === "[") depth += 1;
     if (char === ")" || char === "]") depth = Math.max(0, depth - 1);
     const ampersandSeparatesIngredients = char === "&"
+      && splitAmpersands
       && depth === 0
       && value.slice(start, index).trimEnd().at(-1) !== "-";
     if (((char === "," || char === ";") && depth === 0) || ampersandSeparatesIngredients) {
@@ -21,7 +22,7 @@ function splitTopLevel(value: string): string[] {
   return parts.map((part) => part.trim()).filter(Boolean);
 }
 
-function parseOne(raw: string, position: number): NormalizedIngredient {
+function parseOne(raw: string, position: number, splitAmpersands: boolean): NormalizedIngredient {
   const percentageMatch = raw.match(/(\d+(?:\.\d+)?)\s*%/);
   const parsedPercentage = percentageMatch?.[1] ? Number(percentageMatch[1]) : null;
   const nestedMatch = raw.match(/^([^([]+)[([](.+)[)\]]$/);
@@ -33,7 +34,8 @@ function parseOne(raw: string, position: number): NormalizedIngredient {
     percentage: parsedPercentage !== null && parsedPercentage >= 0 && parsedPercentage <= 100 ? parsedPercentage : null,
     position,
     children: nestedMatch?.[2]
-      ? splitTopLevel(nestedMatch[2]).map((child, childIndex) => parseOne(child, childIndex))
+      ? splitTopLevel(nestedMatch[2], splitAmpersands)
+        .map((child, childIndex) => parseOne(child, childIndex, splitAmpersands))
       : [],
   };
 }
@@ -47,7 +49,12 @@ export function invalidIngredientPercentages(raw: string | null | undefined): nu
 
 export function parseIngredients(raw: string | null | undefined): NormalizedIngredient[] {
   if (!raw?.trim()) return [];
-  return splitTopLevel(raw).map((ingredient, index) => parseOne(ingredient, index));
+  return splitTopLevel(raw).map((ingredient, index) => parseOne(ingredient, index, true));
+}
+
+export function parseLegacyIngredients(raw: string | null | undefined): NormalizedIngredient[] {
+  if (!raw?.trim()) return [];
+  return splitTopLevel(raw, false).map((ingredient, index) => parseOne(ingredient, index, false));
 }
 
 function cleanTag(tag: string): string {

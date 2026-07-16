@@ -1,6 +1,6 @@
 import { canonicalJson, sha256Hex } from "./evidence-decisions";
 import { normalizeGtin } from "./gtin";
-import { invalidIngredientPercentages, parseIngredients } from "./ingredients";
+import { invalidIngredientPercentages, parseIngredients, parseLegacyIngredients } from "./ingredients";
 import type { NormalizedIngredient } from "./types";
 
 export type IngredientJsonValue =
@@ -283,9 +283,13 @@ export async function validateIngredientEvidenceDecision(
       errors.push("verify decisions require bounded reviewer-confirmed text");
     } else {
       const normalizedIngredients = parseIngredients(reviewedText);
+      const legacyNormalizedIngredients = parseLegacyIngredients(reviewedText);
       if (normalizedIngredients.length === 0) errors.push("reviewedText does not contain parseable ingredients");
       if (invalidIngredientPercentages(reviewedText).length > 0) errors.push("reviewedText contains an invalid ingredient percentage");
-      if (canonicalJson(normalizedIngredients) !== canonicalJson(input.payload.normalizedIngredients)) {
+      if (
+        canonicalJson(normalizedIngredients) !== canonicalJson(input.payload.normalizedIngredients)
+        && canonicalJson(legacyNormalizedIngredients) !== canonicalJson(input.payload.normalizedIngredients)
+      ) {
         errors.push("normalizedIngredients do not match reviewedText");
       }
       if (reviewedText !== input.payload.candidate.entityText && input.rationale.trim().length < 12) {
