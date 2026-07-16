@@ -656,6 +656,28 @@ describe("Open Food Facts bulk staging", () => {
     expect(() => assertPublicationEvidence(manifest, { ...report, outcomes: { failed: 1 } })).toThrow("failed barcodes");
   });
 
+  it("requires terminal barcode accounting for multi-prediction Robotoff ingredient evidence", () => {
+    const manifest = {
+      source: "open_food_facts_robotoff_ingredients",
+      mode: "production",
+      sourceComplete: true,
+      terminalEvidence: "end_of_file",
+      stagedRecords: 14,
+      indiaRecords: 10,
+    } as SourceManifest;
+    const report = {
+      sourceComplete: true,
+      marketComplete: false,
+      requestedBarcodes: 10,
+      accountedBarcodes: 10,
+      outcomes: { failed: 0 },
+      exclusions: { records: 2, reconcilesIndiaSlice: true },
+    };
+    expect(() => assertPublicationEvidence(manifest, report)).not.toThrow();
+    expect(() => assertPublicationEvidence(manifest, { ...report, accountedBarcodes: 9 })).toThrow("barcode accounting");
+    expect(() => assertPublicationEvidence(manifest, { ...report, outcomes: { failed: 1 } })).toThrow("failed barcodes");
+  });
+
   it("streams all India-tagged foods without protein prefiltering", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-ingest-"));
     const input = join(directory, "sample.jsonl");

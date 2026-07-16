@@ -24,6 +24,17 @@ interface PublicationReport {
   };
 }
 
+const BARCODE_ACCOUNTED_SOURCES = new Set([
+  "open_food_facts_api",
+  "open_food_facts_robotoff",
+  "open_food_facts_robotoff_ingredients",
+]);
+
+const MULTI_PREDICTION_SOURCES = new Set([
+  "open_food_facts_robotoff",
+  "open_food_facts_robotoff_ingredients",
+]);
+
 export interface PublicationSnapshot {
   directory: string;
   manifestPath: string;
@@ -45,7 +56,7 @@ export function assertPublicationEvidence(manifest: SourceManifest, report: Publ
   if (report.marketComplete !== false) failures.push("report must not claim market completeness");
   if (report.exclusions?.reconcilesIndiaSlice !== true) failures.push("India source accounting does not reconcile");
   const excluded = report.exclusions?.records;
-  if (manifest.source !== "open_food_facts_robotoff"
+  if (!MULTI_PREDICTION_SOURCES.has(manifest.source)
     && (!Number.isInteger(excluded) || manifest.stagedRecords + (excluded ?? 0) !== manifest.indiaRecords)) {
     failures.push("staged plus excluded records do not equal the India slice");
   }
@@ -58,7 +69,7 @@ export function assertPublicationEvidence(manifest: SourceManifest, report: Publ
     const maximumDropRatio = report.continuity?.maximumDropRatio ?? 0;
     if (previous > 0 && missing / previous > maximumDropRatio) failures.push("snapshot exceeds the permitted continuity drop");
   }
-  if (["open_food_facts_api", "open_food_facts_robotoff"].includes(manifest.source)) {
+  if (BARCODE_ACCOUNTED_SOURCES.has(manifest.source)) {
     if (report.requestedBarcodes !== manifest.indiaRecords) failures.push("requested barcode count differs from the manifest");
     if (report.accountedBarcodes !== report.requestedBarcodes) failures.push("barcode accounting does not reconcile");
     if (report.outcomes?.failed !== 0) failures.push("enrichment contains failed barcodes");
@@ -98,7 +109,7 @@ export async function validatePublicationSnapshot(directory: string): Promise<Pu
     expectedFiles.set(file, match[1]);
   }
   const requiredFiles = ["manifest.json", "report.json", "source-index.jsonl", "exclusions.jsonl", "staged-products.jsonl"];
-  if (["open_food_facts_api", "open_food_facts_robotoff"].includes(manifest.source)) requiredFiles.push("outcomes.jsonl");
+  if (BARCODE_ACCOUNTED_SOURCES.has(manifest.source)) requiredFiles.push("outcomes.jsonl");
   for (const required of requiredFiles) {
     if (!expectedFiles.has(required)) throw new Error(`Publication checksum is missing ${required}`);
   }
