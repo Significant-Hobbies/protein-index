@@ -22,7 +22,7 @@
 
 - [x] 4.1 Update README and `PROJECT_STATUS.md` with the automatic evidence boundary, recovery path, cadence, and explicit non-verification guarantee.
 - [x] 4.2 Run focused tests, full checks, release preflight, and strict OpenSpec validation.
-- [ ] 4.3 Commit and push a clean synchronized `main`, then require green CI before the production proof run.
+- [x] 4.3 Commit and push a clean synchronized `main`, then require green CI before the production proof run.
 
 ## 5. Production proof and handoff
 
