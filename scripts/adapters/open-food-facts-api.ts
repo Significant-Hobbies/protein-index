@@ -9,7 +9,7 @@ import { normalizeGtin } from "../../shared/gtin";
 import type { SourceManifest, StagedProduct } from "../../shared/types";
 import { normalizeOpenFoodFactsRecord } from "./open-food-facts";
 
-export const OPEN_FOOD_FACTS_API_ADAPTER_VERSION = "off-api-enrichment-v2";
+export const OPEN_FOOD_FACTS_API_ADAPTER_VERSION = "off-api-enrichment-v3";
 export const OPEN_FOOD_FACTS_MULTI_PRODUCT_URL = "https://world.openfoodfacts.org/api/v2/search";
 export const OPEN_FOOD_FACTS_API_FIELDS = [
   "code",
@@ -20,8 +20,10 @@ export const OPEN_FOOD_FACTS_API_FIELDS = [
   "countries_tags",
   "quantity",
   "product_quantity",
+  "product_quantity_unit",
   "serving_size",
   "serving_quantity",
+  "serving_quantity_unit",
   "categories",
   "categories_tags",
   "labels",

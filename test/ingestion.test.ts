@@ -704,10 +704,23 @@ describe("Open Food Facts bulk staging", () => {
       code: "8900000000029",
       product_name: "Protein Drink",
       quantity: "6 x 200ml",
+      product_quantity: 1200,
       product_quantity_unit: "ml",
+      serving_size: "70 ml",
+      serving_quantity: 70,
+      serving_quantity_unit: "ml",
     });
     expect(normalized.staged?.nutrition.basis).toBe("per_100ml");
+    expect(normalized.staged?.netQuantityGrams).toBeNull();
+    expect(normalized.staged?.servingSizeGrams).toBeNull();
     expect(normalized.staged?.nutrients.every(({ basis }) => basis === "per_100ml")).toBe(true);
+    const computedGramServing = normalizeOpenFoodFactsRecord({
+      ...indiaProduct,
+      code: "8900000000043",
+      serving_size: "",
+      serving_quantity: 50,
+    });
+    expect(computedGramServing.staged?.servingSizeGrams).toBe(50);
     const unknown = normalizeOpenFoodFactsRecord({ ...indiaProduct, code: "8900000000036", quantity: "" });
     expect(unknown.staged?.nutrition.basis).toBe("unknown");
   });
@@ -1185,6 +1198,42 @@ describe("Robotoff label evidence", () => {
     const ambiguous = parseRobotoffNutritionEvidence(response, { ...context, servingSizeGrams: null });
     expect(ambiguous.candidates).toHaveLength(0);
     expect(ambiguous.issues.some(({ code }) => code === "robotoff_ambiguous_serving_basis")).toBe(true);
+  });
+
+  it("rejects legacy volume servings instead of treating millilitres as grams", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-volume-"));
+    const input = join(directory, "source.jsonl");
+    await writeFile(input, `${JSON.stringify({
+      ...indiaProduct,
+      quantity: "70 ml",
+      product_quantity: 70,
+      product_quantity_unit: "ml",
+      serving_size: "70 ml",
+      serving_quantity: 70,
+      serving_quantity_unit: "ml",
+      image_nutrition_url: context.nutritionImageUrl,
+    })}\n`, "utf8");
+    const source = await stageOpenFoodFacts({ input, outputDirectory: join(directory, "source"), mode: "sample", limit: null });
+    const legacy = JSON.parse((await readFile(source.stagedPath, "utf8")).trim()) as Record<string, unknown>;
+    expect(legacy.servingSizeGrams).toBeNull();
+    legacy.servingSizeGrams = 70;
+    await writeFile(source.stagedPath, `${JSON.stringify(legacy)}\n`, "utf8");
+
+    const result = await extractRobotoffApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory: join(directory, "robotoff"),
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      fetcher: async () => new Response(JSON.stringify({ image_predictions: [prediction(22, "20", {
+        "energy-kcal_serving": nutrient(155, "kcal"),
+        proteins_serving: nutrient(4.5, "g"),
+      })] }), { status: 200 }),
+    });
+    expect(result.outcomes).toEqual({ candidate: 0, no_prediction: 0, rejected: 1, failed: 0 });
+    const staged = JSON.parse((await readFile(result.stagedPath, "utf8")).trim()) as { validationIssues: Array<{ code: string }> };
+    expect(staged.validationIssues).toContainEqual(expect.objectContaining({ code: "robotoff_ambiguous_serving_basis" }));
   });
 
   it("merges supplementary serving values only when both core bases agree", () => {

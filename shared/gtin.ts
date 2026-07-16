@@ -41,11 +41,18 @@ export function normalizeText(value: string | null | undefined): string {
 
 export function parseQuantity(value: string | null | undefined): NormalizedQuantity | null {
   if (!value) return null;
-  const match = value.trim().toLowerCase().match(/(?:^|\s)(\d+(?:\.\d+)?)\s*(kg|g|ml|l)\b/);
+  const match = value.trim().toLowerCase().match(
+    /(?:^|[^0-9.])(\d+(?:\.\d+)?)\s*(kilograms?|kgs?|grams?|g|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l)\b/,
+  );
   if (!match?.[1] || !match[2]) return null;
   const amount = Number(match[1]);
   if (!Number.isFinite(amount) || amount <= 0) return null;
-  const unit = match[2] as NormalizedQuantity["unit"];
+  const rawUnit = match[2];
+  const unit: NormalizedQuantity["unit"] =
+    /^(?:kilograms?|kgs?)$/.test(rawUnit) ? "kg"
+      : /^(?:grams?|g)$/.test(rawUnit) ? "g"
+        : /^(?:millilit(?:er|re)s?|ml)$/.test(rawUnit) ? "ml"
+          : "l";
   return {
     value: amount,
     unit,

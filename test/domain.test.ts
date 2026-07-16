@@ -63,6 +63,9 @@ describe("GTIN and identity normalization", () => {
     expect(normalizeText("  Café & Whey™  ")).toBe("cafe and whey");
     expect(parseQuantity("Net wt. 1.5 kg")?.grams).toBe(1500);
     expect(parseQuantity("250 ml")?.grams).toBeNull();
+    expect(parseQuantity("1 scoop (38g)")?.grams).toBe(38);
+    expect(parseQuantity("36 grams in 350 ml of water")?.grams).toBe(36);
+    expect(parseQuantity("1 portion (70 millilitres)")?.millilitres).toBe(70);
   });
 
   it("resolves exact GTIN before conservative composite identity", () => {

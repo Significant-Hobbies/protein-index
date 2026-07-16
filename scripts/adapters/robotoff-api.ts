@@ -5,11 +5,12 @@ import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { finished } from "node:stream/promises";
 import { once } from "node:events";
-import { normalizeGtin } from "../../shared/gtin";
+import { normalizeGtin, normalizeText, parseQuantity } from "../../shared/gtin";
+import { finiteNumber } from "../../shared/nutrition";
 import type { SourceManifest, StagedProduct } from "../../shared/types";
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "./robotoff";
 
-export const ROBOTOFF_API_ADAPTER_VERSION = "robotoff-api-v1";
+export const ROBOTOFF_API_ADAPTER_VERSION = "robotoff-api-v2";
 export const ROBOTOFF_IMAGE_PREDICTIONS_URL = "https://robotoff.openfoodfacts.org/api/v1/image_predictions";
 const PAGE_SIZE = 50;
 export const ROBOTOFF_API_REQUEST_SCHEMA = createHash("sha256")
@@ -64,6 +65,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function explicitServingMass(product: StagedProduct): number | null {
+  const evidence = isRecord(product.rawEvidence) ? product.rawEvidence : null;
+  const rawServing = typeof evidence?.serving_size === "string" ? evidence.serving_size : null;
+  const parsed = parseQuantity(rawServing);
+  if (parsed) return parsed.grams;
+  const value = finiteNumber(evidence?.serving_quantity);
+  if (value === null || value <= 0) return null;
+  const rawUnit = typeof evidence?.serving_quantity_unit === "string" ? evidence.serving_quantity_unit : null;
+  const unit = normalizeText(rawUnit);
+  if (unit === "g" || unit === "gram" || unit === "grams") return value;
+  if (unit === "kg" || unit === "kilogram" || unit === "kilograms") return value * 1000;
+  return unit ? null : value;
+}
+
 async function hashFile(path: string): Promise<string> {
   const hash = createHash("sha256");
   const stream = createReadStream(path);
@@ -90,7 +105,7 @@ async function readContexts(path: string, limit: number | null): Promise<Robotof
       category: product.category,
       categoryRaw: product.categoryRaw,
       netQuantityGrams: product.netQuantityGrams,
-      servingSizeGrams: product.servingSizeGrams,
+      servingSizeGrams: explicitServingMass(product),
       imageUrl: product.imageUrl,
       nutritionImageUrl: product.nutritionImageUrl,
     });

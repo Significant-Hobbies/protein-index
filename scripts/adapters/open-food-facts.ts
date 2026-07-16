@@ -20,7 +20,7 @@ import type {
   ValidationIssue,
 } from "../../shared/types";
 
-export const OPEN_FOOD_FACTS_ADAPTER_VERSION = "off-bulk-v1";
+export const OPEN_FOOD_FACTS_ADAPTER_VERSION = "off-bulk-v2";
 export const OPEN_FOOD_FACTS_EXPORT_URL =
   "https://static.openfoodfacts.org/data/en.openfoodfacts.org.products.csv.gz";
 
@@ -116,6 +116,17 @@ function nutritionBasis(record: RawRecord): "per_100g" | "per_100ml" | "unknown"
   return "unknown";
 }
 
+function massQuantity(raw: unknown, numeric: unknown, rawUnit: unknown, unitlessNumericIsGrams = false): number | null {
+  const parsed = parseQuantity(stringValue(raw));
+  if (parsed) return parsed.grams;
+  const value = finiteNumber(numeric);
+  if (value === null || value <= 0) return null;
+  const unit = normalizeText(stringValue(rawUnit));
+  if (unit === "g" || unit === "gram" || unit === "grams") return value;
+  if (unit === "kg" || unit === "kilogram" || unit === "kilograms") return value * 1000;
+  return unitlessNumericIsGrams && !unit ? value : null;
+}
+
 function parseGenericNutrients(record: RawRecord, basis: "per_100g" | "per_100ml" | "unknown"): GenericNutrientValue[] {
   const values: GenericNutrientValue[] = [];
   for (const [key, rawValue] of Object.entries(nutritionContainer(record))) {
@@ -186,12 +197,11 @@ export function normalizeOpenFoodFactsRecord(
   const nutritionPer100g = parseCoreNutrition(record);
   const nutritionIssues = validateNutrition(nutritionPer100g);
   issues.push(...nutritionIssues);
-  const quantity = parseQuantity(stringValue(record.quantity));
-  const numericQuantity = finiteNumber(record.product_quantity);
-  const netQuantityGrams = quantity?.grams ?? (numericQuantity !== null && numericQuantity > 0 ? numericQuantity : null);
-  const serving = parseQuantity(stringValue(record.serving_size));
-  const numericServing = finiteNumber(record.serving_quantity);
-  const servingSizeGrams = serving?.grams ?? (numericServing !== null && numericServing > 0 ? numericServing : null);
+  const netQuantityGrams = massQuantity(record.quantity, record.product_quantity, record.product_quantity_unit);
+  // Open Food Facts defines serving_quantity as a computed gram value when no
+  // explicit unit is returned. An explicit volume in serving_size still wins
+  // and deliberately produces no serving mass.
+  const servingSizeGrams = massQuantity(record.serving_size, record.serving_quantity, record.serving_quantity_unit, true);
   if (netQuantityGrams !== null && servingSizeGrams !== null && servingSizeGrams > netQuantityGrams) {
     issues.push({ code: "serving_exceeds_pack", message: "Serving size exceeds net pack mass", severity: "error", field: "servingSizeGrams" });
   }
