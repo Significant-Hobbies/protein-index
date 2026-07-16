@@ -66,6 +66,8 @@ describe("GTIN and identity normalization", () => {
     expect(parseQuantity("1 scoop (38g)")?.grams).toBe(38);
     expect(parseQuantity("36 grams in 350 ml of water")?.grams).toBe(36);
     expect(parseQuantity("1 portion (70 millilitres)")?.millilitres).toBe(70);
+    expect(parseQuantity("25 cl")?.millilitres).toBe(250);
+    expect(parseQuantity("2 dl")?.millilitres).toBe(200);
   });
 
   it("resolves exact GTIN before conservative composite identity", () => {

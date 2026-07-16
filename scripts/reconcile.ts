@@ -171,6 +171,20 @@ export async function emitImportSql(input: {
       output,
       `UPDATE products SET is_active = 1 WHERE id = ${sql(productId)} AND NOT EXISTS (SELECT 1 FROM identity_decisions d WHERE d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.identity_hash = ${sql(identityHash)} AND d.active = 1 AND (d.decision = 'no_match' OR d.target_product_id <> ${sql(productId)}));`,
     );
+    if (product.source === "open_food_facts_robotoff") {
+      const candidateHash = nutritionCandidate?.candidateHash ?? null;
+      await write(
+        output,
+        `UPDATE review_items SET status = 'dismissed', decision = 'dismiss', decision_rationale = 'Superseded by corrected source evidence', decided_by = 'system_reconciliation', resolved_at = ${sql(now)} WHERE status = 'open' AND source_record_id = ${sql(sourceRecordId)} AND type = 'nutrition_validation' AND json_extract(evidence_json, '$.code') = 'robotoff_nutrition_candidate' AND (${sql(candidateHash)} IS NULL OR COALESCE(json_extract(evidence_json, '$.details.candidateHash'), '') <> ${sql(candidateHash)});`,
+      );
+    }
+    if (product.source === "open_food_facts_robotoff_ingredients") {
+      const candidateHash = ingredientCandidate?.candidateHash ?? null;
+      await write(
+        output,
+        `UPDATE review_items SET status = 'dismissed', decision = 'dismiss', decision_rationale = 'Superseded by corrected source evidence', decided_by = 'system_reconciliation', resolved_at = ${sql(now)} WHERE status = 'open' AND source_record_id = ${sql(sourceRecordId)} AND type = 'ingredient_conflict' AND json_extract(evidence_json, '$.code') = 'robotoff_ingredient_candidate' AND (${sql(candidateHash)} IS NULL OR COALESCE(json_extract(evidence_json, '$.details.candidateHash'), '') <> ${sql(candidateHash)});`,
+      );
+    }
     if (!product.gtin && !compositeIdentityKey(product)) {
       pendingIdentityReviews.push({
         reviewId: stableId("rev", `${sourceRecordId}:identity:${identityHash}`),

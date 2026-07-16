@@ -42,7 +42,7 @@ export function normalizeText(value: string | null | undefined): string {
 export function parseQuantity(value: string | null | undefined): NormalizedQuantity | null {
   if (!value) return null;
   const match = value.trim().toLowerCase().match(
-    /(?:^|[^0-9.])(\d+(?:\.\d+)?)\s*(kilograms?|kgs?|grams?|g|millilit(?:er|re)s?|ml|lit(?:er|re)s?|l)\b/,
+    /(?:^|[^0-9.])(\d+(?:\.\d+)?)\s*(kilograms?|kgs?|grams?|g|millilit(?:er|re)s?|ml|centilit(?:er|re)s?|cl|decilit(?:er|re)s?|dl|lit(?:er|re)s?|l)\b/,
   );
   if (!match?.[1] || !match[2]) return null;
   const amount = Number(match[1]);
@@ -51,13 +51,16 @@ export function parseQuantity(value: string | null | undefined): NormalizedQuant
   const unit: NormalizedQuantity["unit"] =
     /^(?:kilograms?|kgs?)$/.test(rawUnit) ? "kg"
       : /^(?:grams?|g)$/.test(rawUnit) ? "g"
-        : /^(?:millilit(?:er|re)s?|ml)$/.test(rawUnit) ? "ml"
-          : "l";
+        : /^(?:lit(?:er|re)s?|l)$/.test(rawUnit) ? "l"
+          : "ml";
+  const millilitres = /^(?:centilit(?:er|re)s?|cl)$/.test(rawUnit) ? amount * 10
+    : /^(?:decilit(?:er|re)s?|dl)$/.test(rawUnit) ? amount * 100
+      : unit === "ml" ? amount : unit === "l" ? amount * 1000 : null;
   return {
     value: amount,
     unit,
     grams: unit === "g" ? amount : unit === "kg" ? amount * 1000 : null,
-    millilitres: unit === "ml" ? amount : unit === "l" ? amount * 1000 : null,
+    millilitres,
   };
 }
 

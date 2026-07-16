@@ -112,11 +112,14 @@ function nutritionBasis(record: RawRecord): "per_100g" | "per_100ml" | "unknown"
   if (declared === "100ml" || declared === "per 100ml") return "per_100ml";
   if (declared === "100g" || declared === "per 100g") return "per_100g";
   const unit = normalizeText(stringValue(record.product_quantity_unit));
-  const quantity = normalizeText(stringValue(record.quantity));
-  const serving = normalizeText(stringValue(record.serving_size));
-  const volumeUnit = /(?:^|[^a-z])(?:ml|cl|dl|l|litre|liter|litres|liters)(?:[^a-z]|$)/;
-  if (volumeUnit.test(unit) || volumeUnit.test(quantity) || volumeUnit.test(serving)) return "per_100ml";
-  if (parseQuantity(stringValue(record.quantity))?.grams != null) return "per_100g";
+  if (["ml", "cl", "dl", "l", "millilitre", "milliliter", "litre", "liter"].includes(unit)) return "per_100ml";
+  if (["g", "kg", "gram", "grams", "kilogram", "kilograms"].includes(unit)) return "per_100g";
+  const quantity = parseQuantity(stringValue(record.quantity));
+  if (quantity?.millilitres != null) return "per_100ml";
+  if (quantity?.grams != null) return "per_100g";
+  const serving = parseQuantity(stringValue(record.serving_size));
+  if (serving?.millilitres != null) return "per_100ml";
+  if (serving?.grams != null) return "per_100g";
   // Open Food Facts nutriment fields ending in _100g are normalized per 100 g
   // unless the product carries explicit volume evidence.
   return "per_100g";

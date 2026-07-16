@@ -729,6 +729,14 @@ describe("Open Food Facts bulk staging", () => {
       nutrition_data_per: "100ml",
     });
     expect(declaredLiquid.staged?.nutrition.basis).toBe("per_100ml");
+    const massBeforePreparationVolume = normalizeOpenFoodFactsRecord({
+      ...indiaProduct,
+      code: "8900000000050",
+      quantity: "",
+      serving_size: "36 grams in 350 ml of water",
+    });
+    expect(massBeforePreparationVolume.staged?.nutrition.basis).toBe("per_100g");
+    expect(massBeforePreparationVolume.staged?.servingSizeGrams).toBe(36);
     const unknown = normalizeOpenFoodFactsRecord({ ...indiaProduct, code: "8900000000036", quantity: "" });
     expect(unknown.staged?.nutrition.basis).toBe("per_100g");
   });
@@ -1243,6 +1251,11 @@ describe("Robotoff label evidence", () => {
     expect(result.outcomes).toEqual({ candidate: 0, no_prediction: 0, rejected: 1, failed: 0 });
     const staged = JSON.parse((await readFile(result.stagedPath, "utf8")).trim()) as { validationIssues: Array<{ code: string }> };
     expect(staged.validationIssues).toContainEqual(expect.objectContaining({ code: "robotoff_unsupported_volume_basis" }));
+    const sqlPath = join(directory, "robotoff-import.sql");
+    await emitImportSql({ stagedPath: result.stagedPath, manifestPath: result.manifestPath, outputPath: sqlPath });
+    const sql = await readFile(sqlPath, "utf8");
+    expect(sql).toContain("Superseded by corrected source evidence");
+    expect(sql).toContain("json_extract(evidence_json, '$.code') = 'robotoff_nutrition_candidate'");
   });
 
   it("merges supplementary serving values only when both core bases agree", () => {
