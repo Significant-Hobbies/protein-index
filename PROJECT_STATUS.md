@@ -1,6 +1,6 @@
 # Protein Index — PROJECT STATUS
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 ## Why / What
 
@@ -74,6 +74,8 @@ must pass desktop/mobile verification.
 - 2026-07-16 — first exact source-matched ingredient rejection published for a Threptin label with visibly unsupported OCR fragments; postconditions resolved one candidate, kept verified ingredients at zero, reduced the open ingredient queue from 5,661 to 5,660, and preserved independent community ingredients
 - 2026-07-16 — production coverage timeout traced to a correlated full review-queue scan; the endpoint now batches a single source-bounded candidate aggregate while preserving exact per-product counts and response semantics
 - 2026-07-16 — calorie-derived protein rankings now withhold rounded label combinations where protein alone implies more than 100% of declared energy; raw unverified nutrition remains visible and the next valid density ceiling is exactly 25 g per 100 kcal
+- 2026-07-16 — token-aware product search deployed after green CI; combined brand, name, flavour, and GTIN queries now match across fields and oversized queries fail with a structured validation error
+- 2026-07-16 — exact SYNTHA-6 label evidence converted and committed as checksummed verification bundle `review-492c536b4dbb0130d437`; protected publication run `29474290721` failed before its first remote read because the GitHub production environment supplied no Cloudflare credentials, leaving the review open and verified coverage unchanged
 
 ## Products
 
@@ -169,3 +171,8 @@ must pass desktop/mobile verification.
     workflow diagnostics.
 15. Deploy the new label-review UI only after rendered desktop/mobile visual and
     accessibility verification succeeds.
+16. Blocked: the GitHub `production` environment must provide the existing
+    Cloudflare publication credentials before protected catalog or reviewed-
+    evidence workflows can read or write D1. Runs `29449999090` and
+    `29474290721` both failed with empty credential variables before applying
+    data; the exact SYNTHA-6 verification bundle remains committed and replayable.
