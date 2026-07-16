@@ -32,8 +32,15 @@ jobs:
       UPSTREAM_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       UPSTREAM_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
       LIVE_BASE_URL: https://protein-index.sarthakagrawal927.workers.dev
-      PUBLICATION_EVIDENCE_DIR: ${{ runner.temp }}/protein-index-publication-evidence
     steps:
+      - name: Initialize durable publication evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/protein-index-publication-evidence"
+          mkdir -p "$evidence_dir"
+          echo "PUBLICATION_EVIDENCE_DIR=$evidence_dir" >> "$GITHUB_ENV"
+
       - name: Resolve fail-closed publication route
         id: route
         uses: actions/github-script@v9

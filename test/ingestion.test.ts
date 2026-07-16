@@ -994,7 +994,10 @@ describe("Open Food Facts bulk staging", () => {
     expect(workflow).toContain("-z \"$CLOUDFLARE_ACCOUNT_ID\"");
     expect(workflow).toContain("artifact.digest");
     expect(workflow).toContain("artifact.size_in_bytes");
-    expect(workflow).toContain("PUBLICATION_EVIDENCE_DIR: ${{ runner.temp }}/protein-index-publication-evidence");
+    expect(workflow).toContain("Initialize durable publication evidence");
+    expect(workflow).toContain('evidence_dir="$RUNNER_TEMP/protein-index-publication-evidence"');
+    expect(workflow).toContain('echo "PUBLICATION_EVIDENCE_DIR=$evidence_dir" >> "$GITHUB_ENV"');
+    expect(workflow).not.toContain("PUBLICATION_EVIDENCE_DIR: ${{ runner.temp }}");
     expect(workflow).toContain("path: ${{ env.PUBLICATION_EVIDENCE_DIR }}/");
     expect(workflow).not.toContain("path: .data/publication-evidence/");
     expect(workflow).toContain("group: protein-index-production-publication");
