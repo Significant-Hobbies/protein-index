@@ -20,7 +20,7 @@ import type {
   ValidationIssue,
 } from "../../shared/types";
 
-export const OPEN_FOOD_FACTS_ADAPTER_VERSION = "off-bulk-v2";
+export const OPEN_FOOD_FACTS_ADAPTER_VERSION = "off-bulk-v3";
 export const OPEN_FOOD_FACTS_EXPORT_URL =
   "https://static.openfoodfacts.org/data/en.openfoodfacts.org.products.csv.gz";
 
@@ -108,12 +108,18 @@ function parseCoreNutrition(record: RawRecord): NutritionPer100g {
 }
 
 function nutritionBasis(record: RawRecord): "per_100g" | "per_100ml" | "unknown" {
+  const declared = normalizeText(stringValue(record.nutrition_data_per));
+  if (declared === "100ml" || declared === "per 100ml") return "per_100ml";
+  if (declared === "100g" || declared === "per 100g") return "per_100g";
   const unit = normalizeText(stringValue(record.product_quantity_unit));
   const quantity = normalizeText(stringValue(record.quantity));
+  const serving = normalizeText(stringValue(record.serving_size));
   const volumeUnit = /(?:^|[^a-z])(?:ml|cl|dl|l|litre|liter|litres|liters)(?:[^a-z]|$)/;
-  if (volumeUnit.test(unit) || volumeUnit.test(quantity)) return "per_100ml";
+  if (volumeUnit.test(unit) || volumeUnit.test(quantity) || volumeUnit.test(serving)) return "per_100ml";
   if (parseQuantity(stringValue(record.quantity))?.grams != null) return "per_100g";
-  return "unknown";
+  // Open Food Facts nutriment fields ending in _100g are normalized per 100 g
+  // unless the product carries explicit volume evidence.
+  return "per_100g";
 }
 
 function massQuantity(raw: unknown, numeric: unknown, rawUnit: unknown, unitlessNumericIsGrams = false): number | null {

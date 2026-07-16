@@ -721,8 +721,16 @@ describe("Open Food Facts bulk staging", () => {
       serving_quantity: 50,
     });
     expect(computedGramServing.staged?.servingSizeGrams).toBe(50);
+    const declaredLiquid = normalizeOpenFoodFactsRecord({
+      ...indiaProduct,
+      code: "8900000000050",
+      quantity: "",
+      serving_size: "1 can (250 ml)",
+      nutrition_data_per: "100ml",
+    });
+    expect(declaredLiquid.staged?.nutrition.basis).toBe("per_100ml");
     const unknown = normalizeOpenFoodFactsRecord({ ...indiaProduct, code: "8900000000036", quantity: "" });
-    expect(unknown.staged?.nutrition.basis).toBe("unknown");
+    expect(unknown.staged?.nutrition.basis).toBe("per_100g");
   });
 
   it("writes an auditable exclusion ledger that reconciles the India slice", async () => {
