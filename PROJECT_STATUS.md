@@ -218,9 +218,10 @@ must pass desktop/mobile verification.
     workflow diagnostics.
 15. Deploy the new label-review UI only after rendered desktop/mobile visual and
     accessibility verification succeeds.
-16. Blocked: the GitHub `production` environment must provide the existing
-    Cloudflare publication credentials before protected catalog or reviewed-
-    evidence workflows can read or write D1. Runs `29449999090`,
+16. Blocked data refresh: protected automatic evidence publication requires the
+    GitHub `production` environment to provide the existing Cloudflare
+    credentials before catalog or reviewed-evidence workflows can read or write
+    D1. Runs `29449999090`,
     `29474290721`, and automatic source proof `29495130626` failed with empty
     credential variables before applying data; the exact SYNTHA-6 verification bundle and the eight-decision
     incomplete-candidate rejection bundle remain committed and replayable.
