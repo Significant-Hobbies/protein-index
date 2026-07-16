@@ -2,7 +2,7 @@ import { normalizeGtin } from "./gtin";
 import { hasNutritionErrors, validateNutrition } from "./nutrition";
 import type { NutritionPer100g } from "./types";
 
-export interface NutritionCandidate {
+interface NutritionCandidateBase {
   predictionId: string;
   barcode: string;
   imageId: string;
@@ -10,10 +10,22 @@ export interface NutritionCandidate {
   modelName: string;
   modelVersion: string;
   observedAt: string;
-  basis: "per_100g" | "per_serving";
   minimumConfidence: number;
-  nutritionPer100g: NutritionPer100g;
 }
+
+export interface MassNutritionCandidate extends NutritionCandidateBase {
+  basis: "per_100g" | "per_serving";
+  nutritionPer100g: NutritionPer100g;
+  nutritionPer100ml?: never;
+}
+
+export interface VolumeNutritionCandidate extends NutritionCandidateBase {
+  basis: "per_100ml" | "per_serving";
+  nutritionPer100ml: NutritionPer100g;
+  nutritionPer100g?: never;
+}
+
+export type NutritionCandidate = MassNutritionCandidate | VolumeNutritionCandidate;
 
 export interface EvidenceDecisionInput {
   id: string;
@@ -51,9 +63,13 @@ export function nutritionCandidateFromEvidence(evidence: unknown, productGtin: s
   const root = record(evidence);
   if (root?.code !== "robotoff_nutrition_candidate") return null;
   const candidate = record(record(root.details)?.candidate);
-  const nutrition = record(candidate?.nutritionPer100g);
-  if (!candidate || !nutrition) return null;
-  const nutritionPer100g: NutritionPer100g = {
+  if (!candidate) return null;
+  const massNutrition = record(candidate.nutritionPer100g);
+  const volumeNutrition = record(candidate.nutritionPer100ml);
+  if ((massNutrition === null) === (volumeNutrition === null)) return null;
+  const nutrition = massNutrition ?? volumeNutrition;
+  if (!nutrition) return null;
+  const normalizedNutrition: NutritionPer100g = {
     calories: nutritionValue(nutrition.calories),
     proteinGrams: nutritionValue(nutrition.proteinGrams),
     carbohydrateGrams: nutritionValue(nutrition.carbohydrateGrams),
@@ -65,7 +81,12 @@ export function nutritionCandidateFromEvidence(evidence: unknown, productGtin: s
   };
   const barcode = typeof candidate.barcode === "string" ? normalizeGtin(candidate.barcode) : null;
   const observedAt = typeof candidate.observedAt === "string" ? new Date(candidate.observedAt) : new Date(Number.NaN);
-  const basis = candidate.basis === "per_100g" || candidate.basis === "per_serving" ? candidate.basis : null;
+  const basis = candidate.basis === "per_100g" || candidate.basis === "per_100ml" || candidate.basis === "per_serving"
+    ? candidate.basis
+    : null;
+  const compatibleBasis = massNutrition
+    ? basis === "per_100g" || basis === "per_serving"
+    : basis === "per_100ml" || basis === "per_serving";
   if (
     typeof candidate.predictionId !== "string" || !candidate.predictionId ||
     !barcode || (productGtin !== null && barcode !== productGtin) ||
@@ -73,12 +94,12 @@ export function nutritionCandidateFromEvidence(evidence: unknown, productGtin: s
     !validHttpsUrl(candidate.imageUrl) ||
     typeof candidate.modelName !== "string" || !candidate.modelName.startsWith("nutrition_extractor") ||
     typeof candidate.modelVersion !== "string" || !candidate.modelVersion ||
-    !Number.isFinite(observedAt.valueOf()) || !basis ||
+    !Number.isFinite(observedAt.valueOf()) || !basis || !compatibleBasis ||
     typeof candidate.minimumConfidence !== "number" || candidate.minimumConfidence < 0.85 || candidate.minimumConfidence > 1 ||
-    nutritionPer100g.calories === null || nutritionPer100g.proteinGrams === null ||
-    hasNutritionErrors(validateNutrition(nutritionPer100g))
+    normalizedNutrition.calories === null || normalizedNutrition.proteinGrams === null ||
+    hasNutritionErrors(validateNutrition(normalizedNutrition))
   ) return null;
-  return {
+  const base = {
     predictionId: candidate.predictionId,
     barcode,
     imageId: candidate.imageId,
@@ -88,8 +109,20 @@ export function nutritionCandidateFromEvidence(evidence: unknown, productGtin: s
     observedAt: observedAt.toISOString(),
     basis,
     minimumConfidence: candidate.minimumConfidence,
-    nutritionPer100g,
   };
+  return massNutrition
+    ? { ...base, basis: basis as MassNutritionCandidate["basis"], nutritionPer100g: normalizedNutrition }
+    : { ...base, basis: basis as VolumeNutritionCandidate["basis"], nutritionPer100ml: normalizedNutrition };
+}
+
+export function nutritionCandidateValues(candidate: NutritionCandidate): NutritionPer100g {
+  return "nutritionPer100g" in candidate && candidate.nutritionPer100g
+    ? candidate.nutritionPer100g
+    : candidate.nutritionPer100ml;
+}
+
+export function nutritionCandidateNormalizedBasis(candidate: NutritionCandidate): "per_100g" | "per_100ml" {
+  return candidate.nutritionPer100g !== undefined ? "per_100g" : "per_100ml";
 }
 
 function canonicalValue(value: unknown): unknown {
@@ -119,7 +152,7 @@ export async function sha256Hex(value: unknown): Promise<string> {
 }
 
 export function canonicalNutritionCandidate(candidate: NutritionCandidate): NutritionCandidate {
-  return {
+  const base = {
     predictionId: candidate.predictionId,
     barcode: normalizeGtin(candidate.barcode) ?? candidate.barcode,
     imageId: candidate.imageId,
@@ -129,17 +162,21 @@ export function canonicalNutritionCandidate(candidate: NutritionCandidate): Nutr
     observedAt: candidate.observedAt,
     basis: candidate.basis,
     minimumConfidence: candidate.minimumConfidence,
-    nutritionPer100g: {
-      calories: candidate.nutritionPer100g.calories,
-      proteinGrams: candidate.nutritionPer100g.proteinGrams,
-      carbohydrateGrams: candidate.nutritionPer100g.carbohydrateGrams,
-      sugarGrams: candidate.nutritionPer100g.sugarGrams,
-      fatGrams: candidate.nutritionPer100g.fatGrams,
-      saturatedFatGrams: candidate.nutritionPer100g.saturatedFatGrams,
-      fibreGrams: candidate.nutritionPer100g.fibreGrams,
-      sodiumMg: candidate.nutritionPer100g.sodiumMg,
-    },
   };
+  const nutrition = nutritionCandidateValues(candidate);
+  const canonicalNutrition = {
+    calories: nutrition.calories,
+    proteinGrams: nutrition.proteinGrams,
+    carbohydrateGrams: nutrition.carbohydrateGrams,
+    sugarGrams: nutrition.sugarGrams,
+    fatGrams: nutrition.fatGrams,
+    saturatedFatGrams: nutrition.saturatedFatGrams,
+    fibreGrams: nutrition.fibreGrams,
+    sodiumMg: nutrition.sodiumMg,
+  };
+  return nutritionCandidateNormalizedBasis(candidate) === "per_100g"
+    ? { ...base, basis: candidate.basis as MassNutritionCandidate["basis"], nutritionPer100g: canonicalNutrition }
+    : { ...base, basis: candidate.basis as VolumeNutritionCandidate["basis"], nutritionPer100ml: canonicalNutrition };
 }
 
 export async function nutritionCandidateHash(candidate: NutritionCandidate): Promise<string> {

@@ -118,10 +118,10 @@ export function validateNutrition(nutrition: NutritionPer100g): ValidationIssue[
 
 export function normalizePerServing(
   values: NutritionPer100g,
-  servingSizeGrams: number | null,
+  servingQuantity: number | null,
 ): NutritionPer100g | null {
-  if (!servingSizeGrams || servingSizeGrams <= 0) return null;
-  const factor = 100 / servingSizeGrams;
+  if (!servingQuantity || servingQuantity <= 0) return null;
+  const factor = 100 / servingQuantity;
   const scale = (value: number | null): number | null => (value === null ? null : value * factor);
   return {
     calories: scale(values.calories),

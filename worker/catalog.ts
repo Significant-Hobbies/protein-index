@@ -74,6 +74,7 @@ function mapProduct(row: ProductRow): CatalogProduct {
   };
   const calculatedMetrics = calculateMetrics({
     nutrition,
+    nutritionBasis: nutrition.basis,
     netQuantityGrams: row.net_quantity_grams,
     servingSizeGrams: row.serving_size_grams,
     sellingPrice: row.selling_price,

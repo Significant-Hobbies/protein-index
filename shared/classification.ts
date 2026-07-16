@@ -36,6 +36,7 @@ export function classifyProtein(input: {
     }
     if (
       proteinGrams !== null &&
+      input.nutrition.basis === "per_100g" &&
       input.nutrition.servingSizeGrams !== null &&
       (proteinGrams * input.nutrition.servingSizeGrams) / 100 >= 10
     ) {

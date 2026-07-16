@@ -33,7 +33,14 @@ import {
   validateReviewDecisionSources,
   writeReviewDecisionBundle,
 } from "../scripts/review-bundles";
-import { canonicalJson, nutritionCandidateFromEvidence, nutritionCandidateHash, type EvidenceDecisionInput } from "../shared/evidence-decisions";
+import {
+  canonicalJson,
+  nutritionCandidateFromEvidence,
+  nutritionCandidateHash,
+  nutritionCandidateNormalizedBasis,
+  nutritionCandidateValues,
+  type EvidenceDecisionInput,
+} from "../shared/evidence-decisions";
 import { ingredientCandidateHash, type IngredientEvidenceDecisionInput } from "../shared/ingredient-evidence";
 import { parseIngredients } from "../shared/ingredients";
 import type { SourceManifest } from "../shared/types";
@@ -421,6 +428,45 @@ async function reviewDecision(id: string, decision: "verify" | "reject" = "verif
   };
 }
 
+async function volumeReviewDecision(id: string): Promise<EvidenceDecisionInput> {
+  const evidence = {
+    code: "robotoff_nutrition_candidate",
+    details: { candidate: {
+      predictionId: `prediction-${id}`,
+      barcode: "8900000000012",
+      imageId: `image-${id}`,
+      imageUrl: `https://images.openfoodfacts.org/${id}.jpg`,
+      modelName: "nutrition_extractor",
+      modelVersion: "nutrition_extractor-2.0",
+      observedAt: "2026-07-15T00:00:00.000Z",
+      basis: "per_100ml",
+      minimumConfidence: 0.96,
+      nutritionPer100ml: {
+        calories: 50, proteinGrams: 10, carbohydrateGrams: 1, sugarGrams: 0,
+        fatGrams: 0.5, saturatedFatGrams: 0.1, fibreGrams: 0, sodiumMg: 20,
+      },
+    } },
+  };
+  const candidate = nutritionCandidateFromEvidence(evidence, "08900000000012");
+  if (!candidate) throw new Error("Expected valid volume review fixture candidate");
+  return {
+    id,
+    sourceId: "open_food_facts_robotoff",
+    sourceRecordKey: `8900000000012:prediction-${id}`,
+    sourceRecordId: `src_${id}`,
+    sourceContentHash: `source_${id}`,
+    productId: "prd_volume_fixture",
+    candidateHash: await nutritionCandidateHash(candidate),
+    fieldFamily: "nutrition",
+    decision: "verify",
+    payload: candidate,
+    evidenceUrl: candidate.imageUrl,
+    rationale: `Reviewed volume decision ${id}`,
+    decidedBy: "local_operator",
+    decidedAt: "2026-07-15T01:00:00.000Z",
+  };
+}
+
 async function ingredientReviewDecision(id: string): Promise<IngredientEvidenceDecisionInput> {
   const parsed = parseRobotoffIngredientEvidence(
     { image_predictions: [ingredientPrediction] },
@@ -643,7 +689,7 @@ describe("Reviewed evidence bundles", () => {
       decided_by: item.decidedBy,
       decided_at: item.decidedAt,
     }));
-    const nutrition = first.payload.nutritionPer100g;
+    const nutrition = nutritionCandidateValues(first.payload);
     const postconditions = [
       { success: true, results: decisionRows },
       { success: true, results: [{
@@ -651,6 +697,7 @@ describe("Reviewed evidence bundles", () => {
         source_record_id: first.sourceRecordId,
         status: "verified",
         authority: 100,
+        basis: nutritionCandidateNormalizedBasis(first.payload),
         calories: nutrition.calories,
         protein_grams: nutrition.proteinGrams,
         carbohydrate_grams: nutrition.carbohydrateGrams,
@@ -686,6 +733,125 @@ describe("Reviewed evidence bundles", () => {
       postconditions[0], postconditions[1], postconditions[2], postconditions[3], postconditions[4],
       { success: true, results: [{ id: "rev_still_open" }] },
     ])).toThrow("remain unresolved");
+  });
+
+  it("emits and validates exact per-100-mL reviewed publication", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-review-volume-"));
+    const decision = await volumeReviewDecision("evd_volume");
+    const bundle = await writeReviewDecisionBundle({ decisions: [decision], outputRoot: directory });
+    const parsed = await readReviewDecisionBundle(bundle.directory);
+    const exact = parsed.decisions[0];
+    if (!exact || exact.fieldFamily !== "nutrition") throw new Error("Expected a volume nutrition decision");
+    expect(nutritionCandidateNormalizedBasis(exact.payload)).toBe("per_100ml");
+    expect(nutritionCandidateValues(exact.payload)).toMatchObject({ calories: 50, proteinGrams: 10 });
+
+    const sqlPath = join(directory, "volume-review.sql");
+    await emitReviewDecisionSql(parsed, sqlPath);
+    const sql = await readFile(sqlPath, "utf8");
+    expect(sql).toContain("'per_100ml', 'as_sold', 50, 10");
+    expect(sql).toContain('"nutritionPer100ml"');
+    expect(sql).toContain("CASE WHEN 0 THEN");
+
+    const database = new DatabaseSync(":memory:");
+    for (const migration of (await readdir("migrations")).filter((name) => name.endsWith(".sql")).sort()) {
+      database.exec(await readFile(join("migrations", migration), "utf8"));
+    }
+    database.exec(`
+      INSERT INTO sources (id, name, kind, identity_authority, nutrition_authority, ingredient_authority,
+        license_url, retention_notes, credential_requirement, created_at)
+      VALUES ('open_food_facts_robotoff', 'Robotoff', 'open_data', 0, 20, 0, NULL, 'review only', NULL, '2026-07-15T00:00:00.000Z');
+      INSERT INTO ingestion_runs (id, source_id, adapter_version, mode, input_identifier, records_read,
+        india_records, staged_records, terminal_evidence, source_complete, market_complete, status, started_at, completed_at)
+      VALUES ('run_volume', 'open_food_facts_robotoff', 'test', 'sample', 'fixture', 1, 1, 1,
+        'end_of_file', 1, 0, 'completed', '2026-07-15T00:00:00.000Z', '2026-07-15T00:00:00.000Z');
+      INSERT INTO products (id, gtin, brand, brand_normalized, name, name_normalized, category,
+        marketed_reasons_json, nutrition_reasons_json, classifier_version, completeness,
+        completeness_missing_json, identity_authority, created_at, updated_at)
+      VALUES ('prd_volume_fixture', '08900000000012', 'Test', 'test', 'Protein water', 'protein water',
+        'ready_to_drink', '[]', '[]', 'protein-v1', 50, '[]', 100,
+        '2026-07-15T00:00:00.000Z', '2026-07-15T00:00:00.000Z');
+      INSERT INTO source_records (id, source_id, source_record_id, product_id, source_url, content_hash,
+        observed_at, first_seen_run_id, last_seen_run_id, raw_evidence_json, resolution_rule, identity_hash)
+      VALUES ('src_evd_volume', 'open_food_facts_robotoff', '8900000000012:prediction-evd_volume',
+        'prd_volume_fixture', 'https://robotoff.openfoodfacts.org/', 'source_evd_volume',
+        '2026-07-15T00:00:00.000Z', 'run_volume', 'run_volume', '{}', 'exact_gtin', 'identity');
+      INSERT INTO review_items (id, type, priority, status, source_record_id, product_id,
+        candidate_product_ids_json, evidence_json, created_at)
+      VALUES ('rev_volume', 'nutrition_validation', 50, 'open', 'src_evd_volume', 'prd_volume_fixture',
+        '[]', '{"details":{"candidateHash":"${exact.candidateHash}"}}', '2026-07-15T00:00:00.000Z');
+    `);
+    database.exec(sql);
+    database.exec(sql);
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions) AS decisions,
+      (SELECT COUNT(*) FROM nutrient_values WHERE basis = 'per_100ml') AS nutrients,
+      (SELECT COUNT(*) FROM field_observations WHERE selected = 1) AS observations,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE field_family = 'nutrition') AS outcomes,
+      (SELECT status FROM review_items WHERE id = 'rev_volume') AS review_status,
+      (SELECT basis FROM nutrition_facts WHERE product_id = 'prd_volume_fixture') AS basis
+    `).get()).toEqual({ decisions: 1, nutrients: 8, observations: 8, outcomes: 1, review_status: "resolved", basis: "per_100ml" });
+
+    const nutrition = nutritionCandidateValues(exact.payload);
+    const decisionRow = {
+      id: exact.id,
+      source_id: exact.sourceId,
+      source_record_key: exact.sourceRecordKey,
+      source_record_id: exact.sourceRecordId,
+      source_content_hash: exact.sourceContentHash,
+      product_id: exact.productId,
+      candidate_hash: exact.candidateHash,
+      field_family: exact.fieldFamily,
+      decision: exact.decision,
+      payload_json: canonicalJson(exact.payload),
+      evidence_url: exact.evidenceUrl,
+      rationale: exact.rationale,
+      decided_by: exact.decidedBy,
+      decided_at: exact.decidedAt,
+    };
+    const postconditions = [
+      { success: true, results: [decisionRow] },
+      { success: true, results: [{
+        product_id: exact.productId,
+        source_record_id: exact.sourceRecordId,
+        status: "verified",
+        authority: 100,
+        basis: "per_100ml",
+        calories: nutrition.calories,
+        protein_grams: nutrition.proteinGrams,
+        carbohydrate_grams: nutrition.carbohydrateGrams,
+        sugar_grams: nutrition.sugarGrams,
+        fat_grams: nutrition.fatGrams,
+        saturated_fat_grams: nutrition.saturatedFatGrams,
+        fibre_grams: nutrition.fibreGrams,
+        sodium_mg: nutrition.sodiumMg,
+        label_verified_at: exact.decidedAt,
+        observed_at: exact.payload.observedAt,
+      }] },
+      { success: true, results: [] },
+      { success: true, results: [] },
+      { success: true, results: [{
+        product_id: exact.productId,
+        field_family: "nutrition",
+        outcome: "verified",
+        source_record_id: exact.sourceRecordId,
+        evidence_url: exact.evidenceUrl,
+        observed_at: exact.payload.observedAt,
+        verified_at: exact.decidedAt,
+        decided_by: exact.decidedBy,
+      }] },
+      { success: true, results: [] },
+    ];
+    expect(validateReviewPostconditions(parsed, postconditions)).toMatchObject({
+      decisions: 1,
+      verifiedFacts: 1,
+      verifiedOutcomes: 1,
+      unresolvedCandidates: 0,
+    });
+    expect(() => validateReviewPostconditions(parsed, [
+      postconditions[0],
+      { success: true, results: [{ ...postconditions[1]!.results[0], basis: "per_100g" }] },
+      ...postconditions.slice(2),
+    ])).toThrow("Verified nutrition postcondition failed");
   });
 
   it("refuses empty, invalid, tampered, and unsafe review bundles", async () => {
@@ -1757,13 +1923,13 @@ describe("Robotoff label evidence", () => {
     })] };
     const converted = parseRobotoffNutritionEvidence(response, context);
     expect(converted.candidates[0]).toMatchObject({ basis: "per_serving", nutritionPer100g: { calories: 365, proteinGrams: 25 } });
-    expect(converted.candidates[0]?.nutritionPer100g.fatGrams).toBeCloseTo(8.925, 6);
+    expect(converted.candidates[0] && nutritionCandidateValues(converted.candidates[0]).fatGrams).toBeCloseTo(8.925, 6);
     const ambiguous = parseRobotoffNutritionEvidence(response, { ...context, servingSizeGrams: null });
     expect(ambiguous.candidates).toHaveLength(0);
     expect(ambiguous.issues.some(({ code }) => code === "robotoff_ambiguous_serving_basis")).toBe(true);
   });
 
-  it("rejects legacy volume servings instead of treating millilitres as grams", async () => {
+  it("retains volume nutrition without treating millilitres as grams", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-volume-"));
     const input = join(directory, "source.jsonl");
     await writeFile(input, `${JSON.stringify({
@@ -1794,14 +1960,59 @@ describe("Robotoff label evidence", () => {
         proteins_100g: nutrient(4.5, "g"),
       })] }), { status: 200 }),
     });
-    expect(result.outcomes).toEqual({ candidate: 0, no_prediction: 0, rejected: 1, failed: 0 });
-    const staged = JSON.parse((await readFile(result.stagedPath, "utf8")).trim()) as { validationIssues: Array<{ code: string }> };
-    expect(staged.validationIssues).toContainEqual(expect.objectContaining({ code: "robotoff_unsupported_volume_basis" }));
+    expect(result.outcomes).toEqual({ candidate: 1, no_prediction: 0, rejected: 0, failed: 0 });
+    const staged = JSON.parse((await readFile(result.stagedPath, "utf8")).trim()) as {
+      validationIssues: Array<{ code: string }>;
+      rawEvidence: { candidate: Record<string, unknown> };
+    };
+    expect(staged.validationIssues).toContainEqual(expect.objectContaining({ code: "robotoff_nutrition_candidate" }));
+    expect(staged.rawEvidence.candidate).toMatchObject({
+      basis: "per_100ml",
+      nutritionPer100ml: { calories: 155, proteinGrams: 4.5 },
+    });
+    expect(staged.rawEvidence.candidate).not.toHaveProperty("nutritionPer100g");
     const sqlPath = join(directory, "robotoff-import.sql");
     await emitImportSql({ stagedPath: result.stagedPath, manifestPath: result.manifestPath, outputPath: sqlPath });
     const sql = await readFile(sqlPath, "utf8");
     expect(sql).toContain("Superseded by corrected source evidence");
     expect(sql).toContain("json_extract(evidence_json, '$.code') = 'robotoff_nutrition_candidate'");
+    expect(sql).toContain("'per_100ml'");
+    expect(sql).toContain("$.nutritionPer100ml.calories");
+  });
+
+  it("normalizes a liquid serving only from explicit serving volume", () => {
+    const response = { image_predictions: [prediction(25, "23", {
+      "energy-kcal_serving": nutrient(125, "kcal"),
+      proteins_serving: nutrient(25, "g"),
+      sodium_serving: nutrient(50, "mg"),
+    })] };
+    const volumeContext: RobotoffProductContext = {
+      ...context,
+      name: "Protein water",
+      netQuantityGrams: null,
+      servingSizeGrams: null,
+      servingSizeMillilitres: 250,
+      nutritionBasis: "per_100ml",
+      sourceNutritionPer100g: null,
+    };
+    const result = parseRobotoffNutritionEvidence(response, volumeContext);
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      basis: "per_serving",
+      nutritionPer100ml: { calories: 50, proteinGrams: 10, sodiumMg: 20 },
+    });
+    expect(result.candidates[0]).not.toHaveProperty("nutritionPer100g");
+
+    const missingVolume = parseRobotoffNutritionEvidence(response, {
+      ...volumeContext,
+      servingSizeMillilitres: null,
+      servingSizeGrams: 250,
+    });
+    expect(missingVolume.candidates).toHaveLength(0);
+    expect(missingVolume.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_ambiguous_serving_basis",
+      field: "servingSizeMillilitres",
+    }));
   });
 
   it("merges supplementary serving values only when both core bases agree", () => {
@@ -1881,7 +2092,7 @@ describe("Robotoff label evidence", () => {
     })] };
     const result = parseRobotoffNutritionEvidence(response, context);
     expect(result.candidates).toHaveLength(1);
-    expect(result.candidates[0]?.nutritionPer100g.sodiumMg).toBeNull();
+    expect(result.candidates[0] && nutritionCandidateValues(result.candidates[0]).sodiumMg).toBeNull();
     expect(result.issues).toContainEqual(expect.objectContaining({
       code: "robotoff_unsupported_nutrient_unit",
       field: "sodium_100g",

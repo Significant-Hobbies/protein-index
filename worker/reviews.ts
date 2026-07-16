@@ -3,6 +3,8 @@ import {
   canonicalJson,
   nutritionCandidateFromEvidence,
   nutritionCandidateHash,
+  nutritionCandidateNormalizedBasis,
+  nutritionCandidateValues,
   validateEvidenceDecision,
   type EvidenceDecisionInput,
 } from "../shared/evidence-decisions";
@@ -313,12 +315,13 @@ export async function resolveReview(
       ));
   }
   if (review.product_id && review.source_record_id && decision === "verify_nutrition" && candidate) {
-    const nutrition = candidate.nutritionPer100g;
+    const nutrition = nutritionCandidateValues(candidate);
+    const normalizedBasis = nutritionCandidateNormalizedBasis(candidate);
     statements.push(db.prepare(`INSERT INTO nutrition_facts
       (product_id, source_record_id, status, confidence, authority, basis, preparation_state,
         calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams,
         fibre_grams, sodium_mg, label_verified_at, observed_at, updated_at)
-      VALUES (?, ?, 'verified', 'high', 100, 'per_100g', 'as_sold', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, 'verified', 'high', 100, ?, 'as_sold', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(product_id) DO UPDATE SET
         source_record_id = excluded.source_record_id, status = excluded.status, confidence = excluded.confidence,
         authority = excluded.authority, basis = excluded.basis, preparation_state = excluded.preparation_state,
@@ -328,7 +331,7 @@ export async function resolveReview(
         fibre_grams = excluded.fibre_grams, sodium_mg = excluded.sodium_mg,
         label_verified_at = excluded.label_verified_at, observed_at = excluded.observed_at,
         updated_at = excluded.updated_at`)
-      .bind(review.product_id, review.source_record_id, nutrition.calories, nutrition.proteinGrams,
+      .bind(review.product_id, review.source_record_id, normalizedBasis, nutrition.calories, nutrition.proteinGrams,
         nutrition.carbohydrateGrams, nutrition.sugarGrams, nutrition.fatGrams,
         nutrition.saturatedFatGrams, nutrition.fibreGrams, nutrition.sodiumMg,
         decidedAt, candidate.observedAt, decidedAt));
@@ -350,11 +353,11 @@ export async function resolveReview(
           valueJson, valueJson, candidate.observedAt, candidate.imageUrl, `review:${id}:${column}:${valueJson}`));
       statements.push(db.prepare(`INSERT INTO nutrient_values
         (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at)
-        VALUES (?, ?, ?, ?, ?, ?, 'per_100g', 'as_sold', 'verified', ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'as_sold', 'verified', ?)
         ON CONFLICT(source_record_id, nutrient_code, basis, preparation_state) DO UPDATE SET
           product_id = excluded.product_id, quantity = excluded.quantity, unit = excluded.unit,
           status = excluded.status, observed_at = excluded.observed_at`)
-        .bind(`ntr_review_${id}_${column}`, review.product_id, review.source_record_id, field, value, unit, candidate.observedAt));
+        .bind(`ntr_review_${id}_${column}`, review.product_id, review.source_record_id, field, value, unit, normalizedBasis, candidate.observedAt));
     }
     statements.push(db.prepare(`INSERT INTO evidence_outcomes
       (product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by, notes)
@@ -370,13 +373,15 @@ export async function resolveReview(
     if ((nutrition.proteinGrams! / nutrition.calories!) * 100 >= 10) nutritionReasons.push("protein_at_least_10g_per_100kcal");
     if (((nutrition.proteinGrams! * 4) / nutrition.calories!) * 100 >= 20) nutritionReasons.push("protein_at_least_20_percent_calories");
     statements.push(db.prepare(`UPDATE products SET
-      nutritionally_protein_dense = CASE WHEN ? = 1 OR (? * serving_size_grams / 100.0 >= 10) THEN 1 ELSE 0 END,
-      nutrition_reasons_json = CASE WHEN ? * serving_size_grams / 100.0 >= 10
+      nutritionally_protein_dense = CASE WHEN ? = 1 OR (? = 1 AND ? * serving_size_grams / 100.0 >= 10) THEN 1 ELSE 0 END,
+      nutrition_reasons_json = CASE WHEN ? = 1 AND ? * serving_size_grams / 100.0 >= 10
         THEN json_insert(?, '$[#]', 'protein_at_least_10g_per_serving') ELSE ? END,
       classifier_version = 'protein-v1', updated_at = ? WHERE id = ?`)
       .bind(
         nutritionReasons.length > 0 ? 1 : 0,
+        normalizedBasis === "per_100g" ? 1 : 0,
         nutrition.proteinGrams,
+        normalizedBasis === "per_100g" ? 1 : 0,
         nutrition.proteinGrams,
         JSON.stringify(nutritionReasons),
         JSON.stringify(nutritionReasons),

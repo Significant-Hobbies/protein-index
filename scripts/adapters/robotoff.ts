@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { classifyProtein } from "../../shared/classification";
-import { canonicalJson, canonicalNutritionCandidate } from "../../shared/evidence-decisions";
+import {
+  canonicalJson,
+  canonicalNutritionCandidate,
+  nutritionCandidateNormalizedBasis,
+  nutritionCandidateValues,
+  type MassNutritionCandidate,
+  type VolumeNutritionCandidate,
+} from "../../shared/evidence-decisions";
 import { normalizeGtin } from "../../shared/gtin";
 import { calculateCompleteness } from "../../shared/metrics";
 import { emptyNutrition, normalizePerServing, validateNutrition } from "../../shared/nutrition";
@@ -17,25 +24,17 @@ export interface RobotoffProductContext {
   categoryRaw: string | null;
   netQuantityGrams: number | null;
   servingSizeGrams: number | null;
+  servingSizeMillilitres?: number | null;
   nutritionBasis: "per_100g" | "per_100ml" | "per_serving" | "unknown";
   sourceNutritionPer100g?: NutritionPer100g | null;
+  sourceNutritionPer100ml?: NutritionPer100g | null;
   imageUrl: string | null;
   nutritionImageUrl: string | null;
 }
 
-export interface RobotoffNutritionCandidate {
-  predictionId: string;
-  barcode: string;
-  imageId: string;
-  imageUrl: string;
-  modelName: string;
-  modelVersion: string;
-  observedAt: string;
-  basis: "per_100g" | "per_serving";
-  minimumConfidence: number;
-  nutritionPer100g: NutritionPer100g;
+export type RobotoffNutritionCandidate = (MassNutritionCandidate | VolumeNutritionCandidate) & {
   rawNutrients: Record<string, unknown>;
-}
+};
 
 export interface RobotoffParseResult {
   staged: StagedProduct[];
@@ -158,17 +157,6 @@ function parsePrediction(
     });
     return { candidate: null, issues, prediction };
   }
-  if (context.nutritionBasis === "per_100ml") {
-    issues.push({
-      code: "robotoff_unsupported_volume_basis",
-      message: "Robotoff volume-label output cannot be represented as per-100-g nutrition without density evidence.",
-      severity: "error",
-      field: "nutrition",
-      details: { predictionId, nutritionBasis: context.nutritionBasis, servingSizeGrams: context.servingSizeGrams },
-    });
-    return { candidate: null, issues, prediction };
-  }
-
   const per100g = emptyNutrition();
   const perServing = emptyNutrition();
   const confidences: number[] = [];
@@ -202,21 +190,31 @@ function parsePrediction(
     }
   }
 
-  let basis: RobotoffNutritionCandidate["basis"] | null = null;
+  const volumeBased = context.nutritionBasis === "per_100ml";
+  const normalizedBasis = volumeBased ? "per_100ml" as const : "per_100g" as const;
+  const servingQuantity = volumeBased ? context.servingSizeMillilitres ?? null : context.servingSizeGrams;
+  const servingField = volumeBased ? "servingSizeMillilitres" : "servingSizeGrams";
+  let basis: "per_100g" | "per_100ml" | "per_serving" | null = null;
   let normalized: NutritionPer100g | null = null;
   if (completeCore(per100g)) {
-    basis = "per_100g";
+    basis = normalizedBasis;
     normalized = per100g;
   }
   if (completeCore(perServing)) {
-    const converted = normalizePerServing(perServing, context.servingSizeGrams);
+    const converted = normalizePerServing(perServing, servingQuantity);
     if (!converted) {
       issues.push({
         code: "robotoff_ambiguous_serving_basis",
-        message: "Per-serving prediction cannot be normalized without a valid serving mass.",
+        message: `Per-serving prediction cannot be normalized without a valid serving ${volumeBased ? "volume" : "mass"}.`,
         severity: "error",
-        field: "servingSizeGrams",
-        details: { predictionId, servingSizeGrams: context.servingSizeGrams, perServing },
+        field: servingField,
+        details: {
+          predictionId,
+          servingSizeGrams: context.servingSizeGrams,
+          servingSizeMillilitres: context.servingSizeMillilitres,
+          nutritionBasis: context.nutritionBasis,
+          perServing,
+        },
       });
     } else if (normalized && differs(normalized, converted)) {
       issues.push({
@@ -243,14 +241,16 @@ function parsePrediction(
         normalized.calories = converted.calories;
       }
     } else if (!normalized) {
-      const sourceAnchor = context.sourceNutritionPer100g ?? null;
+      const sourceAnchor = volumeBased
+        ? context.sourceNutritionPer100ml ?? null
+        : context.sourceNutritionPer100g ?? null;
       if (sourceAnchor && !differs(perServing, sourceAnchor, 0.05) && differs(converted, sourceAnchor, 0.15)) {
         issues.push({
           code: "robotoff_serving_basis_conflicts_source_anchor",
-          message: "Values labeled as serving data match the source per-100-g row before conversion and materially disagree after conversion.",
+          message: `Values labeled as serving data match the source ${normalizedBasis === "per_100ml" ? "per-100-mL" : "per-100-g"} row before conversion and materially disagree after conversion.`,
           severity: "error",
           field: "nutrition",
-          details: { predictionId, perServing, convertedServing: converted, sourceNutritionPer100g: sourceAnchor },
+          details: { predictionId, perServing, convertedServing: converted, sourceNutrition: sourceAnchor, normalizedBasis },
         });
       } else {
         normalized = converted;
@@ -258,7 +258,7 @@ function parsePrediction(
       }
     }
   } else if (normalized) {
-    const converted = normalizePerServing(perServing, context.servingSizeGrams);
+    const converted = normalizePerServing(perServing, servingQuantity);
     if (converted && hasComparableCore(normalized, converted) && !differs(normalized, converted)) {
       if (normalized.sugarGrams === null && converted.sugarGrams !== null) {
         issues.push({
@@ -291,8 +291,7 @@ function parsePrediction(
   issues.push(...validation.map((issue) => ({ ...issue, code: `robotoff_${issue.code}`, details: { predictionId } })));
   if (validation.some(({ severity }) => severity === "error")) return { candidate: null, issues, prediction };
 
-  return {
-    candidate: {
+  const candidateBase = {
       predictionId,
       barcode: context.code,
       imageId,
@@ -302,9 +301,13 @@ function parsePrediction(
       observedAt: predictionTime(prediction),
       basis,
       minimumConfidence: confidences.length ? Math.min(...confidences) : 0,
-      nutritionPer100g: normalized,
       rawNutrients,
-    },
+  };
+  const candidate: RobotoffNutritionCandidate = normalizedBasis === "per_100ml"
+    ? { ...candidateBase, basis: basis as VolumeNutritionCandidate["basis"], nutritionPer100ml: normalized }
+    : { ...candidateBase, basis: basis as MassNutritionCandidate["basis"], nutritionPer100g: normalized };
+  return {
+    candidate,
     issues,
     prediction,
   };
@@ -416,7 +419,10 @@ export function parseRobotoffNutritionEvidence(
   ));
   const parsed = predictions.map((prediction) => parsePrediction(prediction, context, confidenceThreshold));
   const candidates = parsed.flatMap(({ candidate }) => candidate ? [candidate] : []);
-  const crossImageConflict = candidates.some((candidate, index) => candidates.slice(index + 1).some((other) => differs(candidate.nutritionPer100g, other.nutritionPer100g)));
+  const crossImageConflict = candidates.some((candidate, index) => candidates.slice(index + 1).some((other) => (
+    nutritionCandidateNormalizedBasis(candidate) !== nutritionCandidateNormalizedBasis(other) ||
+    differs(nutritionCandidateValues(candidate), nutritionCandidateValues(other))
+  )));
   const staged = parsed.map((item) => stagedReview(context, item, crossImageConflict && item.candidate !== null));
   return { staged, candidates, issues: staged.flatMap(({ validationIssues }) => validationIssues) };
 }

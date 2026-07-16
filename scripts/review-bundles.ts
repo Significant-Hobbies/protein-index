@@ -5,6 +5,8 @@ import { isAbsolute, join } from "node:path";
 import {
   canonicalJson,
   nutritionCandidateFromEvidence,
+  nutritionCandidateNormalizedBasis,
+  nutritionCandidateValues,
   validateEvidenceDecision,
   type EvidenceDecisionInput,
 } from "../shared/evidence-decisions";
@@ -489,13 +491,14 @@ export async function emitReviewDecisionSql(
           decided_by = excluded.decided_by, notes = excluded.notes;`);
       continue;
     }
-    const nutrition = decision.payload.nutritionPer100g;
+    const nutrition = nutritionCandidateValues(decision.payload);
+    const normalizedBasis = nutritionCandidateNormalizedBasis(decision.payload);
     statements.push(`INSERT INTO nutrition_facts
       (product_id, source_record_id, status, confidence, authority, basis, preparation_state,
         calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams,
         fibre_grams, sodium_mg, label_verified_at, observed_at, updated_at)
       VALUES (${sql(decision.productId)}, ${sql(decision.sourceRecordId)}, 'verified', 'high', 100,
-        'per_100g', 'as_sold', ${sql(nutrition.calories)}, ${sql(nutrition.proteinGrams)},
+        ${sql(normalizedBasis)}, 'as_sold', ${sql(nutrition.calories)}, ${sql(nutrition.proteinGrams)},
         ${sql(nutrition.carbohydrateGrams)}, ${sql(nutrition.sugarGrams)}, ${sql(nutrition.fatGrams)},
         ${sql(nutrition.saturatedFatGrams)}, ${sql(nutrition.fibreGrams)}, ${sql(nutrition.sodiumMg)},
         ${sql(decision.decidedAt)}, ${sql(decision.payload.observedAt)}, ${sql(decision.decidedAt)})
@@ -514,7 +517,9 @@ export async function emitReviewDecisionSql(
     const nutritionReasons: string[] = [];
     if ((protein / calories) * 100 >= 10) nutritionReasons.push("protein_at_least_10g_per_100kcal");
     if (((protein * 4) / calories) * 100 >= 20) nutritionReasons.push("protein_at_least_20_percent_calories");
-    const servingReason = `${protein} * serving_size_grams / 100.0 >= 10`;
+    const servingReason = normalizedBasis === "per_100g"
+      ? `${protein} * serving_size_grams / 100.0 >= 10`
+      : "0";
     const baseReasons = sql(JSON.stringify(nutritionReasons));
     statements.push(`UPDATE products SET
       nutritionally_protein_dense = CASE WHEN ${nutritionReasons.length > 0 ? "1" : "0"}
@@ -543,7 +548,7 @@ export async function emitReviewDecisionSql(
       statements.push(`INSERT INTO nutrient_values
         (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at)
         VALUES (${sql(stableId("nut", `${decision.id}:${field}`))}, ${sql(decision.productId)},
-          ${sql(decision.sourceRecordId)}, ${sql(field)}, ${sql(value)}, ${sql(unit)}, 'per_100g',
+          ${sql(decision.sourceRecordId)}, ${sql(field)}, ${sql(value)}, ${sql(unit)}, ${sql(normalizedBasis)},
           'as_sold', 'verified', ${sql(decision.payload.observedAt)})
         ON CONFLICT(source_record_id, nutrient_code, basis, preparation_state) DO UPDATE SET
           product_id = excluded.product_id, quantity = excluded.quantity, unit = excluded.unit,
@@ -654,7 +659,7 @@ export async function emitReviewPostconditionQuery(bundle: ReviewDecisionBundle,
   const candidateHashes = sqlList(bundle.decisions.map(({ candidateHash }) => candidateHash));
   const statements = [
     `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id, candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at FROM evidence_decisions WHERE active = 1 AND id IN (${decisionIds}) ORDER BY id;`,
-    `SELECT product_id, source_record_id, status, authority, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at FROM nutrition_facts WHERE product_id IN (${nutritionVerifyProducts}) ORDER BY product_id;`,
+    `SELECT product_id, source_record_id, status, authority, basis, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at FROM nutrition_facts WHERE product_id IN (${nutritionVerifyProducts}) ORDER BY product_id;`,
     `SELECT product_id, source_record_id, raw_text, language, status, confidence, authority, observed_at, updated_at FROM ingredient_statements WHERE product_id IN (${ingredientVerifyProducts}) ORDER BY product_id;`,
     `SELECT id, product_id, source_record_id, parent_id, position, raw_text, normalized_name, percentage, resolved FROM product_ingredients WHERE product_id IN (${ingredientVerifyProducts}) ORDER BY product_id, parent_id, position, id;`,
     `SELECT product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by FROM evidence_outcomes WHERE (field_family = 'nutrition' AND product_id IN (${nutritionVerifyProducts})) OR (field_family = 'ingredients' AND product_id IN (${ingredientVerifyProducts})) ORDER BY field_family, product_id;`,
@@ -690,9 +695,11 @@ export function validateReviewPostconditions(bundle: ReviewDecisionBundle, value
       : decision.payload.candidate.observedAt;
     if (decision.fieldFamily === "nutrition") {
       const fact = nutritionFacts.get(decision.productId);
-      const nutrition = decision.payload.nutritionPer100g;
+      const nutrition = nutritionCandidateValues(decision.payload);
+      const normalizedBasis = nutritionCandidateNormalizedBasis(decision.payload);
       if (
         !fact || fact.source_record_id !== decision.sourceRecordId || fact.status !== "verified" || fact.authority !== 100 ||
+        fact.basis !== normalizedBasis ||
         !sameNumber(fact.calories, nutrition.calories) || !sameNumber(fact.protein_grams, nutrition.proteinGrams) ||
         !sameNumber(fact.carbohydrate_grams, nutrition.carbohydrateGrams) || !sameNumber(fact.sugar_grams, nutrition.sugarGrams) ||
         !sameNumber(fact.fat_grams, nutrition.fatGrams) || !sameNumber(fact.saturated_fat_grams, nutrition.saturatedFatGrams) ||

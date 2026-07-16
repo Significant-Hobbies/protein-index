@@ -32,9 +32,10 @@ export interface ReviewNutritionCandidate {
   modelName: string;
   modelVersion: string;
   observedAt: string;
-  basis: "per_100g" | "per_serving";
+  basis: "per_100g" | "per_100ml" | "per_serving";
+  normalizedBasis: "per_100g" | "per_100ml";
   minimumConfidence: number;
-  nutritionPer100g: {
+  nutrition: {
     calories: number | null;
     proteinGrams: number | null;
     carbohydrateGrams: number | null;
@@ -80,8 +81,12 @@ export function reviewNutritionCandidate(evidence: unknown): ReviewNutritionCand
   const root = object(evidence);
   if (root?.code !== "robotoff_nutrition_candidate") return null;
   const candidate = object(object(root.details)?.candidate);
-  const nutrition = object(candidate?.nutritionPer100g);
-  if (!candidate || !nutrition) return null;
+  if (!candidate) return null;
+  const massNutrition = object(candidate.nutritionPer100g);
+  const volumeNutrition = object(candidate.nutritionPer100ml);
+  if ((massNutrition === null) === (volumeNutrition === null)) return null;
+  const nutrition = massNutrition ?? volumeNutrition;
+  if (!nutrition) return null;
   const calories = nullableNumber(nutrition.calories);
   const proteinGrams = nullableNumber(nutrition.proteinGrams);
   const carbohydrateGrams = nullableNumber(nutrition.carbohydrateGrams);
@@ -95,7 +100,13 @@ export function reviewNutritionCandidate(evidence: unknown): ReviewNutritionCand
     sugarGrams === undefined || fatGrams === undefined || saturatedFatGrams === undefined ||
     fibreGrams === undefined || sodiumMg === undefined
   ) return null;
-  const basis = candidate.basis === "per_100g" || candidate.basis === "per_serving" ? candidate.basis : null;
+  const basis = candidate.basis === "per_100g" || candidate.basis === "per_100ml" || candidate.basis === "per_serving"
+    ? candidate.basis
+    : null;
+  const normalizedBasis = massNutrition ? "per_100g" as const : "per_100ml" as const;
+  const compatibleBasis = massNutrition
+    ? basis === "per_100g" || basis === "per_serving"
+    : basis === "per_100ml" || basis === "per_serving";
   if (
     typeof candidate.predictionId !== "string" || !candidate.predictionId ||
     typeof candidate.imageId !== "string" || !candidate.imageId ||
@@ -103,7 +114,7 @@ export function reviewNutritionCandidate(evidence: unknown): ReviewNutritionCand
     typeof candidate.modelName !== "string" || !candidate.modelName ||
     typeof candidate.modelVersion !== "string" || !candidate.modelVersion ||
     typeof candidate.observedAt !== "string" || !Number.isFinite(Date.parse(candidate.observedAt)) ||
-    !basis || typeof candidate.minimumConfidence !== "number" ||
+    !basis || !compatibleBasis || typeof candidate.minimumConfidence !== "number" ||
     !Number.isFinite(candidate.minimumConfidence) || candidate.minimumConfidence < 0 || candidate.minimumConfidence > 1
   ) return null;
   try {
@@ -119,8 +130,9 @@ export function reviewNutritionCandidate(evidence: unknown): ReviewNutritionCand
     modelVersion: candidate.modelVersion,
     observedAt: candidate.observedAt,
     basis,
+    normalizedBasis,
     minimumConfidence: candidate.minimumConfidence,
-    nutritionPer100g: { calories, proteinGrams, carbohydrateGrams, sugarGrams, fatGrams, saturatedFatGrams, fibreGrams, sodiumMg },
+    nutrition: { calories, proteinGrams, carbohydrateGrams, sugarGrams, fatGrams, saturatedFatGrams, fibreGrams, sodiumMg },
   };
 }
 
@@ -439,15 +451,16 @@ function ProductDrawer({ detail, loading, error, onClose }: {
 
 function NutritionCandidateEvidence({ candidate, productName }: { candidate: ReviewNutritionCandidate; productName: string | null }) {
   const rows: Array<[string, number | null, string]> = [
-    ["Energy", candidate.nutritionPer100g.calories, "kcal"],
-    ["Protein", candidate.nutritionPer100g.proteinGrams, "g"],
-    ["Carbohydrate", candidate.nutritionPer100g.carbohydrateGrams, "g"],
-    ["Sugar", candidate.nutritionPer100g.sugarGrams, "g"],
-    ["Fat", candidate.nutritionPer100g.fatGrams, "g"],
-    ["Saturated fat", candidate.nutritionPer100g.saturatedFatGrams, "g"],
-    ["Fibre", candidate.nutritionPer100g.fibreGrams, "g"],
-    ["Sodium", candidate.nutritionPer100g.sodiumMg, "mg"],
+    ["Energy", candidate.nutrition.calories, "kcal"],
+    ["Protein", candidate.nutrition.proteinGrams, "g"],
+    ["Carbohydrate", candidate.nutrition.carbohydrateGrams, "g"],
+    ["Sugar", candidate.nutrition.sugarGrams, "g"],
+    ["Fat", candidate.nutrition.fatGrams, "g"],
+    ["Saturated fat", candidate.nutrition.saturatedFatGrams, "g"],
+    ["Fibre", candidate.nutrition.fibreGrams, "g"],
+    ["Sodium", candidate.nutrition.sodiumMg, "mg"],
   ];
+  const normalizedLabel = candidate.normalizedBasis === "per_100ml" ? "per 100 mL" : "per 100 g";
   return (
     <section className="nutrition-candidate" aria-label="Extracted nutrition candidate">
       <a className="candidate-label" href={candidate.imageUrl} target="_blank" rel="noreferrer">
@@ -456,7 +469,7 @@ function NutritionCandidateEvidence({ candidate, productName }: { candidate: Rev
       </a>
       <div className="candidate-evidence">
         <div className="candidate-evidence-head">
-          <div><span className="eyebrow">Review candidate</span><h4>Extracted per 100 g</h4></div>
+          <div><span className="eyebrow">Review candidate</span><h4>Extracted {normalizedLabel}</h4></div>
           <span className="confidence">{formatNumber(candidate.minimumConfidence * 100, 1)}% min confidence</span>
         </div>
         <div className="candidate-nutrition-grid">
@@ -464,7 +477,7 @@ function NutritionCandidateEvidence({ candidate, productName }: { candidate: Rev
         </div>
         <dl className="candidate-meta">
           <div><dt>Label observed</dt><dd>{new Date(candidate.observedAt).toLocaleString("en-IN")}</dd></div>
-          <div><dt>Normalization</dt><dd>{candidate.basis === "per_serving" ? "Converted from explicit serving values" : "Explicit per-100-g values"}</dd></div>
+          <div><dt>Normalization</dt><dd>{candidate.basis === "per_serving" ? `Converted from an explicit serving to ${normalizedLabel}` : `Explicit ${normalizedLabel} values`}</dd></div>
           <div><dt>Model evidence</dt><dd>{candidate.modelVersion} · prediction {candidate.predictionId} · image {candidate.imageId}</dd></div>
         </dl>
         <p className="candidate-warning"><strong>Human check required.</strong> Confirm this is the current package and every displayed value matches the label before verification.</p>

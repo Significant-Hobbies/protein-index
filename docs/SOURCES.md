@@ -78,3 +78,8 @@ Nutrition and ingredients have independent states:
 Trusted comparisons default to verified nutrition. Raw observations and
 provenance remain available so verification decisions are auditable and can be
 revisited when packaging changes.
+
+Reviewed label evidence preserves its physical basis. Mass candidates use per
+100 g; liquid candidates use per 100 mL. Serving rows are normalized only from
+an explicit serving quantity of the same dimension, and millilitres are never
+converted to grams without separate density evidence.

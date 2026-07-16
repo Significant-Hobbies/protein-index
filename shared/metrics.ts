@@ -14,11 +14,13 @@ function ratio(numerator: number | null, denominator: number | null, multiplier:
 
 export function calculateMetrics(input: {
   nutrition: NutritionPer100g;
+  nutritionBasis: "per_100g" | "per_100ml" | "per_serving" | "unknown";
   netQuantityGrams: number | null;
   servingSizeGrams: number | null;
   sellingPrice: number | null;
 }): ProductMetrics {
-  const { nutrition, netQuantityGrams, servingSizeGrams, sellingPrice } = input;
+  const { nutrition, nutritionBasis, netQuantityGrams, servingSizeGrams, sellingPrice } = input;
+  const massNormalized = nutritionBasis === "per_100g";
   const proteinEnergyConflict = hasProteinEnergyConflict(nutrition);
   const proteinPer100Calories = proteinEnergyConflict
     ? unavailable("protein_energy_exceeds_total")
@@ -32,9 +34,9 @@ export function calculateMetrics(input: {
         "missing_protein_or_calories",
       );
   const totalProtein =
-    nutrition.proteinGrams !== null && netQuantityGrams !== null && netQuantityGrams > 0
+    massNormalized && nutrition.proteinGrams !== null && netQuantityGrams !== null && netQuantityGrams > 0
       ? available((netQuantityGrams * nutrition.proteinGrams) / 100)
-      : unavailable("missing_protein_or_pack_weight");
+      : unavailable(massNormalized ? "missing_protein_or_pack_weight" : "nutrition_basis_not_mass_normalized");
   const costPer25 = ratio(sellingPrice, totalProtein.value, 25, "missing_price_or_pack_protein");
   const proteinPerInr100 = ratio(totalProtein.value, sellingPrice, 100, "missing_price_or_pack_protein");
   const caloriesFor25 = proteinEnergyConflict
@@ -49,10 +51,12 @@ export function calculateMetrics(input: {
   );
   const fibrePer100Calories = ratio(nutrition.fibreGrams, nutrition.calories, 100, "missing_fibre_or_calories");
   const servings =
-    netQuantityGrams !== null && servingSizeGrams !== null && servingSizeGrams > 0
+    massNormalized && netQuantityGrams !== null && servingSizeGrams !== null && servingSizeGrams > 0
       ? netQuantityGrams / servingSizeGrams
       : null;
-  const pricePerServing = ratio(sellingPrice, servings, 1, "missing_price_or_serving_data");
+  const pricePerServing = servings === null && !massNormalized
+    ? unavailable("nutrition_basis_not_mass_normalized")
+    : ratio(sellingPrice, servings, 1, "missing_price_or_serving_data");
 
   return {
     proteinPer100Calories,

@@ -132,6 +132,28 @@ function robotoffEvidence(barcode: string, nutritionPer100g: Record<string, numb
   };
 }
 
+function robotoffVolumeEvidence(barcode: string, nutritionPer100ml: Record<string, number | null>): unknown {
+  return {
+    code: "robotoff_nutrition_candidate",
+    severity: "warning",
+    field: "nutrition",
+    details: {
+      candidate: {
+        predictionId: "volume-prediction-1",
+        barcode,
+        imageId: "volume-image-1",
+        imageUrl: "https://images.openfoodfacts.org/images/products/volume-label.jpg",
+        modelName: "nutrition_extractor",
+        modelVersion: "nutrition_extractor-2.0",
+        observedAt: "2026-07-14T00:00:00.000Z",
+        basis: "per_100ml",
+        minimumConfidence: 0.96,
+        nutritionPer100ml,
+      },
+    },
+  };
+}
+
 function robotoffIngredientEvidence(barcode: string, suffix: string): {
   evidence: unknown;
   candidate: {
@@ -540,6 +562,51 @@ describe("Worker catalog API", () => {
     });
     expect(decision?.candidate_hash).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.parse(String(decision?.payload_json))).toMatchObject({ nutritionPer100g: nutrition });
+  });
+
+  it("applies exact volume nutrition with per-100-mL facts and basis-safe metrics", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const nutrition = {
+      calories: 50,
+      proteinGrams: 10,
+      carbohydrateGrams: 1,
+      sugarGrams: 0,
+      fatGrams: 0.5,
+      saturatedFatGrams: 0.1,
+      fibreGrams: 0,
+      sodiumMg: 20,
+    };
+    const review = await insertRobotoffReview({ suffix: "verify-volume", evidence: robotoffVolumeEvidence(product.gtin, nutrition) });
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "verify_nutrition",
+        rationale: "Reviewed against exact per-100-mL package label",
+        evidenceUrl: "https://images.openfoodfacts.org/images/products/volume-label.jpg",
+      }),
+    });
+    expect(response.status).toBe(200);
+    const fact = await env.DB.prepare("SELECT basis, status, authority, calories, protein_grams FROM nutrition_facts WHERE product_id = ?")
+      .bind(review.productId).first<Record<string, unknown>>();
+    expect(fact).toEqual({ basis: "per_100ml", status: "verified", authority: 100, calories: 50, protein_grams: 10 });
+    const nutrients = await env.DB.prepare("SELECT DISTINCT basis FROM nutrient_values WHERE product_id = ? AND status = 'verified'")
+      .bind(review.productId).all<{ basis: string }>();
+    expect(nutrients.results).toContainEqual({ basis: "per_100ml" });
+    const decision = await env.DB.prepare("SELECT payload_json FROM evidence_decisions WHERE id = ?")
+      .bind(`evd_${review.reviewId}`).first<{ payload_json: string }>();
+    expect(JSON.parse(decision?.payload_json ?? "null")).toMatchObject({ nutritionPer100ml: nutrition });
+
+    const detailResponse = await worker.fetch(`http://localhost/api/products/${review.productId}`);
+    const detail = await json<ProductDetailResponse>(detailResponse);
+    expect(detail.nutrition.basis).toBe("per_100ml");
+    expect(detail.metrics.proteinPer100Calories).toEqual({ value: 20, reason: null });
+    expect(detail.metrics.proteinCaloriePercentage).toEqual({ value: 80, reason: null });
+    expect(detail.metrics.totalProteinInPack).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });
+    expect(detail.metrics.costPer25gProtein.value).toBeNull();
+    expect(detail.metrics.pricePerServing).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });
   });
 
   it("rejects a Robotoff candidate without clearing independently sourced nutrition", async () => {

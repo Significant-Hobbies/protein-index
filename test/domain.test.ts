@@ -4,6 +4,8 @@ import {
   canonicalJson,
   nutritionCandidateFromEvidence,
   nutritionCandidateHash,
+  nutritionCandidateNormalizedBasis,
+  nutritionCandidateValues,
   validateEvidenceDecision,
 } from "../shared/evidence-decisions";
 import { identityEvidenceHash } from "../scripts/reconcile";
@@ -109,6 +111,17 @@ describe("nutrition accuracy and classification", () => {
     const unverified = classifyProtein({ name: "High Protein Cereal", categories: "cereal", labels: "high protein", nutrition: { ...verifiedNutrition, status: "unverified" } });
     expect(unverified.marketed).toBe(true);
     expect(unverified.nutritionallyDense).toBeNull();
+    const volumeOnlyServing = classifyProtein({
+      name: "Milk",
+      categories: "dairy",
+      labels: "",
+      nutrition: {
+        ...verifiedNutrition,
+        basis: "per_100ml",
+        per100g: { ...emptyNutrition(), calories: 200, proteinGrams: 9 },
+      },
+    });
+    expect(volumeOnlyServing.nutritionReasons).not.toContain("protein_at_least_10g_per_serving");
   });
 });
 
@@ -148,10 +161,27 @@ describe("metrics and completeness", () => {
     expect(candidate).toMatchObject({
       imageUrl: "https://images.openfoodfacts.org/label.jpg",
       minimumConfidence: 0.94,
-      nutritionPer100g: { calories: 400, proteinGrams: 40 },
+      normalizedBasis: "per_100g",
+      nutrition: { calories: 400, proteinGrams: 40 },
     });
     expect(reviewNutritionCandidate({ code: "robotoff_nutrition_candidate", details: { candidate: { imageUrl: "javascript:alert(1)" } } })).toBeNull();
     expect(reviewNutritionCandidate({ code: "robotoff_image_conflict" })).toBeNull();
+
+    const volumeEvidence = {
+      code: "robotoff_nutrition_candidate",
+      details: { candidate: {
+        ...candidate,
+        basis: "per_serving",
+        nutritionPer100ml: candidate?.nutrition,
+      } },
+    };
+    delete (volumeEvidence.details.candidate as Record<string, unknown>).normalizedBasis;
+    delete (volumeEvidence.details.candidate as Record<string, unknown>).nutrition;
+    expect(reviewNutritionCandidate(volumeEvidence)).toMatchObject({
+      basis: "per_serving",
+      normalizedBasis: "per_100ml",
+      nutrition: { calories: 400, proteinGrams: 40 },
+    });
   });
 
   it("parses complete ingredient evidence for side-by-side review and rejects unsafe images", () => {
@@ -216,7 +246,7 @@ describe("metrics and completeness", () => {
     expect(candidate).not.toBeNull();
     if (!candidate) throw new Error("Expected a candidate");
     const candidateHash = await nutritionCandidateHash(candidate);
-    expect(candidateHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(candidateHash).toBe("65294b69248e3438d0bcd534e020184e49e5c9788673d8b5f331939b9f75da51");
     expect(canonicalJson({ z: 1, a: { y: 2, x: 3 } })).toBe('{"a":{"x":3,"y":2},"z":1}');
     const decision = {
       id: "evd_test",
@@ -239,9 +269,45 @@ describe("metrics and completeness", () => {
       .toContain("candidateHash does not match payload");
   });
 
+  it("preserves volume candidates without accepting ambiguous physical bases", async () => {
+    const candidateEvidence = {
+      code: "robotoff_nutrition_candidate",
+      details: { candidate: {
+        predictionId: "volume-prediction-1",
+        barcode: "8900000000012",
+        imageId: "volume-image-1",
+        imageUrl: "https://images.openfoodfacts.org/volume-label.jpg",
+        modelName: "nutrition_extractor",
+        modelVersion: "nutrition_extractor-2.0",
+        observedAt: "2026-07-15T00:00:00.000Z",
+        basis: "per_100ml",
+        minimumConfidence: 0.96,
+        nutritionPer100ml: {
+          calories: 50, proteinGrams: 10, carbohydrateGrams: 1, sugarGrams: 0,
+          fatGrams: 0.5, saturatedFatGrams: 0.1, fibreGrams: 0, sodiumMg: 20,
+        },
+      } },
+    };
+    const candidate = nutritionCandidateFromEvidence(candidateEvidence, "08900000000012");
+    expect(candidate).not.toBeNull();
+    if (!candidate) throw new Error("Expected a volume candidate");
+    expect(nutritionCandidateNormalizedBasis(candidate)).toBe("per_100ml");
+    expect(nutritionCandidateValues(candidate)).toMatchObject({ calories: 50, proteinGrams: 10 });
+    expect(await nutritionCandidateHash(candidate)).toMatch(/^[a-f0-9]{64}$/);
+    expect(await nutritionCandidateHash({ ...candidate })).toBe(await nutritionCandidateHash(candidate));
+
+    const ambiguous = structuredClone(candidateEvidence);
+    Object.assign(ambiguous.details.candidate, { nutritionPer100g: ambiguous.details.candidate.nutritionPer100ml });
+    expect(nutritionCandidateFromEvidence(ambiguous, "08900000000012")).toBeNull();
+    const wrongBasis = structuredClone(candidateEvidence);
+    wrongBasis.details.candidate.basis = "per_100g";
+    expect(nutritionCandidateFromEvidence(wrongBasis, "08900000000012")).toBeNull();
+  });
+
   it("calculates the named protein formulas independently", () => {
     const result = calculateMetrics({
       nutrition: verifiedNutrition.per100g,
+      nutritionBasis: "per_100g",
       netQuantityGrams: 500,
       servingSizeGrams: 50,
       sellingPrice: 250,
@@ -252,9 +318,27 @@ describe("metrics and completeness", () => {
     expect(result.costPer25gProtein.value).toBeCloseTo(24.038, 3);
   });
 
+  it("calculates basis-invariant liquid ratios without fabricating mass economics", () => {
+    const result = calculateMetrics({
+      nutrition: { ...emptyNutrition(), calories: 50, proteinGrams: 10 },
+      nutritionBasis: "per_100ml",
+      netQuantityGrams: 500,
+      servingSizeGrams: 250,
+      sellingPrice: 100,
+    });
+    expect(result.proteinPer100Calories.value).toBe(20);
+    expect(result.proteinCaloriePercentage.value).toBe(80);
+    expect(result.caloriesFor25gProtein.value).toBe(125);
+    expect(result.totalProteinInPack).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });
+    expect(result.costPer25gProtein.value).toBeNull();
+    expect(result.proteinPerInr100.value).toBeNull();
+    expect(result.pricePerServing).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });
+  });
+
   it("withholds calorie-derived protein metrics when rounded label values exceed total energy", () => {
     const result = calculateMetrics({
       nutrition: { ...emptyNutrition(), calories: 115, proteinGrams: 29 },
+      nutritionBasis: "per_100g",
       netQuantityGrams: 500,
       servingSizeGrams: 50,
       sellingPrice: 250,
@@ -268,6 +352,7 @@ describe("metrics and completeness", () => {
   it("returns explicit unavailable reasons instead of infinity", () => {
     const result = calculateMetrics({
       nutrition: { ...emptyNutrition(), calories: 100, proteinGrams: 0 },
+      nutritionBasis: "per_100g",
       netQuantityGrams: 100,
       servingSizeGrams: null,
       sellingPrice: 50,

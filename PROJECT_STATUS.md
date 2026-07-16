@@ -139,6 +139,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — protein-priority and complete-field label audit checked 17 exact package images: Anil Finger Millet Vermicelli, Daawat Pulav Basmati Rice, Flyberry Sublime Strawberries, and Lays Chile Limon match every supported value; 13 candidates were rejected for omitted declared values, added-sugar/total-sugar confusion, unsupported millilitre-to-gram conversion without density, or incomplete evidence; checksummed bundle `review-14a9a56f9ca787977668` passes all 17 live source, product, GTIN, candidate-hash, and decision-conflict checks without writing production data
 - 2026-07-16 — nutrition bundle `review-14a9a56f9ca787977668` published and exact-replayed without migrations: 17 durable decisions, four verified facts/outcomes, zero unresolved bundle candidates, and unchanged replay counts raise verified product nutrition from 53 to 55 and reduce open reviews from 38,752 to 38,735; all four public detail responses select eight authority-100 label fields and recompute protein per 100 calories exactly
 - 2026-07-16 — corrected exhaustive nutrition extraction run `29497231702` completed from source snapshot `f72687ee8bc6522054fe69dbfda6b91902c16af1ec2e043cde27bc6c29ad8176`: all 5,944 eligible label-image barcodes reconcile to 1,139 candidate, 806 no-prediction, 3,999 rejected, and zero failed outcomes; 5,950 portable checksums, 17,626 staged/source-index records, and the exact automatic-publication contract validate independently. Router run `29505585148` retained the exact workflow/run/SHA/artifact id, digest, and byte size, then failed closed before artifact download or D1 access because the protected environment still supplied empty Cloudflare credentials
+- 2026-07-16 — reviewed nutrition evidence now preserves mass and volume as separate candidate shapes: direct per-100-mL values and explicit serving-volume conversions publish atomically as `per_100ml`, existing mass hashes remain unchanged across all 45 manifest-backed immutable bundles, protein-per-calorie metrics remain available, and mass economics fail closed without compatible evidence
 
 ## Products
 
@@ -205,6 +206,8 @@ must pass desktop/mobile verification.
   artifacts into one protected automatic publication lock; community data stays
   unverified, model output stays review-only, pending migrations fail closed,
   and durable pre/post/live evidence is retained for manual recovery
+- Dimension-safe liquid-label evidence with explicit per-100-mL extraction,
+  review, provenance, idempotent publication, and basis-aware metrics
 
 ## Todo / Planned / Deferred / Blocked
 
@@ -247,3 +250,7 @@ must pass desktop/mobile verification.
     `29474290721`, and automatic source proof `29495130626` failed with empty
     credential variables before applying data; the exact SYNTHA-6 verification bundle and the eight-decision
     incomplete-candidate rejection bundle remain committed and replayable.
+17. Run a new source-complete nutrition-label extraction with per-100-mL support,
+    reconcile every eligible barcode, review exact liquid package images, and
+    publish only source/hash-matched decisions before claiming any verified
+    nutrition coverage increase.

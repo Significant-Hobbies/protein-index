@@ -79,6 +79,22 @@ function explicitServingMass(product: StagedProduct): number | null {
   return unit ? null : value;
 }
 
+function explicitServingVolume(product: StagedProduct): number | null {
+  const evidence = isRecord(product.rawEvidence) ? product.rawEvidence : null;
+  const rawServing = typeof evidence?.serving_size === "string" ? evidence.serving_size : null;
+  const parsed = parseQuantity(rawServing);
+  if (parsed?.millilitres != null) return parsed.millilitres;
+  const value = finiteNumber(evidence?.serving_quantity);
+  if (value === null || value <= 0) return null;
+  const rawUnit = typeof evidence?.serving_quantity_unit === "string" ? evidence.serving_quantity_unit : null;
+  const unit = normalizeText(rawUnit);
+  if (["ml", "millilitre", "millilitres", "milliliter", "milliliters"].includes(unit)) return value;
+  if (["cl", "centilitre", "centilitres", "centiliter", "centiliters"].includes(unit)) return value * 10;
+  if (["dl", "decilitre", "decilitres", "deciliter", "deciliters"].includes(unit)) return value * 100;
+  if (["l", "litre", "litres", "liter", "liters"].includes(unit)) return value * 1000;
+  return null;
+}
+
 function explicitNutritionBasis(product: StagedProduct): RobotoffProductContext["nutritionBasis"] {
   const evidence = isRecord(product.rawEvidence) ? product.rawEvidence : null;
   const declared = typeof evidence?.nutrition_data_per === "string" ? normalizeText(evidence.nutrition_data_per) : "";
@@ -117,8 +133,10 @@ async function readContexts(path: string, limit: number | null): Promise<Robotof
       categoryRaw: product.categoryRaw,
       netQuantityGrams: product.netQuantityGrams,
       servingSizeGrams: explicitServingMass(product),
+      servingSizeMillilitres: explicitServingVolume(product),
       nutritionBasis: explicitNutritionBasis(product),
       sourceNutritionPer100g: product.nutrition.basis === "per_100g" ? product.nutrition.per100g : null,
+      sourceNutritionPer100ml: product.nutrition.basis === "per_100ml" ? product.nutrition.per100g : null,
       imageUrl: product.imageUrl,
       nutritionImageUrl: product.nutritionImageUrl,
     });

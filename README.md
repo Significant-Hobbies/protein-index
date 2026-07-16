@@ -92,6 +92,13 @@ no-prediction, rejected, or failed. Model output never becomes verified
 nutrition automatically; an operator must review the current label image, and
 verification applies that exact candidate with its provenance.
 
+Mass and liquid labels remain dimensionally separate throughout extraction and
+review. Direct liquid rows are retained as per 100 mL. A serving-only liquid row
+is normalized only when the source explicitly declares its serving volume; the
+pipeline never assumes that one millilitre weighs one gram. Protein per 100
+calories remains comparable across both bases, while pack-mass and price metrics
+stay unavailable without compatible mass evidence.
+
 ## Automatic fresh-evidence publication
 
 Successful default-branch runs of `Source sync`, API enrichment, nutrition-label
