@@ -88,6 +88,14 @@ jobs:
           if (process.env.EXPECTED_INPUT_HASH && manifest.inputHash !== process.env.EXPECTED_INPUT_HASH) failures.push('input hash differs from the requested hash');
           if (failures.length) throw new Error(failures.join('; '));
           NODE
+          staged_hash="$(sha256sum staged-products.jsonl | cut -d ' ' -f 1)"
+          echo "SOURCE_STAGED_HASH=$staged_hash" >> "$GITHUB_ENV"
+
+      - name: Restore exact-snapshot enrichment responses
+        uses: ./.github/actions/restore-exact-responses
+        with:
+          artifact-prefix: open-food-facts-enrichment-
+          output-directory: .data/enrichment
 
       - name: Enrich exact configured barcode set
         shell: bash

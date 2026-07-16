@@ -1,0 +1,89 @@
+name: Restore exact-snapshot responses
+description: Restore checksum-validated API responses only when the complete source snapshot is identical.
+
+inputs:
+  artifact-prefix:
+    description: Prefix of the prior evidence artifact to locate
+    required: true
+  output-directory:
+    description: Adapter output directory that should receive the responses folder
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Locate prior response evidence
+      id: prior
+      uses: actions/github-script@v9
+      env:
+        ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+      with:
+        script: |
+          const fs = require('fs');
+          const response = await github.rest.actions.listArtifactsForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            per_page: 100,
+          });
+          const artifact = response.data.artifacts
+            .filter((candidate) =>
+              !candidate.expired &&
+              candidate.name.startsWith(process.env.ARTIFACT_PREFIX) &&
+              candidate.workflow_run?.head_branch === context.payload.repository.default_branch)
+            .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))[0];
+          if (!artifact) {
+            core.notice(`No prior ${process.env.ARTIFACT_PREFIX} response artifact is available.`);
+            core.setOutput('available', 'false');
+            return;
+          }
+          const download = await github.rest.actions.downloadArtifact({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            artifact_id: artifact.id,
+            archive_format: 'zip',
+          });
+          fs.writeFileSync('.data-prior-exact.zip', Buffer.from(download.data));
+          core.setOutput('available', 'true');
+          core.setOutput('artifact_id', String(artifact.id));
+          core.setOutput('artifact_name', artifact.name);
+
+    - name: Restore responses for the exact staged snapshot
+      if: steps.prior.outputs.available == 'true'
+      shell: bash
+      env:
+        OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
+        PRIOR_ARTIFACT_ID: ${{ steps.prior.outputs.artifact_id }}
+        PRIOR_ARTIFACT_NAME: ${{ steps.prior.outputs.artifact_name }}
+      run: |
+        set -euo pipefail
+        mkdir -p .data/prior-exact
+        unzip -q .data-prior-exact.zip -d .data/prior-exact
+        (
+          cd .data/prior-exact
+          sha256sum --check checksums.sha256
+        )
+        set +e
+        node --input-type=module <<'NODE'
+        import { readFile } from 'node:fs/promises';
+        const [priorManifest, priorReport, sourceManifest] = await Promise.all([
+          readFile('.data/prior-exact/manifest.json', 'utf8').then(JSON.parse),
+          readFile('.data/prior-exact/report.json', 'utf8').then(JSON.parse),
+          readFile('.data/source-snapshot/manifest.json', 'utf8').then(JSON.parse),
+        ]);
+        const exact = priorManifest.inputHash === process.env.SOURCE_STAGED_HASH
+          && priorReport.inputManifestHash === sourceManifest.inputHash
+          && priorManifest.sourceComplete === true
+          && priorReport.outcomes?.failed === 0;
+        if (!exact) process.exit(10);
+        NODE
+        exact_status=$?
+        set -e
+        if [[ "$exact_status" -eq 0 ]]; then
+          mkdir -p "$OUTPUT_DIRECTORY"
+          cp -a .data/prior-exact/responses "$OUTPUT_DIRECTORY/"
+          echo "Restored exact-snapshot responses from $PRIOR_ARTIFACT_NAME ($PRIOR_ARTIFACT_ID)"
+        elif [[ "$exact_status" -eq 10 ]]; then
+          echo "Prior responses belong to a different source snapshot; fetching current evidence"
+        else
+          exit "$exact_status"
+        fi
