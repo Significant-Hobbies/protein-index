@@ -148,6 +148,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — ingredient artifact audit found that normalized ledgers were checksummed but retained raw response files were not; adapter v2 now requires the response set to exactly match the eligible GTIN cohort and binds every raw response into the portable checksum ledger before it can be reused or published
 - 2026-07-16 — current exact-snapshot fan-out is complete: enrichment run `29510555828` accounts for all 17,284 barcodes with 6,355 enriched, 10,884 unchanged, 45 not found, and zero failures across 179 checksums; ingredient run `29511054187` accounts for all 5,196 eligible GTINs with 3,358 candidate, 1,739 no-prediction, 99 rejected, and zero failures across 5,204 checksums including every raw response
 - 2026-07-16 — protected publication credentials are now present: automatic run `29511127992` validated and downloaded the exact adapter-v2 ingredient artifact, then detected pending migration `0007_review_queue_indexes.sql` and failed before pre-state capture, import generation/application, or live verification; durable trigger and artifact evidence is retained as artifact `8380669231`
+- 2026-07-16 — exact-image review of 16 priority per-100-mL records from nutrition artifact `8380178442` produced checksummed bundle `review-230fca7ea00663c6c05e`: three source/hash-bound candidates match every supported declared value and eleven are rejected for omitted, misread, dimensionally wrong, or inexact label values; Red Bull and Mogu Mogu remain outside the bundle because their otherwise reviewed images are represented as cross-image conflicts rather than decision-eligible candidates. The bundle matches the unpublished artifact exactly and does not change verified coverage before protected source publication.
 
 ## Products
 
@@ -256,7 +257,8 @@ must pass desktop/mobile verification.
     failed closed before import or write; earlier runs `29449999090`,
     `29474290721`, and `29495130626` remain durable evidence of the prior empty
     credential state.
-17. Run a new source-complete nutrition-label extraction with per-100-mL support,
-    reconcile every eligible barcode, review exact liquid package images, and
-    publish only source/hash-matched decisions before claiming any verified
-    nutrition coverage increase.
+17. Publish the exact adapter-v4 nutrition artifact only after the pending
+    production migration is explicitly approved, then source-check and publish
+    `review-230fca7ea00663c6c05e` with exact postconditions and replay. Resolve
+    the two audited cross-image conflicts separately; do not claim the three
+    verified per-100-mL candidates until live publication proves them.
