@@ -1059,10 +1059,41 @@ describe("Open Food Facts rich API enrichment", () => {
         return new Response(JSON.stringify({ products: codes.flatMap((code) => returnedByCode.get(code) ?? []) }), { status: 200 });
       },
     });
-    expect(requests).toBe(3);
+    expect(requests).toBe(7);
     expect(result.manifest.sourceComplete).toBe(true);
     const report = JSON.parse(await readFile(result.reportPath, "utf8")) as { accountedBarcodes: number; fallbackSplits: number; outcomes: { failed: number } };
     expect(report).toMatchObject({ accountedBarcodes: 2, fallbackSplits: 1, outcomes: { failed: 0 } });
+  });
+
+  it("retries a transient multi-code 503 before splitting the batch", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-enrich-multi-retry-"));
+    const source = await sourceSnapshot(directory, 2);
+    const returnedByCode = new Map([
+      ["8900000000012", indiaProduct],
+      ["8900000000029", { ...indiaProduct, code: "8900000000029", product_name: "Ordinary Oats" }],
+    ]);
+    let requests = 0;
+    const result = await enrichOpenFoodFactsApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory: join(directory, "enriched"),
+      mode: "sample",
+      limit: null,
+      batchSize: 2,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      maximumAttempts: 2,
+      fetcher: async (input) => {
+        requests += 1;
+        if (requests === 1) return new Response("busy", { status: 503 });
+        const codes = new URL(input.toString()).searchParams.get("code")?.split(",") ?? [];
+        return new Response(JSON.stringify({ products: codes.flatMap((code) => returnedByCode.get(code) ?? []) }), { status: 200 });
+      },
+    });
+    expect(requests).toBe(2);
+    expect(result.manifest.sourceComplete).toBe(true);
+    const report = JSON.parse(await readFile(result.reportPath, "utf8")) as { fallbackSplits: number; outcomes: { failed: number } };
+    expect(report).toMatchObject({ fallbackSplits: 0, outcomes: { failed: 0 } });
   });
 
   it("preserves successful split siblings and resumes only failed codes", async () => {
