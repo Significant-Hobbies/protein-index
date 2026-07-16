@@ -155,6 +155,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — a fifth 24-record distinct-GTIN liquid batch was checked against exact retained images in checksummed bundle `review-ca0eeaed8172acd296f7`; all 24 candidates were rejected for omitted declarations, unsupported fields, wrong mass/volume basis, inexact values, or incorrect serving conversion, so verified coverage was deliberately not inflated. Across all five bundles, 110 of 258 decision-eligible records covering 99 of 209 GTINs now have exact artifact-bound decisions (15 pending verifications and 95 rejections); the remaining 148 records span 127 GTINs, and live coverage is unchanged before protected publication.
 - 2026-07-16 — a sixth 24-record distinct-GTIN liquid batch was checked against exact retained images in checksummed bundle `review-8883bc8d43df33874d89`; all 24 candidates were rejected for omitted declarations, incorrect values, wrong mass/volume or serving basis, or mismatched product evidence, including an iced-latte identity attached to a photographed Doritos label. Across all six bundles, 134 of 258 decision-eligible records covering 123 of 209 GTINs now have exact artifact-bound decisions (15 pending verifications and 119 rejections); the remaining 124 records span 106 GTINs, and live coverage is unchanged before protected publication.
 - 2026-07-16 — a seventh 24-record distinct-GTIN liquid batch was checked against exact retained images in checksummed bundle `review-6f3e91617c0bb4bcf50d`; all 24 candidates were rejected for omitted declarations, wrong mass/volume or serving basis, misclassified nutrients, or incorrect values. Two unreadable images were excluded and replaced instead of being treated as evidence. Across all seven bundles, 158 of 258 decision-eligible records covering 147 of 209 GTINs now have exact artifact-bound decisions (15 pending verifications and 143 rejections); exactly 100 records across 86 GTINs remain, and live coverage is unchanged before protected publication.
+- 2026-07-16 — an eighth 24-record distinct-GTIN liquid batch was checked against exact retained images in checksummed bundle `review-af930823bd0d8c430b9f`; all 24 candidates were rejected for omitted declarations, added-sugar/total-sugar confusion, incorrect values, wrong mass/volume basis, or inexact serving conversion, so no unsupported fact is promoted. Across all eight bundles, 182 of 258 decision-eligible records covering 171 of 209 GTINs now have exact artifact-bound decisions (15 pending verifications and 167 rejections); 76 records across 67 GTINs remain, and live coverage is unchanged before protected publication.
 
 ## Products
 
@@ -271,7 +272,8 @@ must pass desktop/mobile verification.
     `review-faa4134c08f801a2e6b1`,
     `review-ca0eeaed8172acd296f7`,
     `review-8883bc8d43df33874d89`, and
-    `review-6f3e91617c0bb4bcf50d` with exact postconditions and replay. Continue
-    reviewing the remaining 100 decision-eligible records across 86 GTINs and
+    `review-6f3e91617c0bb4bcf50d`, and
+    `review-af930823bd0d8c430b9f` with exact postconditions and replay. Continue
+    reviewing the remaining 76 decision-eligible records across 67 GTINs and
     resolve the two audited cross-image conflicts separately; do not claim the
     fifteen verified per-100-mL candidates until live publication proves them.
