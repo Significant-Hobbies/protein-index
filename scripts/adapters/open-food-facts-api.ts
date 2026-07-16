@@ -424,7 +424,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
   const fetchChunk = (codes: string[]) => fetchBatchResilient({
     codes,
     fetcher: options.fetcher ?? fetch,
-    userAgent: options.userAgent ?? "protein-index/0.1 (+https://github.com/sarthak-fleet/protein-index; nutrition-enrichment)",
+    userAgent: options.userAgent ?? "protein-index/0.1 (+https://github.com/sarthakagrawal927/protein-index; nutrition-enrichment)",
     maximumAttempts,
     retryBaseMs,
     requestTimeoutMs,

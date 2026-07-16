@@ -222,7 +222,7 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
   let requests = 0;
   let lastFetchStartedAt: number | null = null;
   const fetcher = options.fetcher ?? fetch;
-  const userAgent = options.userAgent ?? "protein-index/0.1 (+https://github.com/sarthak-fleet/protein-index; label-evidence)";
+  const userAgent = options.userAgent ?? "protein-index/0.1 (+https://github.com/sarthakagrawal927/protein-index; label-evidence)";
 
   const fetchPage = async (code: string, page: number): Promise<Record<string, unknown>[]> => {
     let lastError: Error | null = null;

@@ -145,6 +145,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — exact-snapshot response restoration is consolidated into one checksum-validating local action and applied to richer product enrichment plus nutrition and ingredient label extraction; all adapters still validate their own response schema and refetch incompatible checkpoints
 - 2026-07-16 — official source refresh `29509034567` traversed all 4,535,553 export rows and exactly reproduced the current 21,188-row India slice as 17,732 staged records plus 3,456 exclusions, with zero new, changed, missing, duplicate, or continuity-drift records and all five snapshot checksums passing
 - 2026-07-16 — official adapter-v4 nutrition run `29509879367` restored the exact checksum-validated response cohort and reconciled all 5,944 eligible barcodes in under two minutes to 1,354 candidate, 806 no-prediction, 3,784 rejected, and zero failed outcomes; artifact `8380178442` contains 5,950 valid checksums and 273 valid per-100-mL records across 215 barcodes with zero candidate/hash failures, while protected publication again failed before D1 access because production credentials remain unavailable
+- 2026-07-16 — ingredient artifact audit found that normalized ledgers were checksummed but retained raw response files were not; adapter v2 now requires the response set to exactly match the eligible GTIN cohort and binds every raw response into the portable checksum ledger before it can be reused or published
 
 ## Products
 

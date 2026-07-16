@@ -277,6 +277,7 @@ describe("Robotoff ingredient evidence", () => {
       fetchedBarcodes: 1,
       resumedBarcodes: 0,
     });
+    expect(first.manifest.adapterVersion).toBe("robotoff-ingredients-api-v2");
     const candidates = (await readFile(first.candidatesPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(candidates).toHaveLength(1);
     expect(candidates[0]).toMatchObject({
@@ -384,8 +385,15 @@ describe("Robotoff ingredient evidence", () => {
       minimumIntervalMs: 0,
       fetcher: async () => new Response(JSON.stringify({ image_predictions: [ingredientPrediction] }), { status: 200 }),
     });
-    await writeFile(result.candidatesPath, `${await readFile(result.candidatesPath, "utf8")} `, "utf8");
+    const originalCandidates = await readFile(result.candidatesPath, "utf8");
+    await writeFile(result.candidatesPath, `${originalCandidates} `, "utf8");
     await expect(validateRobotoffIngredientArtifact(outputDirectory)).rejects.toThrow("checksum mismatch");
+    await writeFile(result.candidatesPath, originalCandidates, "utf8");
+    const responsePath = join(outputDirectory, "responses", "00001241000224.json");
+    const originalResponse = await readFile(responsePath, "utf8");
+    expect(await readFile(result.checksumsPath, "utf8")).toContain("responses/00001241000224.json");
+    await writeFile(responsePath, `${originalResponse} `, "utf8");
+    await expect(validateRobotoffIngredientArtifact(outputDirectory)).rejects.toThrow("responses/00001241000224.json");
   });
 });
 

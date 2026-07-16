@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import { once } from "node:events";
 import { basename, isAbsolute, join } from "node:path";
 import { createInterface } from "node:readline";
@@ -11,7 +11,7 @@ import { emptyNutrition } from "../../shared/nutrition";
 import type { SourceManifest, StagedProduct, ValidationIssue } from "../../shared/types";
 import { parseRobotoffIngredientEvidence } from "./robotoff-ingredients";
 
-export const ROBOTOFF_INGREDIENT_API_ADAPTER_VERSION = "robotoff-ingredients-api-v1";
+export const ROBOTOFF_INGREDIENT_API_ADAPTER_VERSION = "robotoff-ingredients-api-v2";
 export const ROBOTOFF_IMAGE_PREDICTIONS_URL = "https://robotoff.openfoodfacts.org/api/v1/image_predictions";
 const PAGE_SIZE = 50;
 export const ROBOTOFF_INGREDIENT_REQUEST_SCHEMA = createHash("sha256")
@@ -374,7 +374,7 @@ export async function extractRobotoffIngredientApi(
   let lastFetchStartedAt: number | null = null;
   const fetcher = options.fetcher ?? fetch;
   const userAgent = options.userAgent
-    ?? "protein-index/0.1 (+https://github.com/sarthak-fleet/protein-index; ingredient-label-evidence)";
+    ?? "protein-index/0.1 (+https://github.com/sarthakagrawal927/protein-index; ingredient-label-evidence)";
 
   const fetchPage = async (code: string, page: number): Promise<RawRecord[]> => {
     let lastError: Error | null = null;
@@ -602,6 +602,9 @@ export async function extractRobotoffIngredientApi(
     writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8"),
     writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8"),
   ]);
+  const responseFiles = (await readdir(responsesDirectory))
+    .filter((name) => /^\d{14}\.json$/.test(name))
+    .map((name) => `responses/${name}`);
   await writeChecksums(options.outputDirectory, [
     basename(cohortPath),
     basename(candidatesPath),
@@ -611,6 +614,7 @@ export async function extractRobotoffIngredientApi(
     basename(exclusionsPath),
     basename(manifestPath),
     basename(reportPath),
+    ...responseFiles,
   ], checksumsPath);
   const result: RobotoffIngredientApiResult = {
     stagedPath,
@@ -718,6 +722,26 @@ export async function validateRobotoffIngredientArtifact(directory: string): Pro
     if (priorCode && priorCode.localeCompare(code) >= 0) throw new Error("Ingredient artifact cohort is not uniquely sorted");
     priorCode = code;
     cohortByCode.set(code, context);
+  }
+  const responseDirectory = join(directory, "responses");
+  const responseNames = (await readdir(responseDirectory)).sort();
+  const expectedResponseNames = cohort.map(({ code }) => `${code}.json`).sort();
+  if (JSON.stringify(responseNames) !== JSON.stringify(expectedResponseNames)) {
+    throw new Error("Ingredient artifact response files do not exactly match the source cohort");
+  }
+  const expectedChecksumFiles = new Set([
+    ...requiredFiles,
+    ...expectedResponseNames.map((name) => `responses/${name}`),
+  ]);
+  if (expectedChecksums.size !== expectedChecksumFiles.size
+    || [...expectedChecksums.keys()].some((file) => !expectedChecksumFiles.has(file))) {
+    throw new Error("Ingredient artifact checksum entries do not exactly match the retained evidence files");
+  }
+  for (const name of expectedResponseNames) {
+    const file = `responses/${name}`;
+    if (await hashFile(join(directory, file)) !== expectedChecksums.get(file)) {
+      throw new Error(`Ingredient artifact checksum mismatch for ${file}`);
+    }
   }
   if (manifest.indiaRecords !== cohort.length
     || manifest.recordsRead !== cohort.length
