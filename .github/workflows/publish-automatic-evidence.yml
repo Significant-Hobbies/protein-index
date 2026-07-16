@@ -61,8 +61,33 @@ jobs:
             const route = routes[run.name];
             if (!route) throw new Error(`Unsupported upstream workflow: ${run.name}`);
             const artifactName = `${route.artifactPrefix}-${run.id}`;
+            const response = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+              per_page: 100,
+            });
+            const matches = response.data.artifacts.filter((artifact) => artifact.name === artifactName && !artifact.expired);
+            if (matches.length !== 1) throw new Error(`Expected exactly one unexpired artifact named ${artifactName}`);
+            const artifact = matches[0];
+            if (!/^sha256:[a-f0-9]{64}$/.test(artifact.digest ?? '') || artifact.size_in_bytes <= 0) {
+              throw new Error('Upstream artifact does not expose a valid immutable digest and size');
+            }
             core.setOutput('artifact_name', artifactName);
             core.setOutput('expected_source', route.source);
+            core.setOutput('artifact_id', String(artifact.id));
+            fs.writeFileSync('.data/publication-evidence/trigger.json', JSON.stringify({
+              workflow: run.name,
+              runId: run.id,
+              headSha: run.head_sha,
+              headBranch: run.head_branch,
+              artifact: artifactName,
+              artifactId: artifact.id,
+              artifactDigest: artifact.digest,
+              artifactBytes: artifact.size_in_bytes,
+              expectedSource: route.source,
+              status: 'routed',
+            }, null, 2));
 
       - name: Check out exact upstream commit
         uses: actions/checkout@v6
@@ -80,6 +105,18 @@ jobs:
           grep -F -- "--skip-migrations" scripts/sync.ts >/dev/null
           grep -F -- "applyEvidenceDecisions: !automatic" scripts/sync.ts >/dev/null
 
+      - name: Require protected publication credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo "::error::The protected production environment is missing Cloudflare publication credentials."
+            exit 1
+          fi
+
       - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v6
@@ -92,24 +129,16 @@ jobs:
       - name: Download exact upstream artifact
         uses: actions/github-script@v9
         env:
-          ARTIFACT_NAME: ${{ steps.route.outputs.artifact_name }}
+          ARTIFACT_ID: ${{ steps.route.outputs.artifact_id }}
         with:
           script: |
             const fs = require('fs');
-            const runId = Number(process.env.UPSTREAM_RUN_ID);
-            if (!Number.isSafeInteger(runId) || runId <= 0) throw new Error('Upstream run ID is invalid');
-            const response = await github.rest.actions.listWorkflowRunArtifacts({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: runId,
-              per_page: 100,
-            });
-            const matches = response.data.artifacts.filter((artifact) => artifact.name === process.env.ARTIFACT_NAME && !artifact.expired);
-            if (matches.length !== 1) throw new Error(`Expected exactly one unexpired artifact named ${process.env.ARTIFACT_NAME}`);
+            const artifactId = Number(process.env.ARTIFACT_ID);
+            if (!Number.isSafeInteger(artifactId) || artifactId <= 0) throw new Error('Upstream artifact ID is invalid');
             const download = await github.rest.actions.downloadArtifact({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              artifact_id: matches[0].id,
+              artifact_id: artifactId,
               archive_format: 'zip',
             });
             fs.writeFileSync('.automatic-publication.zip', Buffer.from(download.data));
@@ -127,15 +156,16 @@ jobs:
           cd .data/automatic
           sha256sum --check checksums.sha256
           cd ../..
-          jq -n \
+          jq \
             --arg workflow "$UPSTREAM_WORKFLOW" \
             --arg runId "$UPSTREAM_RUN_ID" \
             --arg headSha "$UPSTREAM_HEAD_SHA" \
             --arg headBranch "$UPSTREAM_HEAD_BRANCH" \
             --arg artifact "$ARTIFACT_NAME" \
             --arg source "$EXPECTED_SOURCE" \
-            '{workflow:$workflow,runId:($runId|tonumber),headSha:$headSha,headBranch:$headBranch,artifact:$artifact,expectedSource:$source}' \
-            > .data/publication-evidence/trigger.json
+            '. + {workflow:$workflow,runId:($runId|tonumber),headSha:$headSha,headBranch:$headBranch,artifact:$artifact,expectedSource:$source,status:"validated"}' \
+            .data/publication-evidence/trigger.json > .data/publication-evidence/trigger.validated.json
+          mv .data/publication-evidence/trigger.validated.json .data/publication-evidence/trigger.json
           cp .data/automatic/manifest.json .data/publication-evidence/manifest.json
           cp .data/automatic/report.json .data/publication-evidence/report.json
           cp .data/automatic/checksums.sha256 .data/publication-evidence/checksums.sha256

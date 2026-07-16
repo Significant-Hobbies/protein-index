@@ -112,12 +112,15 @@ manual publication:
 - DataKart, retailer offers/ratings, review decisions, and Worker deployment are
   excluded.
 
-Every attempt retains the trigger identity, artifact/manifest hashes,
-publication log, exact D1 pre/post state, and live health/catalog checks for 90
-days. If a write or postcondition fails, the workflow makes no success claim.
+Every credentialed attempt retains the trigger identity, artifact/manifest
+hashes, publication log, exact D1 pre/post state, and live health/catalog checks
+for 90 days. If a write or postcondition fails, the workflow makes no success claim.
 The same checksummed artifact remains replayable through the protected manual
 workflow after investigation. The scheduled cadence remains weekly; manual
-producer runs use the same automatic evidence boundary.
+producer runs use the same automatic evidence boundary. Missing protected
+credentials retain the trigger and immutable artifact digest, then fail before
+artifact download so blocked runs do not repeatedly transfer large evidence
+bundles.
 
 ## Reviewed catalog publication
 

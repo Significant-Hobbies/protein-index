@@ -956,6 +956,11 @@ describe("Open Food Facts bulk staging", () => {
     expect(workflow).toContain("Require automatic-publication contract at upstream commit");
     expect(workflow).toContain("validateAutomaticPublicationSnapshot");
     expect(workflow).toContain("applyEvidenceDecisions: !automatic");
+    expect(workflow).toContain("Require protected publication credentials");
+    expect(workflow).toContain("-z \"$CLOUDFLARE_API_TOKEN\"");
+    expect(workflow).toContain("-z \"$CLOUDFLARE_ACCOUNT_ID\"");
+    expect(workflow).toContain("artifact.digest");
+    expect(workflow).toContain("artifact.size_in_bytes");
     expect(workflow).toContain("group: protein-index-production-publication");
     expect(workflow).toContain("cancel-in-progress: false");
     expect(workflow).toContain("environment: production");
