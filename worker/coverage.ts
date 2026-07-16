@@ -81,26 +81,10 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
         SELECT latest.id FROM ingestion_runs latest WHERE latest.source_id = s.id
         ORDER BY latest.started_at DESC LIMIT 1
       ) ORDER BY s.name`),
-    db.prepare(`WITH robotoff_products AS (
-      SELECT r.product_id FROM review_items r
-      JOIN source_records s ON s.id = r.source_record_id
-      WHERE r.status = 'open' AND r.type = 'nutrition_validation'
-        AND s.source_id = 'open_food_facts_robotoff'
-      GROUP BY r.product_id
-      UNION
-      SELECT r.product_id FROM review_items r
-      JOIN source_records s ON s.id = r.source_record_id
-      WHERE r.status = 'resolved' AND r.type = 'nutrition_validation'
-        AND s.source_id = 'open_food_facts_robotoff'
-      GROUP BY r.product_id
-      UNION
-      SELECT r.product_id FROM review_items r
-      JOIN source_records s ON s.id = r.source_record_id
-      WHERE r.status = 'dismissed' AND r.type = 'nutrition_validation'
-        AND s.source_id = 'open_food_facts_robotoff'
-      GROUP BY r.product_id
-    )
-    SELECT COUNT(*) AS extraction_candidates FROM robotoff_products`),
+    db.prepare(`SELECT COUNT(DISTINCT r.product_id) AS extraction_candidates
+      FROM review_items r JOIN source_records s ON s.id = r.source_record_id
+      WHERE r.type = 'nutrition_validation' AND r.product_id IS NOT NULL
+        AND s.source_id = 'open_food_facts_robotoff'`),
   ]);
   const counts = batch[0]?.results[0] as CatalogCountRow | undefined;
   const sourceRows = (batch[1]?.results ?? []) as SourceCoverageRow[];
