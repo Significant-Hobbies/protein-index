@@ -151,6 +151,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — exact-image review of 16 priority per-100-mL records from nutrition artifact `8380178442` produced checksummed bundle `review-230fca7ea00663c6c05e`: three source/hash-bound candidates match every supported declared value and eleven are rejected for omitted, misread, dimensionally wrong, or inexact label values; Red Bull and Mogu Mogu remain outside the bundle because their otherwise reviewed images are represented as cross-image conflicts rather than decision-eligible candidates. The bundle matches the unpublished artifact exactly and does not change verified coverage before protected source publication.
 - 2026-07-16 — the next 24 decision-eligible liquid labels were reviewed against their exact images in checksummed bundle `review-9c7ac1f9e044ed7bce6e`: RAW Coconut Water, RAW Cranberry Refresher, Pepsi, Nimbooz, and Gowardhan Cow Milk match every supported declaration, while 19 candidates are rejected for missing sodium/fibre/sugar/fat, incorrect physical basis, unsupported values, or serving-scale errors. Across both liquid bundles, 38 of 258 decision-eligible records covering 36 of 209 GTINs now have exact artifact-bound decisions; no live verified count changes before protected publication.
 - 2026-07-16 — a third 24-record liquid-label batch was checked against the exact retained images in checksummed bundle `review-6b5e8b66259669560d75`: Mogu Mogu Lychee, Coca-Cola Original, Frantoi Cutrera olive oil, Thums Up, and Storia Pomegranate match every supported declaration, while 19 records are rejected for omitted nutrients, wrong dimensions, incorrect values, or duplicate product evidence. Across all three bundles, 62 of 258 decision-eligible records covering 57 of 209 GTINs now have exact artifact-bound decisions, including 13 pending verifications; the remaining 196 records span 166 GTINs, and live coverage is unchanged before protected publication.
+- 2026-07-16 — a fourth 24-record distinct-GTIN batch was checked against exact retained images in checksummed bundle `review-faa4134c08f801a2e6b1`: Local all-natural soda and Yakult match every supported declaration, while 22 candidates are rejected for wrong mass/volume basis, incorrect serving conversion, omitted label values, or misclassified nutrients. An obscured Amul Pineapple image was excluded rather than treated as proof of rejection. Across all four bundles, 86 of 258 decision-eligible records covering 75 of 209 GTINs now have exact artifact-bound decisions, including 15 pending verifications; the remaining 172 records span 147 GTINs, and live coverage is unchanged before protected publication.
 
 ## Products
 
@@ -262,8 +263,9 @@ must pass desktop/mobile verification.
 17. Publish the exact adapter-v4 nutrition artifact only after the pending
     production migration is explicitly approved, then source-check and publish
     liquid bundles `review-230fca7ea00663c6c05e`,
-    `review-9c7ac1f9e044ed7bce6e`, and
-    `review-6b5e8b66259669560d75` with exact postconditions and replay. Continue
-    reviewing the remaining 196 decision-eligible records across 166 GTINs and
+    `review-9c7ac1f9e044ed7bce6e`,
+    `review-6b5e8b66259669560d75`, and
+    `review-faa4134c08f801a2e6b1` with exact postconditions and replay. Continue
+    reviewing the remaining 172 decision-eligible records across 147 GTINs and
     resolve the two audited cross-image conflicts separately; do not claim the
-    thirteen verified per-100-mL candidates until live publication proves them.
+    fifteen verified per-100-mL candidates until live publication proves them.
