@@ -1961,6 +1961,7 @@ describe("Robotoff label evidence", () => {
       })] }), { status: 200 }),
     });
     expect(result.outcomes).toEqual({ candidate: 1, no_prediction: 0, rejected: 0, failed: 0 });
+    expect(result.manifest.adapterVersion).toBe("robotoff-api-v4");
     const staged = JSON.parse((await readFile(result.stagedPath, "utf8")).trim()) as {
       validationIssues: Array<{ code: string }>;
       rawEvidence: { candidate: Record<string, unknown> };
