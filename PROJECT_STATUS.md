@@ -144,8 +144,10 @@ must pass desktop/mobile verification.
 - 2026-07-16 — nutrition-label automation now restores prior response evidence only when both the complete staged-source hash and upstream export hash match a checksum-validated artifact; changed snapshots fetch current evidence and request-schema mismatches still refetch per barcode, avoiding two-hour no-op API traversals without weakening freshness
 - 2026-07-16 — exact-snapshot response restoration is consolidated into one checksum-validating local action and applied to richer product enrichment plus nutrition and ingredient label extraction; all adapters still validate their own response schema and refetch incompatible checkpoints
 - 2026-07-16 — official source refresh `29509034567` traversed all 4,535,553 export rows and exactly reproduced the current 21,188-row India slice as 17,732 staged records plus 3,456 exclusions, with zero new, changed, missing, duplicate, or continuity-drift records and all five snapshot checksums passing
-- 2026-07-16 — official adapter-v4 nutrition run `29509879367` restored the exact checksum-validated response cohort and reconciled all 5,944 eligible barcodes in under two minutes to 1,354 candidate, 806 no-prediction, 3,784 rejected, and zero failed outcomes; artifact `8380178442` contains 5,950 valid checksums and 273 valid per-100-mL records across 215 barcodes with zero candidate/hash failures, while protected publication again failed before D1 access because production credentials remain unavailable
+- 2026-07-16 — official adapter-v4 nutrition run `29509879367` restored the exact checksum-validated response cohort and reconciled all 5,944 eligible barcodes in under two minutes to 1,354 candidate, 806 no-prediction, 3,784 rejected, and zero failed outcomes; artifact `8380178442` contains 5,950 valid checksums and 273 valid per-100-mL records across 215 barcodes with zero candidate/hash failures, while its protected publication attempt still encountered the then-empty credential gate
 - 2026-07-16 — ingredient artifact audit found that normalized ledgers were checksummed but retained raw response files were not; adapter v2 now requires the response set to exactly match the eligible GTIN cohort and binds every raw response into the portable checksum ledger before it can be reused or published
+- 2026-07-16 — current exact-snapshot fan-out is complete: enrichment run `29510555828` accounts for all 17,284 barcodes with 6,355 enriched, 10,884 unchanged, 45 not found, and zero failures across 179 checksums; ingredient run `29511054187` accounts for all 5,196 eligible GTINs with 3,358 candidate, 1,739 no-prediction, 99 rejected, and zero failures across 5,204 checksums including every raw response
+- 2026-07-16 — protected publication credentials are now present: automatic run `29511127992` validated and downloaded the exact adapter-v2 ingredient artifact, then detected pending migration `0007_review_queue_indexes.sql` and failed before pre-state capture, import generation/application, or live verification; durable trigger and artifact evidence is retained as artifact `8380669231`
 
 ## Products
 
@@ -247,15 +249,13 @@ must pass desktop/mobile verification.
     workflow diagnostics.
 15. Deploy the new label-review UI only after rendered desktop/mobile visual and
     accessibility verification succeeds.
-16. Blocked data refresh: protected automatic evidence publication requires the
-    GitHub `production` environment to provide the existing Cloudflare
-    credentials before catalog or reviewed-evidence workflows can read or write
-    D1, and pending migration `0007_review_queue_indexes.sql` requires an
-    explicit production migration before automatic publication can proceed.
-    Runs `29449999090`,
-    `29474290721`, and automatic source proof `29495130626` failed with empty
-    credential variables before applying data; the exact SYNTHA-6 verification bundle and the eight-decision
-    incomplete-candidate rejection bundle remain committed and replayable.
+16. Blocked data refresh: protected Cloudflare credentials are now configured,
+    but pending migration `0007_review_queue_indexes.sql` requires an explicit
+    production migration before automatic publication can proceed. Automatic
+    run `29511127992` proved the current credential and artifact route, then
+    failed closed before import or write; earlier runs `29449999090`,
+    `29474290721`, and `29495130626` remain durable evidence of the prior empty
+    credential state.
 17. Run a new source-complete nutrition-label extraction with per-100-mL support,
     reconcile every eligible barcode, review exact liquid package images, and
     publish only source/hash-matched decisions before claiming any verified
