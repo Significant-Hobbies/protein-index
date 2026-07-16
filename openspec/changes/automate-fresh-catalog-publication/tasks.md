@@ -26,7 +26,7 @@
 
 ## 5. Production proof and handoff
 
-- [ ] 5.1 Manually dispatch one complete `Source sync` on `main` and prove automatic enrichment/extraction fan-out uses the exact snapshot artifact.
+- [x] 5.1 Manually dispatch one complete `Source sync` on `main` and prove automatic enrichment/extraction fan-out uses the exact snapshot artifact.
 - [ ] 5.2 Monitor all serialized automatic publication runs and verify exact ingestion hashes, non-empty/non-regressing counts, unchanged verified counts, and healthy live API responses.
 - [ ] 5.3 Replay one exact successful artifact and prove products, source records, reviews, and decisions remain duplicate-free.
 - [ ] 5.4 Archive the OpenSpec change only after every requirement and production proof is evidenced.

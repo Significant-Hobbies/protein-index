@@ -111,6 +111,8 @@ must pass desktop/mobile verification.
 - 2026-07-16 — direct API verification reproduced intermittent Open Food Facts multi-code `503` responses while the single-product endpoint and successful search responses remained valid; enrichment now exhausts its bounded retry policy before recursively splitting a batch, avoiding request amplification on transient failures while preserving split recovery and fail-closed barcode accounting for persistent failures; the workflow also independently reconciles manifest, outcome, staged, index, exclusion, response-checkpoint, and source-hash evidence before artifact upload
 - 2026-07-16 — API enrichment v6 adds a bounded official single-product endpoint fallback when repeated search failures isolate to one GTIN; successful records and official not-found responses retain distinct terminal outcomes, fallback use is counted in the artifact report, and exhausted failures still prevent source-complete publication
 - 2026-07-16 — protected automatic fresh-evidence publication implemented for successful default-branch discovery, API-enrichment, nutrition-label, and ingredient-label artifacts: exact workflow/run/artifact/SHA routing, fixed 20% discovery-drop guard, streamed no-verification validation, pending-migration refusal, completeness-monotonic nutrition selection, serialized D1 writes, exact pre/postconditions, live API checks, replay evidence, and 90-day diagnostics are covered locally without granting the path schema, decision, retailer, or deployment authority
+- 2026-07-16 — automatic-chain proof source run `29494734645` completed on `d889b40`: the current official export again reconciled 4,535,553 rows to 21,188 India records, 17,732 staged products, and 3,456 exclusions with zero continuity drift; exact-SHA API run `29495130622`, nutrition run `29495130610`, ingredient run `29495130714`, and source publication run `29495130626` all launched from that snapshot and validated its download before processing
+- 2026-07-16 — automatic source publication run `29495130626` passed route, exact-SHA contract, artifact download, portable checksums, and all 17,732 streamed no-verification records, retained evidence artifact `automatic-publication-evidence-29494734645-29495130626`, then failed at its first Wrangler command because both protected Cloudflare credential variables were empty; no migration, D1 write, live-data check, or success claim occurred
 
 ## Products
 
@@ -212,7 +214,7 @@ must pass desktop/mobile verification.
     accessibility verification succeeds.
 16. Blocked: the GitHub `production` environment must provide the existing
     Cloudflare publication credentials before protected catalog or reviewed-
-    evidence workflows can read or write D1. Runs `29449999090` and
-    `29474290721` both failed with empty credential variables before applying
-    data; the exact SYNTHA-6 verification bundle and the eight-decision
+    evidence workflows can read or write D1. Runs `29449999090`,
+    `29474290721`, and automatic source proof `29495130626` failed with empty
+    credential variables before applying data; the exact SYNTHA-6 verification bundle and the eight-decision
     incomplete-candidate rejection bundle remain committed and replayable.
