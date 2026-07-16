@@ -117,6 +117,46 @@ jobs:
           done
           exit "$status"
 
+      - name: Verify terminal barcode accounting
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readdir, readFile } from 'node:fs/promises';
+          const directory = '.data/enrichment';
+          const manifest = JSON.parse(await readFile(`${directory}/manifest.json`, 'utf8'));
+          const report = JSON.parse(await readFile(`${directory}/report.json`, 'utf8'));
+          const sourceManifest = JSON.parse(await readFile('.data/source-snapshot/manifest.json', 'utf8'));
+          const lineCount = async (name) => {
+            const text = await readFile(`${directory}/${name}`, 'utf8');
+            return text.trim() ? text.trimEnd().split('\n').length : 0;
+          };
+          const failures = [];
+          const outcomes = report.outcomes ?? {};
+          const accountedOutcomes = ['enriched', 'unchanged', 'not_found', 'rejected', 'failed']
+            .reduce((sum, key) => sum + (Number.isSafeInteger(outcomes[key]) ? outcomes[key] : 0), 0);
+          const exclusions = outcomes.not_found + outcomes.rejected + outcomes.failed;
+          if (manifest.source !== 'open_food_facts_api') failures.push('unexpected enrichment source');
+          if (manifest.mode !== 'production') failures.push('enrichment mode is not production');
+          if (manifest.sourceComplete !== true || report.sourceComplete !== true) failures.push('enrichment is incomplete');
+          if (manifest.terminalEvidence !== 'end_of_file') failures.push('enrichment did not exhaust the configured barcode set');
+          if (report.inputManifestHash !== sourceManifest.inputHash) failures.push('source snapshot hash does not match the enrichment report');
+          if (report.accountedBarcodes !== report.requestedBarcodes || accountedOutcomes !== report.requestedBarcodes) failures.push('barcode outcome accounting does not reconcile');
+          if (manifest.recordsRead !== report.requestedBarcodes || manifest.indiaRecords !== report.requestedBarcodes) failures.push('manifest barcode counts do not match the report');
+          if (manifest.stagedRecords !== report.stagedRecords || report.stagedRecords + exclusions !== report.requestedBarcodes) failures.push('staged and excluded barcode counts do not reconcile');
+          if (report.outcomes?.failed !== 0) failures.push('enrichment contains failed barcodes');
+          if (report.exclusions?.records !== exclusions || report.exclusions?.reconcilesIndiaSlice !== true) failures.push('exclusion accounting does not reconcile');
+          if (await lineCount('outcomes.jsonl') !== report.requestedBarcodes) failures.push('outcome ledger line count does not match requested barcodes');
+          if (await lineCount('staged-products.jsonl') !== report.stagedRecords) failures.push('staged-product line count does not match the report');
+          if (await lineCount('source-index.jsonl') !== report.stagedRecords) failures.push('source index line count does not match staged products');
+          if (await lineCount('exclusions.jsonl') !== exclusions) failures.push('exclusion ledger line count does not match excluded barcodes');
+          const responseFiles = (await readdir(`${directory}/responses`)).filter((name) => /^batch-\d+\.json$/.test(name));
+          const errorFiles = (await readdir(`${directory}/responses`)).filter((name) => name.endsWith('.error.json'));
+          if (responseFiles.length !== report.batches) failures.push('response checkpoint count does not match report batches');
+          if (errorFiles.length !== 0) failures.push('terminal response error checkpoints remain');
+          if (failures.length) throw new Error(failures.join('; '));
+          NODE
+
       - name: Record enrichment checksums
         shell: bash
         run: |
