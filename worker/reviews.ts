@@ -366,6 +366,23 @@ export async function resolveReview(
       .bind(review.product_id, review.source_record_id, evidenceUrl ?? candidate.imageUrl,
         candidate.observedAt, decidedAt,
         `${rationale} [Robotoff ${candidate.modelName} ${candidate.modelVersion}; prediction ${candidate.predictionId}; image ${candidate.imageId}]`));
+    const nutritionReasons: string[] = [];
+    if ((nutrition.proteinGrams! / nutrition.calories!) * 100 >= 10) nutritionReasons.push("protein_at_least_10g_per_100kcal");
+    if (((nutrition.proteinGrams! * 4) / nutrition.calories!) * 100 >= 20) nutritionReasons.push("protein_at_least_20_percent_calories");
+    statements.push(db.prepare(`UPDATE products SET
+      nutritionally_protein_dense = CASE WHEN ? = 1 OR (? * serving_size_grams / 100.0 >= 10) THEN 1 ELSE 0 END,
+      nutrition_reasons_json = CASE WHEN ? * serving_size_grams / 100.0 >= 10
+        THEN json_insert(?, '$[#]', 'protein_at_least_10g_per_serving') ELSE ? END,
+      classifier_version = 'protein-v1', updated_at = ? WHERE id = ?`)
+      .bind(
+        nutritionReasons.length > 0 ? 1 : 0,
+        nutrition.proteinGrams,
+        nutrition.proteinGrams,
+        JSON.stringify(nutritionReasons),
+        JSON.stringify(nutritionReasons),
+        decidedAt,
+        review.product_id,
+      ));
   } else if (review.product_id && decision === "verify_nutrition") {
     statements.push(db.prepare("UPDATE nutrition_facts SET status = 'verified', confidence = 'high', label_verified_at = ?, updated_at = ? WHERE product_id = ?")
       .bind(decidedAt, decidedAt, review.product_id));
@@ -387,6 +404,8 @@ export async function resolveReview(
       .bind(decidedAt, review.product_id));
     statements.push(db.prepare("UPDATE field_observations SET selected = 0 WHERE product_id = ? AND field_path LIKE 'nutrition.%'")
       .bind(review.product_id));
+    statements.push(db.prepare("UPDATE products SET nutritionally_protein_dense = NULL, nutrition_reasons_json = '[]', updated_at = ? WHERE id = ?")
+      .bind(decidedAt, review.product_id));
   }
   if (
     review.product_id

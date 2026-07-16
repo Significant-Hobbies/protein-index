@@ -892,6 +892,8 @@ describe("Open Food Facts bulk staging", () => {
     expect(database.prepare("SELECT (SELECT COUNT(*) FROM products) AS products, (SELECT COUNT(*) FROM source_records) AS source_records, (SELECT COUNT(*) FROM review_items) AS reviews, (SELECT COUNT(*) FROM evidence_decisions) AS decisions").get()).toEqual(beforeReplay);
 
     database.exec("UPDATE nutrition_facts SET status = 'verified', authority = 100, calories = 999, label_verified_at = '2026-07-16T12:30:00.000Z'");
+    database.exec(`UPDATE products SET nutritionally_protein_dense = 1,
+      nutrition_reasons_json = '["protein_at_least_20_percent_calories"]'`);
     const newerCommunity = structuredClone(normalized);
     newerCommunity.nutrition.per100g.calories = 370;
     const automaticSql = await writeImport("open_food_facts", newerCommunity, "2026-07-16T13:00:00.000Z", "automatic", true);
@@ -900,6 +902,10 @@ describe("Open Food Facts bulk staging", () => {
       status: "verified",
       authority: 100,
       calories: 999,
+    });
+    expect(database.prepare("SELECT nutritionally_protein_dense, nutrition_reasons_json FROM products").get()).toMatchObject({
+      nutritionally_protein_dense: 1,
+      nutrition_reasons_json: '["protein_at_least_20_percent_calories"]',
     });
     database.close();
   });

@@ -891,6 +891,9 @@ describe("Worker catalog API", () => {
     const staleFact = await env.DB.prepare("SELECT status, label_verified_at FROM nutrition_facts WHERE product_id = ?")
       .bind(source.product_id).first<{ status: string; label_verified_at: string | null }>();
     expect(staleFact).toEqual({ status: "conflict", label_verified_at: null });
+    const staleClassification = await env.DB.prepare(`SELECT nutritionally_protein_dense, nutrition_reasons_json
+      FROM products WHERE id = ?`).bind(source.product_id).first<Record<string, unknown>>();
+    expect(staleClassification).toEqual({ nutritionally_protein_dense: null, nutrition_reasons_json: "[]" });
     const staleOutcome = await env.DB.prepare("SELECT COUNT(*) AS count FROM evidence_outcomes WHERE product_id = ? AND field_family = 'nutrition'")
       .bind(source.product_id).first<{ count: number }>();
     expect(staleOutcome?.count).toBe(0);
@@ -1010,6 +1013,13 @@ describe("Worker catalog API", () => {
     const fact = await env.DB.prepare("SELECT calories, protein_grams, status, authority FROM nutrition_facts WHERE product_id = ?")
       .bind(source.product_id).first<Record<string, unknown>>();
     expect(fact).toEqual({ calories: 365, protein_grams: 25, status: "verified", authority: 100 });
+    const classification = await env.DB.prepare(`SELECT nutritionally_protein_dense, nutrition_reasons_json, classifier_version
+      FROM products WHERE id = ?`).bind(source.product_id).first<Record<string, unknown>>();
+    expect(classification).toEqual({
+      nutritionally_protein_dense: 1,
+      nutrition_reasons_json: JSON.stringify(["protein_at_least_20_percent_calories"]),
+      classifier_version: "protein-v1",
+    });
 
     await applyQueries(applyStatements);
     const replayed = await env.DB.prepare(`SELECT

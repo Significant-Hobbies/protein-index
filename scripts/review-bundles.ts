@@ -508,6 +508,22 @@ export async function emitReviewDecisionSql(
         fibre_grams = excluded.fibre_grams, sodium_mg = excluded.sodium_mg,
         label_verified_at = excluded.label_verified_at, observed_at = excluded.observed_at,
         updated_at = excluded.updated_at;`);
+    const calories = nutrition.calories;
+    const protein = nutrition.proteinGrams;
+    if (calories === null || protein === null) throw new Error(`Nutrition verify decision ${decision.id} is missing calories or protein`);
+    const nutritionReasons: string[] = [];
+    if ((protein / calories) * 100 >= 10) nutritionReasons.push("protein_at_least_10g_per_100kcal");
+    if (((protein * 4) / calories) * 100 >= 20) nutritionReasons.push("protein_at_least_20_percent_calories");
+    const servingReason = `${protein} * serving_size_grams / 100.0 >= 10`;
+    const baseReasons = sql(JSON.stringify(nutritionReasons));
+    statements.push(`UPDATE products SET
+      nutritionally_protein_dense = CASE WHEN ${nutritionReasons.length > 0 ? "1" : "0"}
+        OR (${servingReason}) THEN 1 ELSE 0 END,
+      nutrition_reasons_json = CASE WHEN ${servingReason}
+        THEN json_insert(${baseReasons}, '$[#]', 'protein_at_least_10g_per_serving')
+        ELSE ${baseReasons} END,
+      classifier_version = 'protein-v1', updated_at = ${sql(decision.decidedAt)}
+      WHERE id = ${sql(decision.productId)};`);
     statements.push(`UPDATE field_observations SET selected = 0
       WHERE product_id = ${sql(decision.productId)} AND field_path LIKE 'nutrition.%';`);
     for (const [field, unit] of nutritionFields) {
