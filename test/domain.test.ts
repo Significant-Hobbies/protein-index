@@ -61,6 +61,7 @@ describe("GTIN and identity normalization", () => {
 
   it("normalizes text and mass without confusing liquid volume", () => {
     expect(normalizeText("  Café & Whey™  ")).toBe("cafe and whey");
+    expect(normalizeText("β-galactosidase enzyme")).toBe("beta galactosidase enzyme");
     expect(parseQuantity("Net wt. 1.5 kg")?.grams).toBe(1500);
     expect(parseQuantity("250 ml")?.grams).toBeNull();
     expect(parseQuantity("1 scoop (38g)")?.grams).toBe(38);
@@ -420,6 +421,13 @@ describe("ingredient intelligence", () => {
     expect(parsed.map(({ normalizedName }) => normalizedName)).toEqual(["whey blend", "cocoa", "flavour"]);
     expect(parsed[0]?.percentage).toBe(70);
     expect(parsed[0]?.children.map(({ normalizedName }) => normalizedName)).toEqual(["concentrate", "isolate"]);
+  });
+
+  it("separates top-level ampersand ingredients without splitting hyphenated names", () => {
+    expect(parseIngredients("Milk Solids & Vinegar").map(({ normalizedName }) => normalizedName))
+      .toEqual(["milk solids", "vinegar"]);
+    expect(parseIngredients("Mono- & diglycerides, salt").map(({ normalizedName }) => normalizedName))
+      .toEqual(["mono and diglycerides", "salt"]);
   });
 
   it("keeps impossible percentages in raw evidence but not normalized values", () => {

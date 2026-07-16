@@ -9,7 +9,10 @@ function splitTopLevel(value: string): string[] {
     const char = value[index];
     if (char === "(" || char === "[") depth += 1;
     if (char === ")" || char === "]") depth = Math.max(0, depth - 1);
-    if ((char === "," || char === ";") && depth === 0) {
+    const ampersandSeparatesIngredients = char === "&"
+      && depth === 0
+      && value.slice(start, index).trimEnd().at(-1) !== "-";
+    if (((char === "," || char === ";") && depth === 0) || ampersandSeparatesIngredients) {
       parts.push(value.slice(start, index));
       start = index + 1;
     }

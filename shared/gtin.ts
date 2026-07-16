@@ -30,6 +30,7 @@ export function hasValidGtinCheckDigit(digits: string): boolean {
 export function normalizeText(value: string | null | undefined): string {
   return (value ?? "")
     .replace(/[™®©]/g, "")
+    .replace(/[βΒ]/g, " beta ")
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
