@@ -150,6 +150,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — protected publication credentials are now present: automatic run `29511127992` validated and downloaded the exact adapter-v2 ingredient artifact, then detected pending migration `0007_review_queue_indexes.sql` and failed before pre-state capture, import generation/application, or live verification; durable trigger and artifact evidence is retained as artifact `8380669231`
 - 2026-07-16 — exact-image review of 16 priority per-100-mL records from nutrition artifact `8380178442` produced checksummed bundle `review-230fca7ea00663c6c05e`: three source/hash-bound candidates match every supported declared value and eleven are rejected for omitted, misread, dimensionally wrong, or inexact label values; Red Bull and Mogu Mogu remain outside the bundle because their otherwise reviewed images are represented as cross-image conflicts rather than decision-eligible candidates. The bundle matches the unpublished artifact exactly and does not change verified coverage before protected source publication.
 - 2026-07-16 — the next 24 decision-eligible liquid labels were reviewed against their exact images in checksummed bundle `review-9c7ac1f9e044ed7bce6e`: RAW Coconut Water, RAW Cranberry Refresher, Pepsi, Nimbooz, and Gowardhan Cow Milk match every supported declaration, while 19 candidates are rejected for missing sodium/fibre/sugar/fat, incorrect physical basis, unsupported values, or serving-scale errors. Across both liquid bundles, 38 of 258 decision-eligible records covering 36 of 209 GTINs now have exact artifact-bound decisions; no live verified count changes before protected publication.
+- 2026-07-16 — a third 24-record liquid-label batch was checked against the exact retained images in checksummed bundle `review-6b5e8b66259669560d75`: Mogu Mogu Lychee, Coca-Cola Original, Frantoi Cutrera olive oil, Thums Up, and Storia Pomegranate match every supported declaration, while 19 records are rejected for omitted nutrients, wrong dimensions, incorrect values, or duplicate product evidence. Across all three bundles, 62 of 258 decision-eligible records covering 57 of 209 GTINs now have exact artifact-bound decisions, including 13 pending verifications; the remaining 196 records span 166 GTINs, and live coverage is unchanged before protected publication.
 
 ## Products
 
@@ -260,8 +261,9 @@ must pass desktop/mobile verification.
     credential state.
 17. Publish the exact adapter-v4 nutrition artifact only after the pending
     production migration is explicitly approved, then source-check and publish
-    liquid bundles `review-230fca7ea00663c6c05e` and
-    `review-9c7ac1f9e044ed7bce6e` with exact postconditions and replay. Continue
-    reviewing the remaining 220 decision-eligible records across 173 GTINs and
+    liquid bundles `review-230fca7ea00663c6c05e`,
+    `review-9c7ac1f9e044ed7bce6e`, and
+    `review-6b5e8b66259669560d75` with exact postconditions and replay. Continue
+    reviewing the remaining 196 decision-eligible records across 166 GTINs and
     resolve the two audited cross-image conflicts separately; do not claim the
-    eight verified per-100-mL candidates until live publication proves them.
+    thirteen verified per-100-mL candidates until live publication proves them.
