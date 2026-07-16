@@ -99,6 +99,11 @@ pipeline never assumes that one millilitre weighs one gram. Protein per 100
 calories remains comparable across both bases, while pack-mass and price metrics
 stay unavailable without compatible mass evidence.
 
+The GitHub extraction workflow reuses retained Robotoff responses only when the
+complete staged-source hash and upstream export hash exactly match a previously
+checksummed artifact. A changed source snapshot fetches current responses; a
+request-schema mismatch is rejected by the adapter and fetched again.
+
 ## Automatic fresh-evidence publication
 
 Successful default-branch runs of `Source sync`, API enrichment, nutrition-label
