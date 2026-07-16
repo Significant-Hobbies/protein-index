@@ -1,4 +1,5 @@
 import type { CatalogProduct, CatalogResponse, ProductDetailResponse } from "../shared/api";
+import { normalizeText } from "../shared/gtin";
 import { calculateMetrics } from "../shared/metrics";
 import { hasNutritionErrors, validateNutrition } from "../shared/nutrition";
 import { PRODUCT_CATEGORIES, type EvidenceStatus, type NormalizedIngredient, type ProductCategory } from "../shared/types";
@@ -155,6 +156,8 @@ export function validateSearch(input: URLSearchParams): { value?: SearchInput; e
     pageSize: number("pageSize", 25),
   };
   if (value.category !== "all" && !PRODUCT_CATEGORIES.includes(value.category as ProductCategory)) return { error: "Invalid category" };
+  const searchTerms = normalizeText(value.q).split(" ").filter(Boolean);
+  if (value.q.length > 200 || searchTerms.length > 12) return { error: "Search query is too long" };
   if (!["all", "true", "false"].includes(value.marketed)) return { error: "Invalid marketed filter" };
   if (!["all", "true", "false", "unknown"].includes(value.dense)) return { error: "Invalid dense filter" };
   if (!["all", "missing", "unverified", "verified", "conflict"].includes(value.verification)) return { error: "Invalid verification filter" };
@@ -190,9 +193,11 @@ function filtersFor(input: SearchInput): { sql: string; bindings: Array<string |
   const clauses: string[] = ["p.is_active = 1"];
   const bindings: Array<string | number> = [];
   if (input.q) {
-    clauses.push("(p.name_normalized LIKE ? OR p.brand_normalized LIKE ? OR p.gtin LIKE ?)");
-    const like = `%${input.q.toLowerCase()}%`;
-    bindings.push(like, like, like);
+    for (const term of normalizeText(input.q).split(" ").filter(Boolean)) {
+      clauses.push("(p.name_normalized LIKE ? OR p.brand_normalized LIKE ? OR COALESCE(p.flavour_normalized, '') LIKE ? OR p.gtin LIKE ?)");
+      const like = `%${term}%`;
+      bindings.push(like, like, like, like);
+    }
   }
   if (input.category !== "all") { clauses.push("p.category = ?"); bindings.push(input.category); }
   if (input.marketed !== "all") { clauses.push("p.marketed_protein = ?"); bindings.push(input.marketed === "true" ? 1 : 0); }

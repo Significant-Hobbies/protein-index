@@ -364,9 +364,23 @@ describe("Worker catalog API", () => {
   });
 
   it("validates bounded search and missing records", async () => {
+    const combinedSearch = await worker.fetch("http://localhost/api/products?q=Atlas+Cocoa+Whey");
+    expect(combinedSearch.status).toBe(200);
+    const combinedCatalog = await json<CatalogResponse>(combinedSearch);
+    expect(combinedCatalog.products).toHaveLength(1);
+    expect(combinedCatalog.products[0]).toMatchObject({
+      brand: "Atlas Test Foods",
+      name: "High Protein Whey Blend",
+      flavour: "Cocoa",
+    });
+
     const invalid = await worker.fetch("http://localhost/api/products?pageSize=101");
     expect(invalid.status).toBe(400);
     expect(await json<{ error: { code: string } }>(invalid)).toMatchObject({ error: { code: "validation_error" } });
+
+    const oversized = await worker.fetch(`http://localhost/api/products?q=${"term+".repeat(13)}`);
+    expect(oversized.status).toBe(400);
+    expect(await json<{ error: { message: string } }>(oversized)).toMatchObject({ error: { message: "Search query is too long" } });
 
     const missing = await worker.fetch("http://localhost/api/products/not-a-product");
     expect(missing.status).toBe(404);
