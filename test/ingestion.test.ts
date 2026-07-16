@@ -978,7 +978,7 @@ describe("Open Food Facts rich API enrichment", () => {
         });
       },
     })).rejects.toThrow("incomplete");
-    expect(attempts).toBe(2);
+    expect(attempts).toBe(4);
     const report = JSON.parse(await readFile(join(directory, "timed-out/report.json"), "utf8")) as {
       requestTimeoutMs: number;
       sourceComplete: boolean;
@@ -1009,7 +1009,7 @@ describe("Open Food Facts rich API enrichment", () => {
           : new Response("busy", { status: 503 });
       },
     })).rejects.toThrow("incomplete");
-    expect(firstRunRequests).toBe(2);
+    expect(firstRunRequests).toBe(3);
     expect(await readFile(join(outputDirectory, "responses/batch-00002.json.error.json"), "utf8")).toContain("failed after retry");
 
     let resumedRequests = 0;
@@ -1096,6 +1096,57 @@ describe("Open Food Facts rich API enrichment", () => {
     expect(report).toMatchObject({ fallbackSplits: 0, outcomes: { failed: 0 } });
   });
 
+  it("uses the single-product endpoint after an isolated search failure", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-enrich-product-fallback-"));
+    const source = await sourceSnapshot(directory, 1);
+    const requests: string[] = [];
+    const result = await enrichOpenFoodFactsApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory: join(directory, "enriched"),
+      mode: "sample",
+      limit: null,
+      batchSize: 1,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      maximumAttempts: 2,
+      fetcher: async (input) => {
+        const url = input.toString();
+        requests.push(url);
+        if (url.includes("/api/v2/search")) return new Response("busy", { status: 503 });
+        return new Response(JSON.stringify({ status: 1, product: indiaProduct }), { status: 200 });
+      },
+    });
+    expect(requests).toHaveLength(3);
+    expect(requests.slice(0, 2).every((url) => url.includes("/api/v2/search"))).toBe(true);
+    expect(requests[2]).toContain("/api/v2/product/8900000000012");
+    expect(result.manifest.sourceComplete).toBe(true);
+    expect(result.outcomes.failed).toBe(0);
+    const report = JSON.parse(await readFile(result.reportPath, "utf8")) as { singleProductFallbacks: number };
+    expect(report.singleProductFallbacks).toBe(1);
+  });
+
+  it("records an official single-product miss as not found instead of failed", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-enrich-product-miss-"));
+    const source = await sourceSnapshot(directory, 1);
+    const result = await enrichOpenFoodFactsApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory: join(directory, "enriched"),
+      mode: "sample",
+      limit: null,
+      batchSize: 1,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      maximumAttempts: 1,
+      fetcher: async (input) => input.toString().includes("/api/v2/search")
+        ? new Response("busy", { status: 503 })
+        : new Response(JSON.stringify({ status: 0, status_verbose: "product not found" }), { status: 200 }),
+    });
+    expect(result.manifest.sourceComplete).toBe(true);
+    expect(result.outcomes).toMatchObject({ not_found: 1, failed: 0 });
+  });
+
   it("preserves successful split siblings and resumes only failed codes", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-enrich-partial-split-"));
     const source = await sourceSnapshot(directory, 2);
@@ -1119,7 +1170,7 @@ describe("Open Food Facts rich API enrichment", () => {
         return new Response(JSON.stringify({ products: [indiaProduct] }), { status: 200 });
       },
     })).rejects.toThrow("incomplete");
-    expect(firstRequests).toBe(3);
+    expect(firstRequests).toBe(4);
     const partial = JSON.parse(await readFile(join(outputDirectory, "responses/batch-00001.json"), "utf8")) as {
       response: { products: Array<{ code: string }> };
       failedCodes: string[];

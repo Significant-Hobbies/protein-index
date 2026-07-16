@@ -9,8 +9,9 @@ import { normalizeGtin } from "../../shared/gtin";
 import type { SourceManifest, StagedProduct } from "../../shared/types";
 import { normalizeOpenFoodFactsRecord } from "./open-food-facts";
 
-export const OPEN_FOOD_FACTS_API_ADAPTER_VERSION = "off-api-enrichment-v5";
+export const OPEN_FOOD_FACTS_API_ADAPTER_VERSION = "off-api-enrichment-v6";
 export const OPEN_FOOD_FACTS_MULTI_PRODUCT_URL = "https://world.openfoodfacts.org/api/v2/search";
+export const OPEN_FOOD_FACTS_SINGLE_PRODUCT_URL = "https://world.openfoodfacts.org/api/v2/product";
 export const OPEN_FOOD_FACTS_API_FIELDS = [
   "code",
   "product_name",
@@ -48,7 +49,7 @@ export const OPEN_FOOD_FACTS_API_FIELDS = [
   "states_tags",
 ].join(",");
 export const OPEN_FOOD_FACTS_API_REQUEST_SCHEMA = createHash("sha256")
-  .update(`${OPEN_FOOD_FACTS_MULTI_PRODUCT_URL}:${OPEN_FOOD_FACTS_API_FIELDS}`)
+  .update(`${OPEN_FOOD_FACTS_MULTI_PRODUCT_URL}:${OPEN_FOOD_FACTS_SINGLE_PRODUCT_URL}:${OPEN_FOOD_FACTS_API_FIELDS}`)
   .digest("hex");
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -79,6 +80,11 @@ interface EnrichmentOutcome {
 interface ApiSearchResponse {
   count?: number;
   products?: Array<Record<string, unknown>>;
+}
+
+interface ApiProductResponse {
+  status?: number;
+  product?: Record<string, unknown>;
 }
 
 interface StoredBatchResponse {
@@ -205,6 +211,51 @@ function batchUrl(codes: string[]): URL {
   return url;
 }
 
+function productUrl(code: string): URL {
+  const url = new URL(`${OPEN_FOOD_FACTS_SINGLE_PRODUCT_URL}/${encodeURIComponent(code)}`);
+  url.searchParams.set("fields", OPEN_FOOD_FACTS_API_FIELDS);
+  return url;
+}
+
+async function fetchSingleProduct(input: {
+  code: string;
+  fetcher: FetchLike;
+  userAgent: string;
+  maximumAttempts: number;
+  retryBaseMs: number;
+  requestTimeoutMs: number;
+  beforeAttempt: () => Promise<void>;
+}): Promise<ApiSearchResponse> {
+  let lastError: Error | null = null;
+  for (let attempt = 1; attempt <= input.maximumAttempts; attempt += 1) {
+    let response: Response | null = null;
+    try {
+      await input.beforeAttempt();
+      response = await input.fetcher(productUrl(input.code), {
+        headers: { Accept: "application/json", "User-Agent": input.userAgent },
+        signal: AbortSignal.timeout(input.requestTimeoutMs),
+      });
+      if (!response.ok) {
+        const retryable = response.status === 429 || response.status === 503 || response.status >= 500;
+        if (!retryable) throw new Error(`Open Food Facts product fallback returned HTTP ${response.status}`);
+        lastError = new Error(`Open Food Facts product fallback returned retryable HTTP ${response.status}`);
+      } else {
+        const body: unknown = await response.json();
+        if (!recordValue(body)) throw new Error("Open Food Facts product fallback returned an invalid response");
+        const productResponse = body as ApiProductResponse;
+        if (productResponse.status === 0 && !productResponse.product) return { count: 0, products: [] };
+        if (!recordValue(productResponse.product)) throw new Error("Open Food Facts product fallback omitted its product");
+        return { count: 1, products: [productResponse.product] };
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (response && response.status < 500 && response.status !== 429) throw lastError;
+    }
+    if (attempt < input.maximumAttempts) await sleep(retryDelay(response, attempt, input.retryBaseMs));
+  }
+  throw lastError ?? new Error("Open Food Facts product fallback failed without a response");
+}
+
 async function fetchBatch(input: {
   codes: string[];
   fetcher: FetchLike;
@@ -250,11 +301,20 @@ async function fetchBatchResilient(input: {
   requestTimeoutMs: number;
   beforeAttempt: () => Promise<void>;
   onSplit: () => void;
+  onSingleProductFallback: () => void;
   minimumSplitBatchSize: number;
 }): Promise<ResilientBatchResponse> {
   try {
     return { response: await fetchBatch(input), failedCodes: [] };
   } catch (error) {
+    if (input.codes.length === 1) {
+      input.onSingleProductFallback();
+      try {
+        return { response: await fetchSingleProduct({ ...input, code: input.codes[0]! }), failedCodes: [] };
+      } catch {
+        return { response: { count: 0, products: [] }, failedCodes: input.codes };
+      }
+    }
     if (input.codes.length <= input.minimumSplitBatchSize) return { response: { count: 0, products: [] }, failedCodes: input.codes };
     input.onSplit();
     const middle = Math.ceil(input.codes.length / 2);
@@ -342,6 +402,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
   let fetchedBatches = 0;
   let resumedBatches = 0;
   let fallbackSplits = 0;
+  let singleProductFallbacks = 0;
   let lastFetchStartedAt: number | null = null;
   const coverage = {
     nutritionPairs: {
@@ -375,6 +436,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
       lastFetchStartedAt = Date.now();
     },
     onSplit: () => { fallbackSplits += 1; },
+    onSingleProductFallback: () => { singleProductFallbacks += 1; },
   });
   const fetchCodes = async (codes: string[]): Promise<ResilientBatchResponse> => {
     let response: ApiSearchResponse = { count: 0, products: [] };
@@ -572,6 +634,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
     fetchedBatches,
     resumedBatches,
     fallbackSplits,
+    singleProductFallbacks,
     coverage: {
       nutritionPairs: {
         ...coverage.nutritionPairs,
