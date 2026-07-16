@@ -30,7 +30,7 @@
 
 - [x] 5.1 Add a manually triggered GitHub workflow for full ingredient-image extraction with bounded retries, resumable artifacts, exact accounting, and checksums.
 - [x] 5.2 Complete the full eligible image cohort, validate its artifact and accounting, and publish only the review-gated source records. (2026-07-16: 5,196 eligible GTINs reconciled to 3,358 candidate, 1,739 no-prediction, 99 rejected, and zero failed outcomes; 5,661 image-level candidates published review-only.)
-- [ ] 5.3 Review a bounded real source-matched candidate set, publish its decisions, and verify the exact live verified-ingredient and outstanding-ingredient deltas.
+- [x] 5.3 Review a bounded real source-matched candidate set, publish its decisions, and verify the exact live verified-ingredient and outstanding-ingredient deltas. (2026-07-16: exact Threptin candidate `e5ffca0550663e0432f2872b68e1b4ce73b93b7f43b49e70bddf780d32d44351` rejected for visibly unsupported OCR fragments; verified ingredients stayed 0, open candidates changed 5,661→5,660, and independent community ingredients remained intact.)
 
 ## 6. Quality and release gate
 

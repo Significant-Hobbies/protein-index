@@ -71,6 +71,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — review-only ingredient extraction, exact reviewer transcription, durable replay/drift invalidation, checksum bundles, protected publication, and responsive evidence UI implemented; 57 unit/domain tests and 22 Worker+D1 tests pass
 - 2026-07-16 — first source-matched nutrition rejection published after exact remote source/hash validation; postconditions recorded one durable decision, promoted zero facts, and resolved only the rejected candidate
 - 2026-07-16 — full ingredient-image extraction completed in GitHub Actions run `29450296658`: all 5,196 eligible GTINs reconciled to 3,358 candidate, 1,739 no-prediction, 99 rejected, and zero failed outcomes; 5,661 image-level candidates were validated and published review-only, leaving verified ingredients at zero
+- 2026-07-16 — first exact source-matched ingredient rejection published for a Threptin label with visibly unsupported OCR fragments; postconditions resolved one candidate, kept verified ingredients at zero, reduced the open ingredient queue from 5,661 to 5,660, and preserved independent community ingredients
 
 ## Products
 
@@ -143,7 +144,7 @@ must pass desktop/mobile verification.
 3. Apply for GS1 India DataKart access and map its commercial/licensing constraints.
 4. Validate Amazon and Flipkart affiliate integrations against current India terms.
 5. Evaluate one quick-commerce provider using a coverage, freshness, legality, and cost scorecard.
-6. Review the 5,661 open ingredient-label candidates against their exact source
+6. Review the 5,660 open ingredient-label candidates against their exact source
    images; publish only source/hash-matched decisions and retain the immutable OCR.
 7. Deferred: ONDC offer ingestion until the core catalog and retailer reconciliation are stable.
 8. Deferred: expand the generic nutrient/product-kind model into full macros,
