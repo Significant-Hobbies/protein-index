@@ -279,12 +279,14 @@ describe("Worker catalog API", () => {
     expect(coverage.disconnectedSources).toContain("gs1_india_datakart");
   });
 
-  it("counts Robotoff extraction candidates once per product", async () => {
+  it("counts Robotoff extraction candidates once per product across review statuses", async () => {
     const product = await env.DB.prepare("SELECT id, gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
       .first<{ id: string; gtin: string }>();
     if (!product) throw new Error("Expected a seeded product");
     await insertRobotoffReview({ suffix: "coverage-first", evidence: robotoffEvidence(product.gtin, { calories: 360, proteinGrams: 25 }) });
     await insertRobotoffReview({ suffix: "coverage-second", evidence: robotoffEvidence(product.gtin, { calories: 365, proteinGrams: 26 }) });
+    await env.DB.prepare("UPDATE review_items SET status = 'resolved' WHERE id = 'rev_robotoff_coverage-first'").run();
+    await env.DB.prepare("UPDATE review_items SET status = 'dismissed' WHERE id = 'rev_robotoff_coverage-second'").run();
 
     const response = await worker.fetch("http://localhost/api/coverage");
     expect(response.status).toBe(200);
