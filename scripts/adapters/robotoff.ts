@@ -106,12 +106,12 @@ function completeCore(nutrition: NutritionPer100g): boolean {
   return nutrition.proteinGrams !== null && nutrition.calories !== null && nutrition.calories > 0;
 }
 
-function mergeMissingNutrition(primary: NutritionPer100g, fallback: NutritionPer100g): NutritionPer100g {
+function mergeSupplementaryServingNutrition(primary: NutritionPer100g, fallback: NutritionPer100g): NutritionPer100g {
   return {
     calories: primary.calories ?? fallback.calories,
     proteinGrams: primary.proteinGrams ?? fallback.proteinGrams,
     carbohydrateGrams: primary.carbohydrateGrams ?? fallback.carbohydrateGrams,
-    sugarGrams: primary.sugarGrams ?? fallback.sugarGrams,
+    sugarGrams: primary.sugarGrams,
     fatGrams: primary.fatGrams ?? fallback.fatGrams,
     saturatedFatGrams: primary.saturatedFatGrams ?? fallback.saturatedFatGrams,
     fibreGrams: primary.fibreGrams ?? fallback.fibreGrams,
@@ -228,7 +228,19 @@ function parsePrediction(
       normalized = null;
       basis = null;
     } else if (normalized) {
-      normalized = mergeMissingNutrition(normalized, converted);
+      if (normalized.sugarGrams === null && converted.sugarGrams !== null) {
+        issues.push({
+          code: "robotoff_ambiguous_total_sugar_basis",
+          message: "A serving-column sugar value cannot safely backfill a missing per-100-g total-sugar field.",
+          severity: "warning",
+          field: "sugarGrams",
+          details: { predictionId, servingSugarGrams: converted.sugarGrams },
+        });
+      }
+      normalized = mergeSupplementaryServingNutrition(normalized, converted);
+      if (!("energy-kcal_100g" in rawNutrients) && "energy-kcal_serving" in rawNutrients && converted.calories !== null) {
+        normalized.calories = converted.calories;
+      }
     } else if (!normalized) {
       normalized = converted;
       basis = "per_serving";
@@ -236,7 +248,19 @@ function parsePrediction(
   } else if (normalized) {
     const converted = normalizePerServing(perServing, context.servingSizeGrams);
     if (converted && hasComparableCore(normalized, converted) && !differs(normalized, converted)) {
-      normalized = mergeMissingNutrition(normalized, converted);
+      if (normalized.sugarGrams === null && converted.sugarGrams !== null) {
+        issues.push({
+          code: "robotoff_ambiguous_total_sugar_basis",
+          message: "A serving-column sugar value cannot safely backfill a missing per-100-g total-sugar field.",
+          severity: "warning",
+          field: "sugarGrams",
+          details: { predictionId, servingSugarGrams: converted.sugarGrams },
+        });
+      }
+      normalized = mergeSupplementaryServingNutrition(normalized, converted);
+      if (!("energy-kcal_100g" in rawNutrients) && "energy-kcal_serving" in rawNutrients && converted.calories !== null) {
+        normalized.calories = converted.calories;
+      }
     }
   }
   if (!normalized || !basis) {

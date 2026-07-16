@@ -1788,6 +1788,28 @@ describe("Robotoff label evidence", () => {
     });
   });
 
+  it("does not backfill total sugar from a serving column and prefers declared kcal over converted kJ", () => {
+    const result = parseRobotoffNutritionEvidence({ image_predictions: [prediction(23, "21", {
+      "energy-kj_100g": nutrient(459, "kJ"),
+      proteins_100g: nutrient(19.1, "g"),
+      carbohydrates_100g: nutrient(5.9, "g"),
+      "energy-kcal_serving": nutrient(187, "kcal"),
+      proteins_serving: nutrient(32.4, "g"),
+      sugars_serving: nutrient(0, "g"),
+    })] }, { ...context, servingSizeGrams: 170 });
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      basis: "per_100g",
+      nutritionPer100g: {
+        calories: 110,
+        proteinGrams: 19.1,
+        carbohydrateGrams: 5.9,
+        sugarGrams: null,
+      },
+    });
+    expect(result.issues).toContainEqual(expect.objectContaining({ code: "robotoff_ambiguous_total_sugar_basis" }));
+  });
+
   it("does not assume grams for unitless sodium", () => {
     const response = { image_predictions: [prediction(21, "19", {
       "energy-kcal_100g": nutrient(316, "kcal"),
