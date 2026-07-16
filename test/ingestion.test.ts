@@ -478,6 +478,33 @@ describe("Reviewed evidence bundles", () => {
     expect(sql).toContain("'ingredients.raw'");
     expect(sql).toContain("'ingredients', 'verified'");
 
+    const whitespaceCandidate = { ...ingredients.payload.candidate, entityText: "Casein,  sucrose" };
+    const whitespaceDecision: IngredientEvidenceDecisionInput = {
+      ...ingredients,
+      id: "evd_ingredient_whitespace",
+      sourceRecordKey: `00001241000224:${whitespaceCandidate.predictionId}:${whitespaceCandidate.entityIndex}:whitespace`,
+      sourceRecordId: "src_ingredient_whitespace",
+      sourceContentHash: "source_ingredient_whitespace",
+      candidateHash: await ingredientCandidateHash(whitespaceCandidate),
+      payload: {
+        ...ingredients.payload,
+        candidate: whitespaceCandidate,
+        reviewedText: "Casein,  sucrose",
+        normalizedIngredients: parseIngredients("Casein, sucrose"),
+      },
+      rationale: "Preserve  exact label spacing",
+    };
+    const whitespaceBundle = await writeReviewDecisionBundle({
+      decisions: [whitespaceDecision],
+      outputRoot: join(directory, "whitespace"),
+      createdAt: "2026-07-15T02:00:00.000Z",
+    });
+    const whitespaceSqlPath = join(directory, "ingredient-whitespace.sql");
+    await emitReviewDecisionSql(whitespaceBundle, whitespaceSqlPath);
+    const whitespaceSql = await readFile(whitespaceSqlPath, "utf8");
+    expect(whitespaceSql).toContain('"entityText":"Casein,  sucrose"');
+    expect(whitespaceSql).toContain("Preserve  exact label spacing");
+
     const ingredientOnly = await writeReviewDecisionBundle({
       decisions: [ingredients],
       outputRoot: join(directory, "ingredient-only"),

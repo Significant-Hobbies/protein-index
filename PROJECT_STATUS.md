@@ -120,6 +120,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — serving-only label candidates now fail closed when their unconverted calories/protein match the existing per-100-g source anchor but applying the alleged serving mass creates a material disagreement; the source anchor can only reject a suspect conversion and cannot promote or verify nutrition
 - 2026-07-16 — product detail responses collapse identical allergen, additive, and nutrient values contributed by multiple source records while retaining every source-specific database row and provenance observation
 - 2026-07-16 — live pre-publication validation rejected combined review bundle `review-a38aa3b03b96759fe54b` before any write because 76 nutrition decisions had parser-shaped source-hash drift; the 66 still-current ingredient decisions were isolated into checksummed bundle `review-2e577fd180832df5bc94`, which passes exact live source, candidate, product, and existing-decision validation with 65 verifies and one rejection
+- 2026-07-16 — ingredient bundle `review-2e577fd180832df5bc94` published to D1 after its postcondition gate exposed and repaired SQL whitespace compaction inside quoted evidence payloads; quote-aware compaction now preserves exact strings, and both the first corrected publication and exact replay prove 66 decisions, 65 verified ingredient facts/outcomes, zero unresolved bundle candidates, and unchanged product/source/review/decision counts on replay; the public coverage API reports 65 verified ingredient statements while verified nutrition remains zero
 
 ## Products
 
@@ -222,7 +223,9 @@ must pass desktop/mobile verification.
 16. Blocked data refresh: protected automatic evidence publication requires the
     GitHub `production` environment to provide the existing Cloudflare
     credentials before catalog or reviewed-evidence workflows can read or write
-    D1. Runs `29449999090`,
+    D1, and pending migration `0007_review_queue_indexes.sql` requires an
+    explicit production migration before automatic publication can proceed.
+    Runs `29449999090`,
     `29474290721`, and automatic source proof `29495130626` failed with empty
     credential variables before applying data; the exact SYNTHA-6 verification bundle and the eight-decision
     incomplete-candidate rejection bundle remain committed and replayable.

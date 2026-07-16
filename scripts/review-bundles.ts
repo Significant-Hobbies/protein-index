@@ -85,6 +85,35 @@ function sql(value: string | number | null): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
+function compactSql(statement: string): string {
+  let result = "";
+  let inString = false;
+  let pendingSpace = false;
+  for (let index = 0; index < statement.length; index += 1) {
+    const character = statement.charAt(index);
+    if (character === "'") {
+      if (inString && statement.charAt(index + 1) === "'") {
+        if (pendingSpace) { result += " "; pendingSpace = false; }
+        result += "''";
+        index += 1;
+        continue;
+      }
+      if (pendingSpace) { result += " "; pendingSpace = false; }
+      inString = !inString;
+      result += character;
+      continue;
+    }
+    if (!inString && /\s/.test(character)) {
+      pendingSpace = result.length > 0;
+      continue;
+    }
+    if (pendingSpace) { result += " "; pendingSpace = false; }
+    result += character;
+  }
+  if (inString) throw new Error("Generated review SQL contains an unterminated string literal");
+  return result.trim();
+}
+
 function stableId(prefix: string, value: string): string {
   return `${prefix}_${sha256Text(value).slice(0, 24)}`;
 }
@@ -520,7 +549,7 @@ export async function emitReviewDecisionSql(
   const candidateHashes = bundle.decisions.map(({ candidateHash }) => sql(candidateHash)).join(", ");
   statements.push(`SELECT COUNT(*) AS applied_decisions FROM evidence_decisions WHERE id IN (${decisionIds}) AND active = 1;`);
   statements.push(`SELECT COUNT(*) AS unresolved_candidates FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes});`);
-  const portableStatements = statements.map((statement) => statement.replace(/\s+/g, " ").trim());
+  const portableStatements = statements.map(compactSql);
   await writeFile(outputPath, `${portableStatements.join("\n")}\n`, "utf8");
   return {
     outputPath,
