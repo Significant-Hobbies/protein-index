@@ -22,6 +22,13 @@ export function finiteNumber(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+export function hasProteinEnergyConflict(nutrition: NutritionPer100g): boolean {
+  return nutrition.calories !== null
+    && nutrition.calories > 0
+    && nutrition.proteinGrams !== null
+    && nutrition.proteinGrams * 4 > nutrition.calories;
+}
+
 export function validateNutrition(nutrition: NutritionPer100g): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   for (const [field, value] of Object.entries(nutrition)) {

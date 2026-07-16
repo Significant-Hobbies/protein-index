@@ -82,6 +82,7 @@ describe("nutrition accuracy and classification", () => {
     expect(validateNutrition({ ...emptyNutrition(), calories: 0.25, proteinGrams: 10.8 })).toContainEqual(expect.objectContaining({ code: "protein_energy_exceeds_total", severity: "error" }));
     expect(validateNutrition({ ...emptyNutrition(), calories: 274, proteinGrams: 15.9, fatGrams: 69.1 })).toContainEqual(expect.objectContaining({ code: "macro_energy_exceeds_total", severity: "error" }));
     expect(validateNutrition({ ...emptyNutrition(), calories: 33, proteinGrams: 8.59, carbohydrateGrams: 28.1, fatGrams: 1.2 })).toContainEqual(expect.objectContaining({ code: "calorie_macro_mismatch", severity: "error" }));
+    expect(validateNutrition({ ...emptyNutrition(), calories: 115, proteinGrams: 29 })).not.toContainEqual(expect.objectContaining({ severity: "error" }));
   });
 
   it("normalizes a per-serving label only when serving mass exists", () => {
@@ -243,6 +244,19 @@ describe("metrics and completeness", () => {
     expect(result.proteinCaloriePercentage.value).toBeCloseTo(57.778, 3);
     expect(result.totalProteinInPack.value).toBe(260);
     expect(result.costPer25gProtein.value).toBeCloseTo(24.038, 3);
+  });
+
+  it("withholds calorie-derived protein metrics when rounded label values exceed total energy", () => {
+    const result = calculateMetrics({
+      nutrition: { ...emptyNutrition(), calories: 115, proteinGrams: 29 },
+      netQuantityGrams: 500,
+      servingSizeGrams: 50,
+      sellingPrice: 250,
+    });
+    expect(result.proteinPer100Calories).toEqual({ value: null, reason: "protein_energy_exceeds_total" });
+    expect(result.proteinCaloriePercentage).toEqual({ value: null, reason: "protein_energy_exceeds_total" });
+    expect(result.caloriesFor25gProtein).toEqual({ value: null, reason: "protein_energy_exceeds_total" });
+    expect(result.costPer25gProtein.value).toBeGreaterThan(0);
   });
 
   it("returns explicit unavailable reasons instead of infinity", () => {

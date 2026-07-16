@@ -1,4 +1,5 @@
 import type { MetricResult, NutritionPer100g, ProductMetrics } from "./types";
+import { hasProteinEnergyConflict } from "./nutrition";
 
 const unavailable = (reason: string): MetricResult => ({ value: null, reason });
 const available = (value: number): MetricResult => ({ value, reason: null });
@@ -18,20 +19,27 @@ export function calculateMetrics(input: {
   sellingPrice: number | null;
 }): ProductMetrics {
   const { nutrition, netQuantityGrams, servingSizeGrams, sellingPrice } = input;
-  const proteinPer100Calories = ratio(nutrition.proteinGrams, nutrition.calories, 100, "missing_protein_or_calories");
-  const proteinCaloriePercentage = ratio(
-    nutrition.proteinGrams === null ? null : nutrition.proteinGrams * 4,
-    nutrition.calories,
-    100,
-    "missing_protein_or_calories",
-  );
+  const proteinEnergyConflict = hasProteinEnergyConflict(nutrition);
+  const proteinPer100Calories = proteinEnergyConflict
+    ? unavailable("protein_energy_exceeds_total")
+    : ratio(nutrition.proteinGrams, nutrition.calories, 100, "missing_protein_or_calories");
+  const proteinCaloriePercentage = proteinEnergyConflict
+    ? unavailable("protein_energy_exceeds_total")
+    : ratio(
+        nutrition.proteinGrams === null ? null : nutrition.proteinGrams * 4,
+        nutrition.calories,
+        100,
+        "missing_protein_or_calories",
+      );
   const totalProtein =
     nutrition.proteinGrams !== null && netQuantityGrams !== null && netQuantityGrams > 0
       ? available((netQuantityGrams * nutrition.proteinGrams) / 100)
       : unavailable("missing_protein_or_pack_weight");
   const costPer25 = ratio(sellingPrice, totalProtein.value, 25, "missing_price_or_pack_protein");
   const proteinPerInr100 = ratio(totalProtein.value, sellingPrice, 100, "missing_price_or_pack_protein");
-  const caloriesFor25 = ratio(nutrition.calories, nutrition.proteinGrams, 25, "missing_protein_or_calories");
+  const caloriesFor25 = proteinEnergyConflict
+    ? unavailable("protein_energy_exceeds_total")
+    : ratio(nutrition.calories, nutrition.proteinGrams, 25, "missing_protein_or_calories");
   const sugarPer25 = ratio(nutrition.sugarGrams, nutrition.proteinGrams, 25, "missing_sugar_or_protein");
   const saturatedFatPer25 = ratio(
     nutrition.saturatedFatGrams,

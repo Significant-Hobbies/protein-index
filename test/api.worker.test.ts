@@ -352,6 +352,13 @@ describe("Worker catalog API", () => {
     const invalidNutrition = invalidNutritionCatalog.products.find((product) => product.id === first.id);
     expect(invalidNutrition?.metrics.proteinPer100Calories).toEqual({ value: null, reason: "nutrition_validation_error" });
     expect(invalidNutritionCatalog.products[0]?.id).not.toBe(first.id);
+    await env.DB.prepare("UPDATE nutrition_facts SET status = 'unverified', calories = 115, protein_grams = 29, carbohydrate_grams = NULL, fat_grams = NULL WHERE product_id = ?").bind(first.id).run();
+    const roundedConflictResponse = await worker.fetch("http://localhost/api/products");
+    const roundedConflictCatalog = await json<CatalogResponse>(roundedConflictResponse);
+    const roundedConflict = roundedConflictCatalog.products.find((product) => product.id === first.id);
+    expect(roundedConflict?.metrics.proteinPer100Calories).toEqual({ value: null, reason: "protein_energy_exceeds_total" });
+    expect(roundedConflict?.metrics.proteinCaloriePercentage).toEqual({ value: null, reason: "protein_energy_exceeds_total" });
+    expect(roundedConflictCatalog.products[0]?.id).not.toBe(first.id);
     await env.DB.prepare("UPDATE nutrition_facts SET status = 'verified', calories = ?, protein_grams = ?, carbohydrate_grams = ?, fat_grams = ? WHERE product_id = ?")
       .bind(first.nutrition.calories, first.nutrition.proteinGrams, first.nutrition.carbohydrateGrams, first.nutrition.fatGrams, first.id).run();
   });
