@@ -115,7 +115,8 @@ jobs:
         with:
           artifact-prefix: robotoff-ingredient-candidates-
           output-directory: .data/robotoff-ingredients
-          expected-adapter-version: robotoff-ingredients-api-v3
+          expected-source: open_food_facts_robotoff_ingredients
+          expected-request-schema: 36dbe4371ac9da9ea089a5ef8e88264e19ab6bb5764b15235561a136199b491d
           expected-workflow-name: Extract ingredient label evidence
           restore-label-proofs: "true"
 

@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { normalizeOpenFoodFactsRecord, stageOpenFoodFacts } from "../scripts/adapters/open-food-facts";
-import { enrichOpenFoodFactsApi } from "../scripts/adapters/open-food-facts-api";
-import { extractRobotoffApi, validateRobotoffNutritionArtifact } from "../scripts/adapters/robotoff-api";
-import { extractRobotoffIngredientApi, validateRobotoffIngredientArtifact } from "../scripts/adapters/robotoff-ingredients-api";
+import { enrichOpenFoodFactsApi, OPEN_FOOD_FACTS_API_REQUEST_SCHEMA } from "../scripts/adapters/open-food-facts-api";
+import { extractRobotoffApi, ROBOTOFF_API_REQUEST_SCHEMA, validateRobotoffNutritionArtifact } from "../scripts/adapters/robotoff-api";
+import { extractRobotoffIngredientApi, ROBOTOFF_INGREDIENT_REQUEST_SCHEMA, validateRobotoffIngredientArtifact } from "../scripts/adapters/robotoff-ingredients-api";
 import { parseRobotoffIngredientEvidence } from "../scripts/adapters/robotoff-ingredients";
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "../scripts/adapters/robotoff";
 import {
@@ -2215,13 +2215,18 @@ describe("Open Food Facts bulk staging", () => {
     expect(reviewed).toContain("--skip-migrations");
 
     const restore = await readFile(".github/actions/restore-exact-responses/action.yml", "utf8");
-    expect(restore).toContain("expected-adapter-version:");
+    expect(restore).toContain("expected-source:");
+    expect(restore).toContain("expected-request-schema:");
+    expect(restore).not.toContain("expected-adapter-version:");
     expect(restore).toContain("expected-workflow-name:");
     expect(restore).toContain("github.paginate");
     expect(restore).toContain("run.conclusion === 'success'");
     expect(restore).toContain("digest !== artifact.digest");
     expect(restore).toContain("restore-label-proofs:");
     expect(restore).toContain("prior-label-assets.jsonl");
+    expect(restore).toContain("priorReport.requestSchema === process.env.EXPECTED_REQUEST_SCHEMA");
+    expect(restore).toContain("residualAccounting || failed === 0");
+    expect(restore).toContain('[[ "$RESTORE_LABEL_PROOFS" == "true" && -f .data/prior-exact/label-assets.jsonl ]]');
     expect(restore).toContain('outcomes.jsonl "$OUTPUT_DIRECTORY/outcomes.jsonl"');
     for (const sourceConsumerWorkflow of [
       ".github/workflows/enrich-open-food-facts.yml",
@@ -2236,6 +2241,9 @@ describe("Open Food Facts bulk staging", () => {
       expect(consumer).toContain("matches.length !== 1");
       expect(consumer).toContain("artifact.digest");
       expect(consumer).toContain("artifact.size_in_bytes <= 0");
+      expect(consumer).toContain("expected-source:");
+      expect(consumer).toContain("expected-request-schema:");
+      expect(consumer).toContain("expected-workflow-name:");
     }
     for (const extractionWorkflow of [
       ".github/workflows/extract-robotoff.yml",
@@ -2256,7 +2264,14 @@ describe("Open Food Facts bulk staging", () => {
       expect(extraction).toContain("responses/*.json");
       expect(extraction).toContain("digest !== artifact.digest");
       expect(extraction).toContain("retention-days: 90");
+      expect(extraction).toMatch(/expected-request-schema: [a-f0-9]{64}/);
     }
+    expect(await readFile(".github/workflows/enrich-open-food-facts.yml", "utf8"))
+      .toContain(`expected-request-schema: ${OPEN_FOOD_FACTS_API_REQUEST_SCHEMA}`);
+    expect(await readFile(".github/workflows/extract-robotoff.yml", "utf8"))
+      .toContain(`expected-request-schema: ${ROBOTOFF_API_REQUEST_SCHEMA}`);
+    expect(await readFile(".github/workflows/extract-robotoff-ingredients.yml", "utf8"))
+      .toContain(`expected-request-schema: ${ROBOTOFF_INGREDIENT_REQUEST_SCHEMA}`);
   });
 
   it("accepts only source-complete, reconciled production snapshots for publication", () => {

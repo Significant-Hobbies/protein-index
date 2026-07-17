@@ -111,9 +111,13 @@ stay unavailable without compatible mass evidence.
 
 The GitHub enrichment and label-extraction workflows reuse retained API
 responses only when the complete staged-source hash and upstream export hash
-exactly match a previously checksummed artifact. A changed source snapshot
-fetches current responses; a request-schema mismatch is rejected by the adapter
-and fetched again.
+exactly match a previously checksummed artifact. The reusable cache key is the
+source snapshot plus request schema, not the parser adapter version: parser-only
+changes replay the retained raw responses and rebuild all candidates, label
+proofs, and attempt ledgers under current code. Legacy zero-failure artifacts
+may seed that response cache but can never bypass current artifact validation or
+be published as current evidence. A changed source snapshot fetches current
+responses; a request-schema mismatch is rejected and fetched again.
 
 ## Manual fresh-evidence publication
 

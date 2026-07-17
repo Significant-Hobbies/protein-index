@@ -109,6 +109,9 @@ jobs:
         with:
           artifact-prefix: open-food-facts-enrichment-
           output-directory: .data/enrichment
+          expected-source: open_food_facts_api
+          expected-request-schema: 655f6c7d4a4a353bc4c34eebdf9a07436f3bc4104ea6743654df7a44b8dce3ae
+          expected-workflow-name: Enrich Open Food Facts evidence
 
       - name: Enrich exact configured barcode set
         shell: bash

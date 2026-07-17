@@ -8,15 +8,17 @@ inputs:
   output-directory:
     description: Adapter output directory that should receive the responses folder
     required: true
-  expected-adapter-version:
-    description: Optional exact adapter version required for reuse
-    required: false
-    default: ""
+  expected-source:
+    description: Exact source family that produced the reusable responses
+    required: true
+  expected-request-schema:
+    description: Exact request-schema SHA-256 required for raw-response reuse
+    required: true
   expected-workflow-name:
     description: Exact successful producer workflow allowed to supply reusable evidence
     required: true
   restore-label-proofs:
-    description: Copy a validated prior label ledger for zero-refetch replay
+    description: Copy a validated prior label ledger when the artifact contains one
     required: false
     default: "false"
 
@@ -93,7 +95,8 @@ runs:
         OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
         PRIOR_ARTIFACT_ID: ${{ steps.prior.outputs.artifact_id }}
         PRIOR_ARTIFACT_NAME: ${{ steps.prior.outputs.artifact_name }}
-        EXPECTED_ADAPTER_VERSION: ${{ inputs.expected-adapter-version }}
+        EXPECTED_SOURCE: ${{ inputs.expected-source }}
+        EXPECTED_REQUEST_SCHEMA: ${{ inputs.expected-request-schema }}
         RESTORE_LABEL_PROOFS: ${{ inputs.restore-label-proofs }}
       run: |
         set -euo pipefail
@@ -111,7 +114,20 @@ runs:
           readFile('.data/prior-exact/report.json', 'utf8').then(JSON.parse),
           readFile('.data/source-snapshot/manifest.json', 'utf8').then(JSON.parse),
         ]);
+        const outcomeCounts = priorReport.outcomes && typeof priorReport.outcomes === 'object'
+          ? Object.values(priorReport.outcomes)
+          : [];
         const failed = priorReport.outcomes?.failed;
+        const requested = priorReport.requestedBarcodes;
+        const accounted = priorReport.accountedBarcodes;
+        const exactOutcomeAccounting = Number.isSafeInteger(requested)
+          && requested > 0
+          && accounted === requested
+          && outcomeCounts.length > 0
+          && outcomeCounts.every((count) => Number.isSafeInteger(count) && count >= 0)
+          && outcomeCounts.reduce((sum, count) => sum + count, 0) === requested
+          && Number.isSafeInteger(failed)
+          && failed >= 0;
         const residualAccounting = priorManifest.outcomeAccountingComplete === true
           && priorReport.outcomeAccountingComplete === true
           && priorManifest.verificationComplete === (failed === 0)
@@ -127,15 +143,22 @@ runs:
           && Number.isSafeInteger(failed)
           && failed >= 0
           && failed <= 10
-          && failed / priorReport.requestedBarcodes <= 0.0025;
+          && failed / requested <= 0.0025;
+        // Adapter versions may change parsing and ledger formats without changing
+        // the upstream request. A legacy zero-failure artifact is a safe response
+        // cache when its source snapshot and request schema are exact; the current
+        // adapter rebuilds all candidates, label proofs, and attempt ledgers.
+        const reusableAccounting = exactOutcomeAccounting
+          && (residualAccounting || failed === 0);
         const exact = priorManifest.inputHash === process.env.SOURCE_STAGED_HASH
           && priorReport.inputManifestHash === sourceManifest.inputHash
+          && priorManifest.source === process.env.EXPECTED_SOURCE
+          && priorReport.requestSchema === process.env.EXPECTED_REQUEST_SCHEMA
+          && priorManifest.mode === 'production'
           && priorManifest.sourceComplete === true
+          && priorManifest.terminalEvidence === 'end_of_file'
           && priorReport.sourceComplete === true
-          && residualAccounting
-          && (!process.env.EXPECTED_ADAPTER_VERSION || priorManifest.adapterVersion === process.env.EXPECTED_ADAPTER_VERSION)
-          && (process.env.RESTORE_LABEL_PROOFS !== 'true'
-            || (Number.isSafeInteger(priorReport.labelAssets) && priorReport.labelAssets > 0));
+          && reusableAccounting;
         if (!exact) process.exit(10);
         NODE
         exact_status=$?
@@ -145,9 +168,10 @@ runs:
           test -f .data/prior-exact/outcomes.jsonl
           cp -a .data/prior-exact/responses "$OUTPUT_DIRECTORY/"
           cp .data/prior-exact/outcomes.jsonl "$OUTPUT_DIRECTORY/outcomes.jsonl"
-          if [[ "$RESTORE_LABEL_PROOFS" == "true" ]]; then
-            test -f .data/prior-exact/label-assets.jsonl
+          if [[ "$RESTORE_LABEL_PROOFS" == "true" && -f .data/prior-exact/label-assets.jsonl ]]; then
             cp .data/prior-exact/label-assets.jsonl "$OUTPUT_DIRECTORY/prior-label-assets.jsonl"
+          elif [[ "$RESTORE_LABEL_PROOFS" == "true" ]]; then
+            echo "Prior artifact has no label ledger; rebuilding current label proofs from exact responses"
           fi
           echo "Restored exact-snapshot responses from $PRIOR_ARTIFACT_NAME ($PRIOR_ARTIFACT_ID)"
         elif [[ "$exact_status" -eq 10 ]]; then

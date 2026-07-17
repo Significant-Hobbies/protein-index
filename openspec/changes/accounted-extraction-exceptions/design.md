@@ -50,6 +50,13 @@ Successful outcomes still require their portable raw responses, label-byte artif
 
 Consequently, ingredient run `29574516752` cannot be repackaged: its diagnostics artifact lacks the successful response files, cohort metadata, staged candidates, source index, exclusions, and portable checksum set required by the publisher. One replacement exhaustive run is still necessary.
 
+Raw API responses are reusable across parser adapter versions only when the
+checksummed staged-source hash, upstream export hash, source family, and request
+schema are all exact. A legacy zero-failure artifact may seed this response
+cache even when it predates label and attempt ledgers; current code must rebuild
+every derived candidate, label proof, attempt, outcome, and checksum. Cache
+eligibility never makes the legacy artifact publishable.
+
 ### Separate extraction eligibility from production authority
 
 The producer may emit an eligible candidate artifact with residual exceptions, but successful producer completion never triggers production publication. Publication requires a separate manual dispatch for the exact successful run plus a hard production confirmation before credentials or D1 access are available. This keeps data-policy correctness independent from deployment authorization and does not itself authorize a write.

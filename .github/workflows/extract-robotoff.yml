@@ -115,7 +115,8 @@ jobs:
         with:
           artifact-prefix: robotoff-label-candidates-
           output-directory: .data/robotoff
-          expected-adapter-version: robotoff-api-v8
+          expected-source: open_food_facts_robotoff
+          expected-request-schema: 3dea8e57bd55900e38205dd9c2c9450e359c3adad9203a9ff6e78487ce48fc76
           expected-workflow-name: Extract label evidence with Robotoff
           restore-label-proofs: "true"
 
