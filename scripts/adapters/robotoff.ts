@@ -160,20 +160,46 @@ function hasComparableCore(left: NutritionPer100g, right: NutritionPer100g): boo
   return (["calories", "proteinGrams"] as const).some((field) => left[field] !== null && right[field] !== null);
 }
 
-function labelServingQuantity(
+interface LabelServingEvidence {
+  score: number;
+  rawValue: string | null;
+  rawText: string | null;
+  valueQuantity: number | null;
+  textQuantity: number | null;
+  hasIncompatibleQuantity: boolean;
+}
+
+function servingQuantity(value: string | null, unit: string | null, volumeBased: boolean) {
+  const parsed = parseQuantity(value) ?? parseQuantity(value && unit ? `${value} ${unit}` : null);
+  return {
+    quantity: (volumeBased ? parsed?.millilitres : parsed?.grams) ?? null,
+    incompatible: parsed !== null && (volumeBased ? parsed.millilitres : parsed.grams) === null,
+  };
+}
+
+function labelServingEvidence(
   rawNutrients: RawRecord,
   volumeBased: boolean,
   confidenceThreshold: number,
-): { quantity: number; rawValue: string; score: number } | null {
+): LabelServingEvidence | null {
   const raw = rawNutrients.serving_size;
   if (!isRecord(raw)) return null;
   const score = number(raw.score);
-  const rawValue = text(raw.value) ?? text(raw.text);
-  if (score === null || score < confidenceThreshold || !rawValue) return null;
+  if (score === null || score < confidenceThreshold) return null;
+  const rawValue = text(raw.value);
+  const rawText = text(raw.text);
   const unit = text(raw.unit);
-  const parsed = parseQuantity(rawValue) ?? parseQuantity(unit ? `${rawValue} ${unit}` : null);
-  const quantity = volumeBased ? parsed?.millilitres : parsed?.grams;
-  return quantity !== null && quantity !== undefined ? { quantity, rawValue, score } : null;
+  const value = servingQuantity(rawValue, unit, volumeBased);
+  const visibleText = servingQuantity(rawText, unit, volumeBased);
+  if (value.quantity === null && visibleText.quantity === null && !value.incompatible && !visibleText.incompatible) return null;
+  return {
+    score,
+    rawValue,
+    rawText,
+    valueQuantity: value.quantity,
+    textQuantity: visibleText.quantity,
+    hasIncompatibleQuantity: value.incompatible || visibleText.incompatible,
+  };
 }
 
 function parsePrediction(
@@ -246,12 +272,100 @@ function parsePrediction(
   const volumeBased = context.nutritionBasis === "per_100ml";
   const normalizedBasis = volumeBased ? "per_100ml" as const : "per_100g" as const;
   const servingField = volumeBased ? "servingSizeMillilitres" : "servingSizeGrams";
-  const contextServingQuantity = volumeBased ? context.servingSizeMillilitres ?? null : context.servingSizeGrams;
-  const labelServing = labelServingQuantity(rawNutrients, volumeBased, confidenceThreshold);
-  const servingQuantity = labelServing?.quantity ?? contextServingQuantity;
+  const rawContextServingQuantity = volumeBased ? context.servingSizeMillilitres ?? null : context.servingSizeGrams;
+  const contextServingQuantity = !volumeBased && context.netQuantityGrams !== null
+    && rawContextServingQuantity !== null && rawContextServingQuantity > context.netQuantityGrams
+    ? null
+    : rawContextServingQuantity;
+  const servingEvidence = labelServingEvidence(rawNutrients, volumeBased, confidenceThreshold);
+  let labelServing: { quantity: number; rawValue: string; score: number } | null = null;
+  if (servingEvidence) {
+    const candidates = [servingEvidence.valueQuantity, servingEvidence.textQuantity]
+      .filter((value): value is number => value !== null);
+    const distinct = [...new Set(candidates)];
+    let quantity = distinct[0] ?? null;
+    if (distinct.length > 1 && Math.abs(distinct[0]! - distinct[1]!) > 0.01) {
+      const corroborated = contextServingQuantity === null ? null : distinct.find((value) => (
+        Math.abs(value - contextServingQuantity) / Math.max(value, contextServingQuantity, 1) <= 0.02
+      )) ?? null;
+      quantity = corroborated;
+      issues.push({
+        code: corroborated === null
+          ? "robotoff_label_serving_size_evidence_conflict"
+          : "robotoff_label_serving_size_conflict_resolved",
+        message: corroborated === null
+          ? "Robotoff serving-size value and text disagree without independent corroboration; the label serving size is ignored."
+          : "Robotoff serving-size value and text disagree; the catalog-corroborated quantity is used.",
+        severity: "warning",
+        field: servingField,
+        details: {
+          predictionId,
+          valueQuantity: servingEvidence.valueQuantity,
+          textQuantity: servingEvidence.textQuantity,
+          contextServingQuantity,
+          score: servingEvidence.score,
+        },
+      });
+    }
+    if (servingEvidence.hasIncompatibleQuantity) {
+      const corroborated = quantity !== null && contextServingQuantity !== null
+        && Math.abs(quantity - contextServingQuantity) / Math.max(quantity, contextServingQuantity, 1) <= 0.02;
+      if (!corroborated) quantity = null;
+      issues.push({
+        code: "robotoff_label_serving_size_incompatible_unit",
+        message: corroborated
+          ? `Robotoff serving-size evidence includes an incompatible ${volumeBased ? "mass" : "volume"} quantity; only the catalog-corroborated compatible quantity is used.`
+          : "Robotoff serving-size evidence mixes dimensions without independent corroboration and is ignored.",
+        severity: "warning",
+        field: servingField,
+        details: {
+          predictionId,
+          rawValue: servingEvidence.rawValue,
+          rawText: servingEvidence.rawText,
+          contextServingQuantity,
+          corroborated,
+          score: servingEvidence.score,
+        },
+      });
+    }
+    const exceedsPack = !volumeBased && quantity !== null && context.netQuantityGrams !== null
+      && quantity > context.netQuantityGrams;
+    const exceedsContext = quantity !== null && contextServingQuantity !== null
+      && quantity > contextServingQuantity * 10;
+    if (quantity !== null && (exceedsPack || exceedsContext)) {
+      issues.push({
+        code: "robotoff_label_serving_size_implausible",
+        message: "Robotoff serving size exceeds the compatible pack or is more than ten times the catalog serving and is ignored; a valid catalog serving remains the fallback when available.",
+        severity: "warning",
+        field: servingField,
+        details: {
+          predictionId,
+          labelServingQuantity: quantity,
+          contextServingQuantity,
+          netQuantityGrams: context.netQuantityGrams,
+          exceedsPack,
+          exceedsContext,
+          score: servingEvidence.score,
+        },
+      });
+      quantity = null;
+    }
+    if (quantity !== null) {
+      const selectedRawValue = servingEvidence.valueQuantity !== null
+        && Math.abs(servingEvidence.valueQuantity - quantity) <= 0.01
+        ? servingEvidence.rawValue
+        : servingEvidence.rawText;
+      labelServing = {
+        quantity,
+        rawValue: selectedRawValue ?? String(quantity),
+        score: servingEvidence.score,
+      };
+    }
+  }
+  const normalizationServingQuantity = labelServing?.quantity ?? contextServingQuantity;
   if (
-    labelServing && contextServingQuantity !== null
-    && Math.abs(labelServing.quantity - contextServingQuantity) > 0.01
+    labelServing && rawContextServingQuantity !== null
+    && Math.abs(labelServing.quantity - rawContextServingQuantity) > 0.01
   ) {
     issues.push({
       code: "robotoff_label_serving_size_overrides_context",
@@ -261,7 +375,7 @@ function parsePrediction(
       details: {
         predictionId,
         labelServingQuantity: labelServing.quantity,
-        contextServingQuantity,
+        contextServingQuantity: rawContextServingQuantity,
         rawValue: labelServing.rawValue,
         score: labelServing.score,
       },
@@ -274,7 +388,7 @@ function parsePrediction(
     normalized = per100g;
   }
   if (completeCore(perServing)) {
-    const converted = normalizePerServing(perServing, servingQuantity);
+    const converted = normalizePerServing(perServing, normalizationServingQuantity);
     if (!converted) {
       issues.push({
         code: "robotoff_ambiguous_serving_basis",
@@ -331,7 +445,7 @@ function parsePrediction(
       }
     }
   } else if (normalized) {
-    const converted = normalizePerServing(perServing, servingQuantity);
+    const converted = normalizePerServing(perServing, normalizationServingQuantity);
     if (converted && hasComparableCore(normalized, converted) && !differs(normalized, converted)) {
       if (normalized.sugarGrams === null && converted.sugarGrams !== null) {
         issues.push({
@@ -360,7 +474,7 @@ function parsePrediction(
     }
     return { candidate: null, issues, prediction };
   }
-  const validation = validateNutrition(normalized);
+  const validation = validateNutrition(normalized, normalizedBasis);
   issues.push(...validation.map((issue) => ({ ...issue, code: `robotoff_${issue.code}`, details: { predictionId } })));
   if (validation.some(({ severity }) => severity === "error")) return { candidate: null, issues, prediction };
 
@@ -373,7 +487,7 @@ function parsePrediction(
       modelVersion,
       observedAt: predictionTime(prediction),
       basis,
-      minimumConfidence: confidences.length ? Math.min(...confidences) : 0,
+      minimumConfidence: Math.min(...confidences, ...(labelServing ? [labelServing.score] : [])),
       rawNutrients,
   };
   const candidate: RobotoffNutritionCandidate = normalizedBasis === "per_100ml"

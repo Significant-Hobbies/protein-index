@@ -1324,8 +1324,12 @@ describe("Open Food Facts bulk staging", () => {
       quantity: "",
       serving_size: "1 can (250 ml)",
       nutrition_data_per: "100ml",
+      nutriments: { "energy-kcal_100g": 901, proteins_100g: 1 },
     });
     expect(declaredLiquid.staged?.nutrition.basis).toBe("per_100ml");
+    expect(declaredLiquid.issues).not.toContainEqual(expect.objectContaining({
+      code: "energy_over_physical_maximum",
+    }));
     const massBeforePreparationVolume = normalizeOpenFoodFactsRecord({
       ...indiaProduct,
       code: "8900000000050",
@@ -1939,7 +1943,7 @@ describe("Robotoff label evidence", () => {
 
   it("uses the serving mass extracted from the same label instead of a conflicting catalog value", () => {
     const response = { image_predictions: [prediction(28, "26", {
-      serving_size: { value: "25g", unit: null, score: 0.99 },
+      serving_size: { value: "25g", unit: null, score: 0.9 },
       "energy-kcal_serving": nutrient(125, "kcal"),
       proteins_serving: nutrient(2, "g"),
       carbohydrates_serving: nutrient(16, "g"),
@@ -1949,6 +1953,7 @@ describe("Robotoff label evidence", () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]).toMatchObject({
       basis: "per_serving",
+      minimumConfidence: 0.9,
       nutritionPer100g: {
         calories: 500,
         proteinGrams: 8,
@@ -1959,6 +1964,95 @@ describe("Robotoff label evidence", () => {
     expect(result.issues).toContainEqual(expect.objectContaining({
       code: "robotoff_label_serving_size_overrides_context",
       field: "servingSizeGrams",
+    }));
+  });
+
+  it("rejects implausible serving OCR and physically impossible calorie density", () => {
+    const ghee = parseRobotoffNutritionEvidence({ image_predictions: [prediction(31, "29", {
+      serving_size: { value: "714 g", unit: null, score: 0.9985 },
+      "energy-kcal_serving": nutrient(126, "kcal"),
+      proteins_serving: nutrient(0, "g"),
+      fat_serving: nutrient(14, "g"),
+      "saturated-fat_serving": nutrient(9.3, "g"),
+    })] }, {
+      ...context,
+      name: "Ghee",
+      netQuantityGrams: 144,
+      servingSizeGrams: 14,
+    });
+    expect(ghee.candidates[0]).toMatchObject({
+      nutritionPer100g: { calories: 900, proteinGrams: 0, fatGrams: 100 },
+    });
+    expect(ghee.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_label_serving_size_implausible",
+      field: "servingSizeGrams",
+    }));
+
+    const cashews = parseRobotoffNutritionEvidence({ image_predictions: [prediction(32, "30", {
+      serving_size: { value: "28g", unit: null, score: 0.998 },
+      "energy-kcal_serving": nutrient(370, "kcal", 0.9),
+      proteins_serving: nutrient(5, "g"),
+      fat_serving: nutrient(14, "g"),
+    })] }, { ...context, name: "Sea Salted Whole Cashews", servingSizeGrams: 70 });
+    expect(cashews.candidates).toHaveLength(0);
+    expect(cashews.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_energy_over_physical_maximum",
+      field: "calories",
+    }));
+  });
+
+  it("uses catalog corroboration for conflicting serving evidence and ignores incompatible units", () => {
+    const nutrients = {
+      serving_size: { value: "6 g", text: "69g", unit: null, score: 0.99 },
+      "energy-kcal_serving": nutrient(69, "kcal"),
+      proteins_serving: nutrient(6.9, "g"),
+    };
+    const corroborated = parseRobotoffNutritionEvidence(
+      { image_predictions: [prediction(33, "31", nutrients)] },
+      { ...context, netQuantityGrams: 100, servingSizeGrams: 69 },
+    );
+    expect(corroborated.candidates[0]).toMatchObject({
+      nutritionPer100g: { calories: 100, proteinGrams: 10 },
+    });
+    expect(corroborated.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_label_serving_size_conflict_resolved",
+    }));
+    expect(corroborated.candidates[0]?.rawNutrients.serving_size).toMatchObject({ value: "6 g", text: "69g" });
+
+    const uncorroborated = parseRobotoffNutritionEvidence(
+      { image_predictions: [prediction(34, "32", nutrients)] },
+      context,
+    );
+    expect(uncorroborated.candidates[0]).toMatchObject({
+      nutritionPer100g: { calories: 172.5, proteinGrams: 17.25 },
+    });
+    expect(uncorroborated.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_label_serving_size_evidence_conflict",
+    }));
+
+    const incompatible = parseRobotoffNutritionEvidence({ image_predictions: [prediction(35, "33", {
+      serving_size: { value: "250 mL", unit: null, score: 0.99 },
+      "energy-kcal_serving": nutrient(146, "kcal"),
+      proteins_serving: nutrient(10, "g"),
+    })] }, context);
+    expect(incompatible.candidates[0]).toMatchObject({
+      nutritionPer100g: { calories: 365, proteinGrams: 25 },
+    });
+    expect(incompatible.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_label_serving_size_incompatible_unit",
+    }));
+
+    const mixedDimensions = parseRobotoffNutritionEvidence({ image_predictions: [prediction(36, "34", {
+      serving_size: { value: "250 mL", text: "25 g", unit: null, score: 0.99 },
+      "energy-kcal_serving": nutrient(100, "kcal"),
+      proteins_serving: nutrient(10, "g"),
+    })] }, context);
+    expect(mixedDimensions.candidates[0]).toMatchObject({
+      nutritionPer100g: { calories: 250, proteinGrams: 25 },
+    });
+    expect(mixedDimensions.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_label_serving_size_incompatible_unit",
+      details: expect.objectContaining({ corroborated: false }),
     }));
   });
 
@@ -2041,7 +2135,7 @@ describe("Robotoff label evidence", () => {
       })] }), { status: 200 }),
     });
     expect(result.outcomes).toEqual({ candidate: 1, no_prediction: 0, rejected: 0, failed: 0 });
-    expect(result.manifest.adapterVersion).toBe("robotoff-api-v6");
+    expect(result.manifest.adapterVersion).toBe("robotoff-api-v7");
     const staged = JSON.parse((await readFile(result.stagedPath, "utf8")).trim()) as {
       validationIssues: Array<{ code: string }>;
       rawEvidence: { candidate: Record<string, unknown> };
@@ -2127,7 +2221,7 @@ describe("Robotoff label evidence", () => {
       "energy-kcal_serving": nutrient(187, "kcal"),
       proteins_serving: nutrient(32.4, "g"),
       sugars_serving: nutrient(0, "g"),
-    })] }, { ...context, servingSizeGrams: 170 });
+    })] }, { ...context, netQuantityGrams: 170, servingSizeGrams: 170 });
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0]).toMatchObject({
       basis: "per_100g",
@@ -2186,6 +2280,7 @@ describe("Robotoff label evidence", () => {
       fat_serving: nutrient(24, "g"),
     })] }, {
       ...context,
+      netQuantityGrams: 50,
       servingSizeGrams: 50,
       sourceNutritionPer100g: {
         calories: 312,

@@ -97,7 +97,7 @@ export function nutritionCandidateFromEvidence(evidence: unknown, productGtin: s
     !Number.isFinite(observedAt.valueOf()) || !basis || !compatibleBasis ||
     typeof candidate.minimumConfidence !== "number" || candidate.minimumConfidence < 0.85 || candidate.minimumConfidence > 1 ||
     normalizedNutrition.calories === null || normalizedNutrition.proteinGrams === null ||
-    hasNutritionErrors(validateNutrition(normalizedNutrition))
+    hasNutritionErrors(validateNutrition(normalizedNutrition, massNutrition ? "per_100g" : "per_100ml"))
   ) return null;
   const base = {
     predictionId: candidate.predictionId,

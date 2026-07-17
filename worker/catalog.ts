@@ -79,7 +79,10 @@ function mapProduct(row: ProductRow): CatalogProduct {
     servingSizeGrams: row.serving_size_grams,
     sellingPrice: row.selling_price,
   });
-  const nutritionPassesValidation = !hasNutritionErrors(validateNutrition(nutritionPer100g));
+  const nutritionPassesValidation = !hasNutritionErrors(validateNutrition(
+    nutritionPer100g,
+    row.nutrition_basis === "per_100ml" ? "per_100ml" : "per_100g",
+  ));
   const metrics = (row.nutrition_status === "verified" || row.nutrition_status === "unverified") && nutritionPassesValidation
     ? calculatedMetrics
     : {

@@ -90,6 +90,9 @@ describe("nutrition accuracy and classification", () => {
     expect(validateNutrition({ ...emptyNutrition(), calories: 0.25, proteinGrams: 10.8 })).toContainEqual(expect.objectContaining({ code: "protein_energy_exceeds_total", severity: "error" }));
     expect(validateNutrition({ ...emptyNutrition(), calories: 274, proteinGrams: 15.9, fatGrams: 69.1 })).toContainEqual(expect.objectContaining({ code: "macro_energy_exceeds_total", severity: "error" }));
     expect(validateNutrition({ ...emptyNutrition(), calories: 33, proteinGrams: 8.59, carbohydrateGrams: 28.1, fatGrams: 1.2 })).toContainEqual(expect.objectContaining({ code: "calorie_macro_mismatch", severity: "error" }));
+    expect(validateNutrition({ ...emptyNutrition(), calories: 901, proteinGrams: 1 })).toContainEqual(expect.objectContaining({ code: "energy_over_physical_maximum", severity: "error" }));
+    expect(validateNutrition({ ...emptyNutrition(), calories: 901, proteinGrams: 1 }, "per_100ml")).not.toContainEqual(expect.objectContaining({ code: "energy_over_physical_maximum" }));
+    expect(validateNutrition({ ...emptyNutrition(), calories: 900, proteinGrams: 0, fatGrams: 100 })).not.toContainEqual(expect.objectContaining({ code: "energy_over_physical_maximum" }));
     expect(validateNutrition({ ...emptyNutrition(), calories: 115, proteinGrams: 29 })).not.toContainEqual(expect.objectContaining({ severity: "error" }));
   });
 

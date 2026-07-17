@@ -204,7 +204,8 @@ export function normalizeOpenFoodFactsRecord(
     issues.push({ code: "invalid_gtin", message: "Product code is not a valid GTIN", severity: "error", field: "gtin" });
   }
   const nutritionPer100g = parseCoreNutrition(record);
-  const nutritionIssues = validateNutrition(nutritionPer100g);
+  const basis = nutritionBasis(record);
+  const nutritionIssues = validateNutrition(nutritionPer100g, basis === "per_100ml" ? "per_100ml" : "per_100g");
   issues.push(...nutritionIssues);
   const netQuantityGrams = massQuantity(record.quantity, record.product_quantity, record.product_quantity_unit);
   // Open Food Facts defines serving_quantity as a computed gram value when no
@@ -216,7 +217,6 @@ export function normalizeOpenFoodFactsRecord(
   }
 
   const observedAt = observationTime(record);
-  const basis = nutritionBasis(record);
   const ingredientRaw = stringValue(record.ingredients_text);
   const invalidPercentages = invalidIngredientPercentages(ingredientRaw);
   if (invalidPercentages.length > 0) {

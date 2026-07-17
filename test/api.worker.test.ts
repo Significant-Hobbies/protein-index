@@ -569,14 +569,14 @@ describe("Worker catalog API", () => {
       .first<{ gtin: string }>();
     if (!product) throw new Error("Expected a seeded GTIN");
     const nutrition = {
-      calories: 50,
+      calories: 901,
       proteinGrams: 10,
-      carbohydrateGrams: 1,
-      sugarGrams: 0,
-      fatGrams: 0.5,
-      saturatedFatGrams: 0.1,
-      fibreGrams: 0,
-      sodiumMg: 20,
+      carbohydrateGrams: null,
+      sugarGrams: null,
+      fatGrams: null,
+      saturatedFatGrams: null,
+      fibreGrams: null,
+      sodiumMg: null,
     };
     const review = await insertRobotoffReview({ suffix: "verify-volume", evidence: robotoffVolumeEvidence(product.gtin, nutrition) });
     const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
@@ -591,7 +591,7 @@ describe("Worker catalog API", () => {
     expect(response.status).toBe(200);
     const fact = await env.DB.prepare("SELECT basis, status, authority, calories, protein_grams FROM nutrition_facts WHERE product_id = ?")
       .bind(review.productId).first<Record<string, unknown>>();
-    expect(fact).toEqual({ basis: "per_100ml", status: "verified", authority: 100, calories: 50, protein_grams: 10 });
+    expect(fact).toEqual({ basis: "per_100ml", status: "verified", authority: 100, calories: 901, protein_grams: 10 });
     const nutrients = await env.DB.prepare("SELECT DISTINCT basis FROM nutrient_values WHERE product_id = ? AND status = 'verified'")
       .bind(review.productId).all<{ basis: string }>();
     expect(nutrients.results).toContainEqual({ basis: "per_100ml" });
@@ -602,8 +602,8 @@ describe("Worker catalog API", () => {
     const detailResponse = await worker.fetch(`http://localhost/api/products/${review.productId}`);
     const detail = await json<ProductDetailResponse>(detailResponse);
     expect(detail.nutrition.basis).toBe("per_100ml");
-    expect(detail.metrics.proteinPer100Calories).toEqual({ value: 20, reason: null });
-    expect(detail.metrics.proteinCaloriePercentage).toEqual({ value: 80, reason: null });
+    expect(detail.metrics.proteinPer100Calories).toEqual({ value: expect.closeTo(1.11, 2), reason: null });
+    expect(detail.metrics.proteinCaloriePercentage).toEqual({ value: expect.closeTo(4.44, 2), reason: null });
     expect(detail.metrics.totalProteinInPack).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });
     expect(detail.metrics.costPer25gProtein.value).toBeNull();
     expect(detail.metrics.pricePerServing).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });

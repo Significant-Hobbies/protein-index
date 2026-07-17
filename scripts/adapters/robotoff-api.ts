@@ -10,7 +10,7 @@ import { finiteNumber } from "../../shared/nutrition";
 import type { SourceManifest, StagedProduct } from "../../shared/types";
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "./robotoff";
 
-export const ROBOTOFF_API_ADAPTER_VERSION = "robotoff-api-v6";
+export const ROBOTOFF_API_ADAPTER_VERSION = "robotoff-api-v7";
 export const ROBOTOFF_IMAGE_PREDICTIONS_URL = "https://robotoff.openfoodfacts.org/api/v1/image_predictions";
 const PAGE_SIZE = 50;
 export const ROBOTOFF_API_REQUEST_SCHEMA = createHash("sha256")

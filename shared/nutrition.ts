@@ -29,7 +29,10 @@ export function hasProteinEnergyConflict(nutrition: NutritionPer100g): boolean {
     && nutrition.proteinGrams * 4 > nutrition.calories;
 }
 
-export function validateNutrition(nutrition: NutritionPer100g): ValidationIssue[] {
+export function validateNutrition(
+  nutrition: NutritionPer100g,
+  normalizedBasis: "per_100g" | "per_100ml" = "per_100g",
+): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   for (const [field, value] of Object.entries(nutrition)) {
     if (value !== null && (!Number.isFinite(value) || value < 0)) {
@@ -53,6 +56,14 @@ export function validateNutrition(nutrition: NutritionPer100g): ValidationIssue[
 
   if (nutrition.calories !== null && nutrition.calories <= 0) {
     issues.push({ code: "non_positive_energy", message: "Calories must be positive", severity: "error", field: "calories" });
+  }
+  if (normalizedBasis === "per_100g" && nutrition.calories !== null && nutrition.calories > 900) {
+    issues.push({
+      code: "energy_over_physical_maximum",
+      message: "Calories exceed the physical maximum for 100 g of food",
+      severity: "error",
+      field: "calories",
+    });
   }
   if (
     nutrition.calories !== null &&
