@@ -2,6 +2,7 @@ import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { normalizeOpenFoodFactsRecord, stageOpenFoodFacts } from "../scripts/adapters/open-food-facts";
@@ -2240,6 +2241,15 @@ describe("Open Food Facts bulk staging", () => {
     expect(restore).toContain("allowedFailureReasons");
     expect(restore).toContain("label.id === expectedId");
     expect(restore).toContain("currentSubject?.subjectSourceContentHash === label.subjectSourceContentHash");
+    const shellMarker = "      run: |\n";
+    const shellOffset = restore.indexOf(shellMarker);
+    expect(shellOffset).toBeGreaterThan(-1);
+    const shell = restore.slice(shellOffset + shellMarker.length)
+      .split("\n")
+      .map((line) => line.startsWith("        ") ? line.slice(8) : line)
+      .join("\n");
+    const shellParse = spawnSync("bash", ["-n"], { input: shell, encoding: "utf8" });
+    expect(shellParse.status, shellParse.stderr).toBe(0);
     for (const sourceConsumerWorkflow of [
       ".github/workflows/enrich-open-food-facts.yml",
       ".github/workflows/extract-robotoff.yml",
