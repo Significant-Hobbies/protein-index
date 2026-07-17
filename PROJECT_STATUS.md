@@ -1,6 +1,6 @@
 # Protein Index — PROJECT STATUS
 
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
 ## Why / What
 
@@ -158,6 +158,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — an eighth 24-record distinct-GTIN liquid batch was checked against exact retained images in checksummed bundle `review-af930823bd0d8c430b9f`; all 24 candidates were rejected for omitted declarations, added-sugar/total-sugar confusion, incorrect values, wrong mass/volume basis, or inexact serving conversion, so no unsupported fact is promoted. Across all eight bundles, 182 of 258 decision-eligible records covering 171 of 209 GTINs now have exact artifact-bound decisions (15 pending verifications and 167 rejections); 76 records across 67 GTINs remain, and live coverage is unchanged before protected publication.
 - 2026-07-16 — a ninth 24-record distinct-GTIN liquid batch was checked against exact retained images in checksummed bundle `review-c13277f3643949c99c92`: Rio Mango Beverage exactly matches every supported value declared on its per-100-mL panel, while 23 candidates are rejected for omitted declarations, incorrect field mapping, unconverted serving values, or wrong mass/volume basis. Across all nine bundles, 206 of 258 decision-eligible records covering 195 of 209 GTINs now have exact artifact-bound decisions (16 pending verifications and 190 rejections); 52 records across 45 GTINs remain, and live coverage is unchanged before protected publication.
 - 2026-07-16 — the final 12 readable, previously unreviewed liquid-product GTINs were checked against exact retained images in checksummed bundle `review-35df940b2a5dff4da6b0`; all 12 candidates were rejected for omitted declarations, severe column mapping errors, unconverted serving values, or wrong mass/volume basis. The distinct-product pass now covers 207 of 209 GTINs: 218 of 258 decision-eligible records have exact artifact-bound decisions (16 pending verifications and 202 rejections), while 40 additional-image records across 33 GTINs remain and the two untouched GTINs are the deliberately excluded unreadable labels. Live coverage is unchanged before protected publication.
+- 2026-07-17 — first additional-image reconciliation checked 18 exact retained liquid labels in checksummed bundle `review-ee74911697e3fe5a8a06`; all 18 candidates were independently rejected for omitted declarations, incorrect values, wrong physical basis, or unconverted serving data. Across all liquid bundles, 236 of 258 decision-eligible records have artifact-bound decisions (16 pending verifications and 220 rejections), leaving 22 records across 18 GTINs. Valid redundant images remain unresolved because the current binary decision contract cannot truthfully mark evidence as redundant, and the two unreadable GTINs remain deliberately unresolved. Live coverage is unchanged before protected publication.
 
 ## Products
 
@@ -276,9 +277,11 @@ must pass desktop/mobile verification.
     `review-8883bc8d43df33874d89`,
     `review-6f3e91617c0bb4bcf50d`,
     `review-af930823bd0d8c430b9f`,
-    `review-c13277f3643949c99c92`, and
-    `review-35df940b2a5dff4da6b0` with exact postconditions and replay. Reconcile
-    the remaining 40 additional-image records across 33 GTINs, preserve the two
-    unreadable GTINs as unresolved rather than guessing, and resolve the two
-    audited cross-image conflicts separately; do not claim the
+    `review-c13277f3643949c99c92`,
+    `review-35df940b2a5dff4da6b0`, and
+    `review-ee74911697e3fe5a8a06` with exact postconditions and replay.
+    Reconcile the remaining 22 additional-image records across 18 GTINs,
+    including valid redundant evidence that needs a truthful terminal outcome;
+    preserve the two unreadable GTINs as unresolved rather than guessing, and
+    resolve the two audited cross-image conflicts separately. Do not claim the
     sixteen verified per-100-mL candidates until live publication proves them.
