@@ -41,8 +41,9 @@ app.get("/api/ai", (c) => {
   const origin = new URL(c.req.url).origin;
   return c.json(buildApiAiCatalog(origin));
 });
-app.get("/api/products/:id.md", async (c) => {
-  const id = c.req.param("id") ?? "";
+app.get("/api/products/:id{[^/]+\\.md}", async (c) => {
+  const pathId = c.req.param("id") ?? "";
+  const id = pathId.endsWith(".md") ? pathId.slice(0, -3) : "";
   const product = await getProductDetail(c.env.DB, id);
   if (!product) {
     return text("# Not found\n\nProduct not found.\n", "text/markdown; charset=utf-8", 404);

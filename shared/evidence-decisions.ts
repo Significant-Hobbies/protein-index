@@ -27,7 +27,28 @@ export interface VolumeNutritionCandidate extends NutritionCandidateBase {
 
 export type NutritionCandidate = MassNutritionCandidate | VolumeNutritionCandidate;
 
-export interface EvidenceDecisionInput {
+export interface ReviewedMassNutritionProjection {
+  basis: "per_100g";
+  nutritionPer100g: NutritionPer100g;
+  nutritionPer100ml?: never;
+}
+
+export interface ReviewedVolumeNutritionProjection {
+  basis: "per_100ml";
+  nutritionPer100ml: NutritionPer100g;
+  nutritionPer100g?: never;
+}
+
+export type ReviewedNutritionProjection = ReviewedMassNutritionProjection | ReviewedVolumeNutritionProjection;
+
+export interface CorrectedNutritionDecisionPayload {
+  candidate: NutritionCandidate;
+  reviewedProjection: ReviewedNutritionProjection;
+}
+
+export type NutritionDecisionPayload = NutritionCandidate | CorrectedNutritionDecisionPayload;
+
+interface EvidenceDecisionBase {
   id: string;
   sourceId: string;
   sourceRecordKey: string;
@@ -38,13 +59,49 @@ export interface EvidenceDecisionInput {
   extractionAttemptId?: string | null;
   labelAssetId?: string | null;
   fieldFamily: "nutrition";
-  decision: "verify" | "reject" | "redundant";
-  payload: NutritionCandidate;
   evidenceUrl: string;
   rationale: string;
   decidedBy: string;
   decidedAt: string;
 }
+
+/** Legacy candidate-only shape retained for byte-compatible bundle replay. */
+export interface EvidenceDecisionInput extends EvidenceDecisionBase {
+  decision: "verify" | "reject" | "redundant";
+  payload: NutritionCandidate;
+}
+
+export interface CorrectedNutritionEvidenceDecisionInput extends EvidenceDecisionBase {
+  decision: "verify";
+  payload: CorrectedNutritionDecisionPayload;
+}
+
+export type NutritionEvidenceDecisionInput = EvidenceDecisionInput | CorrectedNutritionEvidenceDecisionInput;
+
+export interface CurrentNutritionEvidenceBinding {
+  sourceId: string;
+  sourceRecordKey: string;
+  sourceRecordId: string;
+  sourceContentHash: string;
+  productId: string;
+  candidateHash: string;
+}
+
+export interface EffectiveNutritionProjection {
+  basis: "per_100g" | "per_100ml";
+  nutrition: NutritionPer100g;
+}
+
+export const NUTRITION_FIELDS = [
+  "calories",
+  "proteinGrams",
+  "carbohydrateGrams",
+  "sugarGrams",
+  "fatGrams",
+  "saturatedFatGrams",
+  "fibreGrams",
+  "sodiumMg",
+] as const satisfies readonly (keyof NutritionPer100g)[];
 
 export interface SelectedNutritionProjection {
   productId: string;
@@ -67,6 +124,19 @@ function validHttpsUrl(value: unknown): value is string {
 
 function nutritionValue(value: unknown): number | null {
   return value === null || (typeof value === "number" && Number.isFinite(value)) ? value : Number.NaN;
+}
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function nutritionCandidateFromValue(value: unknown, productGtin: string | null): NutritionCandidate | null {
+  return nutritionCandidateFromEvidence(
+    { code: "robotoff_nutrition_candidate", details: { candidate: value } },
+    productGtin,
+  );
 }
 
 export function nutritionCandidateFromEvidence(evidence: unknown, productGtin: string | null): NutritionCandidate | null {
@@ -135,6 +205,83 @@ export function nutritionCandidateNormalizedBasis(candidate: NutritionCandidate)
   return candidate.nutritionPer100g !== undefined ? "per_100g" : "per_100ml";
 }
 
+function reviewedNutritionProjectionFromValue(value: unknown): ReviewedNutritionProjection | null {
+  const projection = record(value);
+  if (!projection) return null;
+  const massNutrition = record(projection.nutritionPer100g);
+  const volumeNutrition = record(projection.nutritionPer100ml);
+  const basis = projection.basis;
+  if ((massNutrition === null) === (volumeNutrition === null)) return null;
+  const expectedKeys = massNutrition
+    ? ["basis", "nutritionPer100g"]
+    : ["basis", "nutritionPer100ml"];
+  if (!hasExactKeys(projection, expectedKeys)) return null;
+  if ((massNutrition && basis !== "per_100g") || (volumeNutrition && basis !== "per_100ml")) return null;
+  const rawNutrition = massNutrition ?? volumeNutrition;
+  if (!rawNutrition || !hasExactKeys(rawNutrition, NUTRITION_FIELDS)) return null;
+  const normalizedBasis = basis as "per_100g" | "per_100ml";
+  const nutrition = Object.fromEntries(
+    NUTRITION_FIELDS.map((field) => [field, nutritionValue(rawNutrition[field])]),
+  ) as unknown as NutritionPer100g;
+  if (
+    nutrition.calories === null || nutrition.proteinGrams === null ||
+    !Number.isFinite(nutrition.calories) || !Number.isFinite(nutrition.proteinGrams) ||
+    hasNutritionErrors(validateNutrition(nutrition, normalizedBasis))
+  ) return null;
+  return massNutrition
+    ? { basis: "per_100g", nutritionPer100g: nutrition }
+    : { basis: "per_100ml", nutritionPer100ml: nutrition };
+}
+
+export function isCorrectedNutritionDecisionPayload(
+  payload: NutritionDecisionPayload,
+): payload is CorrectedNutritionDecisionPayload {
+  return "candidate" in payload && "reviewedProjection" in payload;
+}
+
+export function nutritionDecisionCandidate(payload: NutritionDecisionPayload): NutritionCandidate {
+  return isCorrectedNutritionDecisionPayload(payload) ? payload.candidate : payload;
+}
+
+export function parseNutritionDecisionPayload(
+  value: unknown,
+  productGtin: string | null = null,
+): NutritionDecisionPayload | null {
+  const envelope = record(value);
+  if (envelope && ("candidate" in envelope || "reviewedProjection" in envelope)) {
+    if (!hasExactKeys(envelope, ["candidate", "reviewedProjection"])) return null;
+    const candidate = nutritionCandidateFromValue(envelope.candidate, productGtin);
+    const reviewedProjection = reviewedNutritionProjectionFromValue(envelope.reviewedProjection);
+    return candidate && reviewedProjection ? { candidate, reviewedProjection } : null;
+  }
+  return nutritionCandidateFromValue(value, productGtin);
+}
+
+export function effectiveNutritionProjection(payload: NutritionDecisionPayload): EffectiveNutritionProjection {
+  if (isCorrectedNutritionDecisionPayload(payload)) {
+    const { reviewedProjection } = payload;
+    return reviewedProjection.basis === "per_100g"
+      ? { basis: "per_100g", nutrition: reviewedProjection.nutritionPer100g }
+      : { basis: "per_100ml", nutrition: reviewedProjection.nutritionPer100ml };
+  }
+  return {
+    basis: nutritionCandidateNormalizedBasis(payload),
+    nutrition: nutritionCandidateValues(payload),
+  };
+}
+
+export function nutritionEvidenceDecisionMatchesBinding(
+  decision: NutritionEvidenceDecisionInput,
+  current: CurrentNutritionEvidenceBinding,
+): boolean {
+  return decision.sourceId === current.sourceId
+    && decision.sourceRecordKey === current.sourceRecordKey
+    && decision.sourceRecordId === current.sourceRecordId
+    && decision.sourceContentHash === current.sourceContentHash
+    && decision.productId === current.productId
+    && decision.candidateHash === current.candidateHash;
+}
+
 function canonicalValue(value: unknown): unknown {
   if (value === null || typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number") {
@@ -189,38 +336,49 @@ export function canonicalNutritionCandidate(candidate: NutritionCandidate): Nutr
     : { ...base, basis: candidate.basis as VolumeNutritionCandidate["basis"], nutritionPer100ml: canonicalNutrition };
 }
 
+export function canonicalReviewedNutritionProjection(
+  projection: ReviewedNutritionProjection,
+): ReviewedNutritionProjection {
+  const nutrition = projection.basis === "per_100g"
+    ? projection.nutritionPer100g
+    : projection.nutritionPer100ml;
+  const canonicalNutrition: NutritionPer100g = Object.fromEntries(
+    NUTRITION_FIELDS.map((field) => [field, nutrition[field]]),
+  ) as unknown as NutritionPer100g;
+  return projection.basis === "per_100g"
+    ? { basis: "per_100g", nutritionPer100g: canonicalNutrition }
+    : { basis: "per_100ml", nutritionPer100ml: canonicalNutrition };
+}
+
+export function canonicalNutritionDecisionPayload(payload: NutritionDecisionPayload): NutritionDecisionPayload {
+  if (!isCorrectedNutritionDecisionPayload(payload)) return canonicalNutritionCandidate(payload);
+  return {
+    candidate: canonicalNutritionCandidate(payload.candidate),
+    reviewedProjection: canonicalReviewedNutritionProjection(payload.reviewedProjection),
+  };
+}
+
 export async function nutritionCandidateHash(candidate: NutritionCandidate): Promise<string> {
   return sha256Hex(canonicalNutritionCandidate(candidate));
 }
 
-const NUTRITION_FIELDS = [
-  "calories",
-  "proteinGrams",
-  "carbohydrateGrams",
-  "sugarGrams",
-  "fatGrams",
-  "saturatedFatGrams",
-  "fibreGrams",
-  "sodiumMg",
-] as const satisfies readonly (keyof NutritionPer100g)[];
-
 export function nutritionDecisionMatchesSelectedProjection(
-  decision: EvidenceDecisionInput,
+  decision: NutritionEvidenceDecisionInput,
   selected: SelectedNutritionProjection,
 ): boolean {
+  const effective = effectiveNutritionProjection(decision.payload);
   if (
     decision.decision !== "redundant" ||
     decision.productId !== selected.productId ||
     selected.status !== "verified" ||
     selected.authority !== 100 ||
-    nutritionCandidateNormalizedBasis(decision.payload) !== selected.basis
+    effective.basis !== selected.basis
   ) return false;
 
-  const candidateNutrition = nutritionCandidateValues(decision.payload);
-  return NUTRITION_FIELDS.every((field) => candidateNutrition[field] === selected.nutrition[field]);
+  return NUTRITION_FIELDS.every((field) => effective.nutrition[field] === selected.nutrition[field]);
 }
 
-export async function validateEvidenceDecision(input: EvidenceDecisionInput): Promise<string[]> {
+export async function validateEvidenceDecision(input: NutritionEvidenceDecisionInput): Promise<string[]> {
   const errors: string[] = [];
   for (const [field, value] of [
     ["id", input.id], ["sourceId", input.sourceId], ["sourceRecordKey", input.sourceRecordKey],
@@ -238,13 +396,21 @@ export async function validateEvidenceDecision(input: EvidenceDecisionInput): Pr
   if (extractionAttemptId !== null && !/^xat_[a-f0-9]{24}$/.test(extractionAttemptId)) errors.push("extractionAttemptId is invalid");
   if (labelAssetId !== null && !/^lbl_[a-f0-9]{24}$/.test(labelAssetId)) errors.push("labelAssetId is invalid");
   if (!validHttpsUrl(input.evidenceUrl)) errors.push("evidenceUrl must use HTTPS");
-  if (input.decision === "redundant" && input.evidenceUrl !== input.payload.imageUrl) {
+  const candidate = nutritionDecisionCandidate(input.payload);
+  if (input.decision === "redundant" && input.evidenceUrl !== candidate.imageUrl) {
     errors.push("evidenceUrl must match the candidate label image");
   }
+  if (isCorrectedNutritionDecisionPayload(input.payload)) {
+    if (input.decision !== "verify") errors.push("reviewedProjection is verification-only");
+    if (input.evidenceUrl !== candidate.imageUrl) errors.push("corrected verification evidenceUrl must match the candidate label image");
+    if (parseNutritionDecisionPayload(input.payload, candidate.barcode) === null) {
+      errors.push("reviewedProjection is not valid");
+    }
+  }
   if (!Number.isFinite(Date.parse(input.decidedAt))) errors.push("decidedAt must be a valid timestamp");
-  if (!nutritionCandidateFromEvidence({ code: "robotoff_nutrition_candidate", details: { candidate: input.payload } }, input.payload.barcode)) {
+  if (!nutritionCandidateFromEvidence({ code: "robotoff_nutrition_candidate", details: { candidate } }, candidate.barcode)) {
     errors.push("payload is not a valid nutrition candidate");
-  } else if (await nutritionCandidateHash(input.payload) !== input.candidateHash) {
+  } else if (await nutritionCandidateHash(candidate) !== input.candidateHash) {
     errors.push("candidateHash does not match payload");
   }
   return errors;

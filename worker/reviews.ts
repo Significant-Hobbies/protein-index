@@ -1,13 +1,17 @@
 import type { ReviewDecision, ReviewItem, ReviewResponse, ReviewStatus, ReviewType } from "../shared/api";
 import {
   canonicalJson,
+  effectiveNutritionProjection,
+  isCorrectedNutritionDecisionPayload,
   nutritionCandidateFromEvidence,
   nutritionCandidateHash,
-  nutritionCandidateNormalizedBasis,
-  nutritionCandidateValues,
+  nutritionDecisionCandidate,
   nutritionDecisionMatchesSelectedProjection,
+  parseNutritionDecisionPayload,
   sha256Hex,
   validateEvidenceDecision,
+  type NutritionDecisionPayload,
+  type NutritionEvidenceDecisionInput,
   type EvidenceDecisionInput,
   type NutritionCandidate,
   type SelectedNutritionProjection,
@@ -281,6 +285,7 @@ export async function resolveReview(
   evidenceUrl: string | null,
   candidateProductId: string | null,
   reviewedText: string | null,
+  reviewedProjection: unknown | null,
 ): Promise<"resolved" | "not_found" | "conflict" | "invalid_decision" | "invalid_candidate"> {
   const review = await db.prepare(`SELECT r.id, r.status, r.product_id, r.type, r.candidate_product_ids_json,
     r.source_record_id, r.evidence_json, s.source_id, s.source_record_id AS source_record_key,
@@ -354,9 +359,10 @@ export async function resolveReview(
   if (decision === "verify_nutrition" && !candidate && !review.nutrition_product_id) return "invalid_decision";
   if (decision === "redundant_nutrition" && (review.source_id !== "open_food_facts_robotoff" || !candidate)) return "invalid_decision";
   if (["verify_ingredients", "reject_ingredients"].includes(decision) && !ingredientCandidate) return "invalid_candidate";
+  if (reviewedProjection !== null && (decision !== "verify_nutrition" || !candidate)) return "invalid_candidate";
   const status = decision === "dismiss" ? "dismissed" : "resolved";
   const decidedAt = new Date().toISOString();
-  let evidenceDecision: EvidenceDecisionInput | null = null;
+  let evidenceDecision: NutritionEvidenceDecisionInput | null = null;
   let ingredientEvidenceDecision: IngredientEvidenceDecisionInput | null = null;
   if (
     candidate && review.source_id && review.source_record_key && review.source_record_id &&
@@ -371,7 +377,13 @@ export async function resolveReview(
     const decisionId = priorBaseDecision?.active === 0
       ? `${baseDecisionId}_${(await sha256Hex({ sourceContentHash: review.source_content_hash, candidateHash })).slice(0, 16)}`
       : baseDecisionId;
-    evidenceDecision = {
+    let payload: NutritionDecisionPayload = candidate;
+    if (reviewedProjection !== null) {
+      const parsedPayload = parseNutritionDecisionPayload({ candidate, reviewedProjection }, candidate.barcode);
+      if (!parsedPayload || !isCorrectedNutritionDecisionPayload(parsedPayload)) return "invalid_candidate";
+      payload = parsedPayload;
+    }
+    const commonDecision = {
       id: decisionId,
       sourceId: review.source_id,
       sourceRecordKey: review.source_record_key,
@@ -380,15 +392,21 @@ export async function resolveReview(
       productId: review.product_id,
       candidateHash,
       ...extractionLink,
-      fieldFamily: "nutrition",
-      decision: decision === "verify_nutrition" ? "verify" : decision === "reject_nutrition" ? "reject" : "redundant",
-      payload: candidate,
+      fieldFamily: "nutrition" as const,
       evidenceUrl: decision === "redundant_nutrition" ? candidate.imageUrl : evidenceUrl ?? candidate.imageUrl,
       rationale,
       decidedBy: "local_operator",
       decidedAt,
     };
-    if ((await validateEvidenceDecision(evidenceDecision)).length > 0) return "invalid_candidate";
+    const builtDecision: NutritionEvidenceDecisionInput = isCorrectedNutritionDecisionPayload(payload)
+      ? { ...commonDecision, decision: "verify", payload }
+      : {
+        ...commonDecision,
+        decision: decision === "verify_nutrition" ? "verify" : decision === "reject_nutrition" ? "reject" : "redundant",
+        payload,
+      };
+    evidenceDecision = builtDecision;
+    if ((await validateEvidenceDecision(builtDecision)).length > 0) return "invalid_candidate";
     if (decision === "redundant_nutrition") {
       const selectedProjection: SelectedNutritionProjection | null = (
         review.product_id
@@ -410,7 +428,7 @@ export async function resolveReview(
           sodiumMg: review.sodium_mg,
         },
       } : null;
-      if (!selectedProjection || !nutritionDecisionMatchesSelectedProjection(evidenceDecision, selectedProjection)) {
+      if (!selectedProjection || !nutritionDecisionMatchesSelectedProjection(builtDecision, selectedProjection)) {
         return "invalid_candidate";
       }
     }
@@ -418,7 +436,7 @@ export async function resolveReview(
       WHERE id = ? OR (
         source_id = ? AND source_record_key = ? AND candidate_hash = ? AND field_family = 'nutrition' AND active = 1
       ) LIMIT 1`)
-      .bind(evidenceDecision.id, evidenceDecision.sourceId, evidenceDecision.sourceRecordKey, evidenceDecision.candidateHash)
+      .bind(builtDecision.id, builtDecision.sourceId, builtDecision.sourceRecordKey, builtDecision.candidateHash)
       .first<{ id: string }>();
     if (conflicting) return "conflict";
   }
@@ -470,10 +488,34 @@ export async function resolveReview(
     ?? evidenceDecision?.evidenceUrl
     ?? evidenceUrl;
   const redundantTransaction = decision === "redundant_nutrition" && evidenceDecision?.decision === "redundant";
+  const guardedNutritionTransaction = evidenceDecision !== null && !redundantTransaction;
+  const exactNutritionDecisionGuard = evidenceDecision
+    ? `EXISTS (
+        SELECT 1 FROM evidence_decisions exact_decision
+        WHERE exact_decision.id = ? AND exact_decision.source_id = ?
+          AND exact_decision.source_record_key = ? AND exact_decision.source_record_id = ?
+          AND exact_decision.source_content_hash = ? AND exact_decision.product_id = ?
+          AND exact_decision.candidate_hash = ? AND exact_decision.field_family = 'nutrition'
+          AND exact_decision.decision = ? AND exact_decision.payload_json = ?
+          AND exact_decision.active = 1
+      )`
+    : "0 = 1";
+  const exactNutritionDecisionBindings = evidenceDecision
+    ? [
+      evidenceDecision.id,
+      evidenceDecision.sourceId,
+      evidenceDecision.sourceRecordKey,
+      evidenceDecision.sourceRecordId,
+      evidenceDecision.sourceContentHash,
+      evidenceDecision.productId,
+      evidenceDecision.candidateHash,
+      evidenceDecision.decision,
+      canonicalJson(evidenceDecision.payload),
+    ]
+    : [];
   let statements: D1PreparedStatement[];
   if (redundantTransaction && evidenceDecision) {
-    const nutrition = nutritionCandidateValues(evidenceDecision.payload);
-    const basis = nutritionCandidateNormalizedBasis(evidenceDecision.payload);
+    const { nutrition, basis } = effectiveNutritionProjection(evidenceDecision.payload);
     const exactProjectionBindings = [
       evidenceDecision.productId,
       basis,
@@ -526,26 +568,45 @@ export async function resolveReview(
           evidenceDecision.id, evidenceDecision.sourceRecordId, evidenceDecision.candidateHash,
         ),
     ];
+  } else if (evidenceDecision) {
+    statements = [
+      db.prepare(`INSERT INTO evidence_decisions
+        (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+          candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+          decided_by, decided_at, active, extraction_attempt_id, label_asset_id)
+        SELECT ?, ?, ?, ?, ?, ?, ?, 'nutrition', ?, ?, ?, ?, ?, ?, 1, ?, ?
+        WHERE EXISTS (
+          SELECT 1 FROM review_items r
+          JOIN source_records s ON s.id = r.source_record_id
+          WHERE r.id = ? AND r.status = 'open' AND r.product_id = ?
+            AND r.source_record_id = ? AND r.evidence_json = ?
+            AND s.id = ? AND s.source_id = ? AND s.source_record_id = ?
+            AND s.content_hash = ? AND s.product_id = ?
+        )`)
+        .bind(
+          evidenceDecision.id, evidenceDecision.sourceId, evidenceDecision.sourceRecordKey,
+          evidenceDecision.sourceRecordId, evidenceDecision.sourceContentHash, evidenceDecision.productId,
+          evidenceDecision.candidateHash, evidenceDecision.decision, canonicalJson(evidenceDecision.payload),
+          evidenceDecision.evidenceUrl, evidenceDecision.rationale, evidenceDecision.decidedBy,
+          evidenceDecision.decidedAt, evidenceDecision.extractionAttemptId ?? null,
+          evidenceDecision.labelAssetId ?? null,
+          id, evidenceDecision.productId, evidenceDecision.sourceRecordId, review.evidence_json,
+          evidenceDecision.sourceRecordId, evidenceDecision.sourceId, evidenceDecision.sourceRecordKey,
+          evidenceDecision.sourceContentHash, evidenceDecision.productId,
+        ),
+      db.prepare(`UPDATE review_items SET status = ?, decision = ?, decision_rationale = ?,
+        decision_evidence_url = ?, decided_by = 'local_operator', resolved_at = ?
+        WHERE id = ? AND status = 'open' AND ${exactNutritionDecisionGuard}`)
+        .bind(
+          status, decision, rationale, resolvedEvidenceUrl, decidedAt, id,
+          ...exactNutritionDecisionBindings,
+        ),
+    ];
   } else {
     statements = [
       db.prepare("UPDATE review_items SET status = ?, decision = ?, decision_rationale = ?, decision_evidence_url = ?, decided_by = 'local_operator', resolved_at = ? WHERE id = ? AND status = 'open'")
         .bind(status, decision, rationale, resolvedEvidenceUrl, decidedAt, id),
     ];
-  }
-  if (evidenceDecision && !redundantTransaction) {
-    statements.push(db.prepare(`INSERT INTO evidence_decisions
-      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
-        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
-        decided_by, decided_at, active, extraction_attempt_id, label_asset_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'nutrition', ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
-      .bind(
-        evidenceDecision.id, evidenceDecision.sourceId, evidenceDecision.sourceRecordKey,
-        evidenceDecision.sourceRecordId, evidenceDecision.sourceContentHash, evidenceDecision.productId,
-        evidenceDecision.candidateHash, evidenceDecision.decision, canonicalJson(evidenceDecision.payload),
-        evidenceDecision.evidenceUrl, evidenceDecision.rationale, evidenceDecision.decidedBy,
-        evidenceDecision.decidedAt, evidenceDecision.extractionAttemptId ?? null,
-        evidenceDecision.labelAssetId ?? null,
-      ));
   }
   if (ingredientEvidenceDecision) {
     statements.push(db.prepare(`INSERT INTO evidence_decisions
@@ -572,13 +633,15 @@ export async function resolveReview(
       ));
   }
   if (review.product_id && review.source_record_id && decision === "verify_nutrition" && candidate) {
-    const nutrition = nutritionCandidateValues(candidate);
-    const normalizedBasis = nutritionCandidateNormalizedBasis(candidate);
+    if (!evidenceDecision) return "invalid_candidate";
+    const originalCandidate = nutritionDecisionCandidate(evidenceDecision.payload);
+    const { nutrition, basis: normalizedBasis } = effectiveNutritionProjection(evidenceDecision.payload);
     statements.push(db.prepare(`INSERT INTO nutrition_facts
       (product_id, source_record_id, status, confidence, authority, basis, preparation_state,
         calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams,
         fibre_grams, sodium_mg, label_verified_at, observed_at, updated_at)
-      VALUES (?, ?, 'verified', 'high', 100, ?, 'as_sold', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      SELECT ?, ?, 'verified', 'high', 100, ?, 'as_sold', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      WHERE ${exactNutritionDecisionGuard}
       ON CONFLICT(product_id) DO UPDATE SET
         source_record_id = excluded.source_record_id, status = excluded.status, confidence = excluded.confidence,
         authority = excluded.authority, basis = excluded.basis, preparation_state = excluded.preparation_state,
@@ -591,9 +654,17 @@ export async function resolveReview(
       .bind(review.product_id, review.source_record_id, normalizedBasis, nutrition.calories, nutrition.proteinGrams,
         nutrition.carbohydrateGrams, nutrition.sugarGrams, nutrition.fatGrams,
         nutrition.saturatedFatGrams, nutrition.fibreGrams, nutrition.sodiumMg,
-        decidedAt, candidate.observedAt, decidedAt));
-    statements.push(db.prepare("UPDATE field_observations SET selected = 0 WHERE product_id = ? AND field_path LIKE 'nutrition.%'")
-      .bind(review.product_id));
+        decidedAt, originalCandidate.observedAt, decidedAt,
+        ...exactNutritionDecisionBindings));
+    statements.push(db.prepare(`UPDATE field_observations SET selected = 0
+      WHERE product_id = ? AND field_path LIKE 'nutrition.%' AND ${exactNutritionDecisionGuard}`)
+      .bind(review.product_id, ...exactNutritionDecisionBindings));
+    statements.push(db.prepare(`DELETE FROM nutrient_values
+      WHERE product_id = ?
+        AND nutrient_code IN ('calories', 'proteinGrams', 'carbohydrateGrams', 'sugarGrams',
+          'fatGrams', 'saturatedFatGrams', 'fibreGrams', 'sodiumMg')
+        AND ${exactNutritionDecisionGuard}`)
+      .bind(review.product_id, ...exactNutritionDecisionBindings));
     for (const [field, column, unit] of NUTRITION_FIELDS) {
       const value = nutrition[field];
       if (value === null) continue;
@@ -602,30 +673,38 @@ export async function resolveReview(
       statements.push(db.prepare(`INSERT INTO field_observations
         (id, product_id, source_record_id, field_path, raw_value_json, normalized_value_json,
           confidence, authority, observed_at, evidence_url, selected, value_hash)
-        VALUES (?, ?, ?, ?, ?, ?, 'high', 100, ?, ?, 1, ?)
+        SELECT ?, ?, ?, ?, ?, ?, 'high', 100, ?, ?, 1, ?
+        WHERE ${exactNutritionDecisionGuard}
         ON CONFLICT(source_record_id, field_path, value_hash) DO UPDATE SET
-          product_id = excluded.product_id, confidence = excluded.confidence, authority = excluded.authority,
+          product_id = excluded.product_id, raw_value_json = excluded.raw_value_json,
+          normalized_value_json = excluded.normalized_value_json,
+          confidence = excluded.confidence, authority = excluded.authority,
           observed_at = excluded.observed_at, evidence_url = excluded.evidence_url, selected = 1`)
         .bind(observationId, review.product_id, review.source_record_id, `nutrition.${field}`,
-          valueJson, valueJson, candidate.observedAt, candidate.imageUrl, `review:${id}:${column}:${valueJson}`));
+          valueJson, valueJson, originalCandidate.observedAt, evidenceDecision.evidenceUrl,
+          `review:${id}:${column}:${valueJson}`, ...exactNutritionDecisionBindings));
       statements.push(db.prepare(`INSERT INTO nutrient_values
         (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'as_sold', 'verified', ?)
+        SELECT ?, ?, ?, ?, ?, ?, ?, 'as_sold', 'verified', ?
+        WHERE ${exactNutritionDecisionGuard}
         ON CONFLICT(source_record_id, nutrient_code, basis, preparation_state) DO UPDATE SET
           product_id = excluded.product_id, quantity = excluded.quantity, unit = excluded.unit,
           status = excluded.status, observed_at = excluded.observed_at`)
-        .bind(`ntr_review_${id}_${column}`, review.product_id, review.source_record_id, field, value, unit, normalizedBasis, candidate.observedAt));
+        .bind(`ntr_review_${id}_${column}`, review.product_id, review.source_record_id, field, value,
+          unit, normalizedBasis, originalCandidate.observedAt, ...exactNutritionDecisionBindings));
     }
     statements.push(db.prepare(`INSERT INTO evidence_outcomes
       (product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by, notes)
-      VALUES (?, 'nutrition', 'verified', ?, ?, ?, ?, 'local_operator', ?)
+      SELECT ?, 'nutrition', 'verified', ?, ?, ?, ?, 'local_operator', ?
+      WHERE ${exactNutritionDecisionGuard}
       ON CONFLICT(product_id, field_family) DO UPDATE SET
         outcome = excluded.outcome, source_record_id = excluded.source_record_id,
         evidence_url = excluded.evidence_url, observed_at = excluded.observed_at,
         verified_at = excluded.verified_at, decided_by = excluded.decided_by, notes = excluded.notes`)
-      .bind(review.product_id, review.source_record_id, evidenceUrl ?? candidate.imageUrl,
-        candidate.observedAt, decidedAt,
-        `${rationale} [Robotoff ${candidate.modelName} ${candidate.modelVersion}; prediction ${candidate.predictionId}; image ${candidate.imageId}]`));
+      .bind(review.product_id, review.source_record_id, evidenceDecision.evidenceUrl,
+        originalCandidate.observedAt, decidedAt,
+        `${rationale} [Robotoff ${originalCandidate.modelName} ${originalCandidate.modelVersion}; prediction ${originalCandidate.predictionId}; image ${originalCandidate.imageId}]`,
+        ...exactNutritionDecisionBindings));
     const nutritionReasons: string[] = [];
     if ((nutrition.proteinGrams! / nutrition.calories!) * 100 >= 10) nutritionReasons.push("protein_at_least_10g_per_100kcal");
     if (((nutrition.proteinGrams! * 4) / nutrition.calories!) * 100 >= 20) nutritionReasons.push("protein_at_least_20_percent_calories");
@@ -633,7 +712,8 @@ export async function resolveReview(
       nutritionally_protein_dense = CASE WHEN ? = 1 OR (? = 1 AND ? * serving_size_grams / 100.0 >= 10) THEN 1 ELSE 0 END,
       nutrition_reasons_json = CASE WHEN ? = 1 AND ? * serving_size_grams / 100.0 >= 10
         THEN json_insert(?, '$[#]', 'protein_at_least_10g_per_serving') ELSE ? END,
-      classifier_version = 'protein-v1', updated_at = ? WHERE id = ?`)
+      classifier_version = 'protein-v1', updated_at = ? WHERE id = ?
+        AND ${exactNutritionDecisionGuard}`)
       .bind(
         nutritionReasons.length > 0 ? 1 : 0,
         normalizedBasis === "per_100g" ? 1 : 0,
@@ -644,6 +724,7 @@ export async function resolveReview(
         JSON.stringify(nutritionReasons),
         decidedAt,
         review.product_id,
+        ...exactNutritionDecisionBindings,
       ));
   } else if (review.product_id && decision === "verify_nutrition") {
     statements.push(db.prepare("UPDATE nutrition_facts SET status = 'verified', confidence = 'high', label_verified_at = ?, updated_at = ? WHERE product_id = ?")
@@ -817,7 +898,7 @@ export async function resolveReview(
   }
   try {
     const results = await db.batch(statements);
-    if (redundantTransaction) {
+    if (redundantTransaction || guardedNutritionTransaction) {
       const inserted = results[0]?.meta.changes ?? 0;
       const resolved = results[1]?.meta.changes ?? 0;
       if (inserted === 0 && resolved === 0) {
@@ -826,7 +907,7 @@ export async function resolveReview(
         return current?.status === "open" ? "invalid_candidate" : "conflict";
       }
       if (inserted !== 1 || resolved !== 1) {
-        throw new Error(`Redundant evidence transaction invariant failed: inserted=${inserted}, resolved=${resolved}`);
+        throw new Error(`Evidence transaction invariant failed: inserted=${inserted}, resolved=${resolved}`);
       }
     }
   } catch (error) {

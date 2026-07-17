@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import {
   canonicalJson,
   canonicalNutritionCandidate,
+  nutritionDecisionCandidate,
   nutritionCandidateHash,
   type NutritionCandidate,
 } from "../shared/evidence-decisions";
@@ -199,7 +200,9 @@ function sourceKey(value: Pick<ReviewEvidenceDecision, "sourceId" | "sourceRecor
 }
 
 function decisionCandidate(decision: ReviewEvidenceDecision): NutritionCandidate | IngredientCandidate {
-  return decision.fieldFamily === "nutrition" ? decision.payload : decision.payload.candidate;
+  return decision.fieldFamily === "nutrition"
+    ? nutritionDecisionCandidate(decision.payload)
+    : decision.payload.candidate;
 }
 
 function candidateBarcode(candidate: NutritionCandidate | IngredientCandidate): string | null {

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { CatalogResponse, CoverageResponse, HealthResponse, ProductDetailResponse, ReviewResponse } from "../shared/api";
 import { canonicalJson, nutritionCandidateFromEvidence, nutritionCandidateHash } from "../shared/evidence-decisions";
 import { ingredientCandidateFromEvidence, ingredientCandidateHash } from "../shared/ingredient-evidence";
+import { resolveReview } from "../worker/reviews";
 
 const worker = exports.default;
 
@@ -788,6 +789,168 @@ describe("Worker catalog API", () => {
     expect(JSON.parse(String(decision?.payload_json))).toMatchObject({ nutritionPer100g: nutrition });
   });
 
+  it("publishes a corrected reviewed projection while preserving the immutable model candidate", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const originalNutrition = {
+      calories: 400, proteinGrams: 40, carbohydrateGrams: 30, sugarGrams: 5,
+      fatGrams: 10, saturatedFatGrams: 3, fibreGrams: 4, sodiumMg: 250,
+    };
+    const evidence = robotoffEvidence(product.gtin, originalNutrition);
+    const candidate = nutritionCandidateFromEvidence(evidence, product.gtin);
+    if (!candidate) throw new Error("Expected a valid model candidate");
+    const reviewedProjection = {
+      basis: "per_100ml",
+      nutritionPer100ml: {
+        calories: 64, proteinGrams: 12, carbohydrateGrams: 2, sugarGrams: null,
+        fatGrams: 0.8, saturatedFatGrams: 0.2, fibreGrams: null, sodiumMg: 35,
+      },
+    };
+    const review = await insertRobotoffReview({ suffix: "corrected", evidence });
+    const priorSource = await env.DB.prepare("SELECT id FROM source_records WHERE product_id = ? AND id <> ? ORDER BY id LIMIT 1")
+      .bind(review.productId, review.sourceRecordId).first<{ id: string }>();
+    if (!priorSource) throw new Error("Expected a prior product source");
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO nutrient_values
+        (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at)
+        VALUES ('nut_stale_corrected_sugar', ?, ?, 'sugarGrams', 99, 'g', 'per_serving', 'as_sold', 'verified', '2026-07-01T00:00:00.000Z')`)
+        .bind(review.productId, priorSource.id),
+      env.DB.prepare(`INSERT INTO nutrient_values
+        (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at)
+        VALUES ('nut_preserved_corrected_vitamin', ?, ?, 'vitamin-c', 12, 'mg', 'per_serving', 'as_sold', 'verified', '2026-07-01T00:00:00.000Z')`)
+        .bind(review.productId, priorSource.id),
+    ]);
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "verify_nutrition",
+        rationale: "Transcribed from the exact current package label",
+        evidenceUrl: candidate.imageUrl,
+        reviewedProjection,
+      }),
+    });
+    expect(response.status).toBe(200);
+
+    const fact = await env.DB.prepare(`SELECT basis, calories, protein_grams, carbohydrate_grams,
+      sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg, observed_at
+      FROM nutrition_facts WHERE product_id = ?`).bind(review.productId).first<Record<string, unknown>>();
+    expect(fact).toEqual({
+      basis: "per_100ml", calories: 64, protein_grams: 12, carbohydrate_grams: 2,
+      sugar_grams: null, fat_grams: 0.8, saturated_fat_grams: 0.2, fibre_grams: null,
+      sodium_mg: 35, observed_at: candidate.observedAt,
+    });
+    const persisted = await env.DB.prepare(`SELECT candidate_hash, payload_json FROM evidence_decisions
+      WHERE id = ?`).bind(`evd_${review.reviewId}`).first<{ candidate_hash: string; payload_json: string }>();
+    expect(persisted?.candidate_hash).toBe(await nutritionCandidateHash(candidate));
+    expect(JSON.parse(persisted?.payload_json ?? "null")).toEqual({ candidate, reviewedProjection });
+    const artifacts = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND source_record_id = ? AND basis = 'per_100ml') AS nutrients,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND nutrient_code = 'sugarGrams') AS stale_core,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND nutrient_code = 'vitamin-c') AS micronutrients,
+      (SELECT COUNT(*) FROM field_observations WHERE product_id = ? AND selected = 1 AND field_path LIKE 'nutrition.%') AS observations,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE product_id = ? AND field_family = 'nutrition' AND observed_at = ?) AS outcomes,
+      (SELECT COUNT(*) FROM review_items WHERE id = ? AND status = 'resolved') AS resolved`)
+      .bind(review.productId, review.sourceRecordId, review.productId, review.productId,
+        review.productId, review.productId, candidate.observedAt, review.reviewId)
+      .first<{ nutrients: number; stale_core: number; micronutrients: number; observations: number; outcomes: number; resolved: number }>();
+    expect(artifacts).toEqual({
+      nutrients: 6, stale_core: 0, micronutrients: 1, observations: 6, outcomes: 1, resolved: 1,
+    });
+  });
+
+  it("rejects malformed reviewed nutrition atomically and rejects corrections on non-verify decisions", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const evidence = robotoffEvidence(product.gtin, {
+      calories: 400, proteinGrams: 40, carbohydrateGrams: 30, sugarGrams: 5,
+      fatGrams: 10, saturatedFatGrams: 3, fibreGrams: 4, sodiumMg: 250,
+    });
+    const candidate = nutritionCandidateFromEvidence(evidence, product.gtin);
+    if (!candidate) throw new Error("Expected a valid model candidate");
+    const malformed = { basis: "per_100g", nutritionPer100g: { calories: 380, proteinGrams: 42 } };
+    const review = await insertRobotoffReview({ suffix: "malformed-correction", evidence });
+    for (const body of [
+      { decision: "verify_nutrition", rationale: "Incomplete transcription", evidenceUrl: candidate.imageUrl, reviewedProjection: malformed },
+      { decision: "reject_nutrition", rationale: "Correction cannot accompany rejection", reviewedProjection: malformed },
+    ]) {
+      const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(400);
+    }
+    const durable = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE id = ?) AS decisions,
+      (SELECT COUNT(*) FROM nutrition_facts WHERE source_record_id = ?) AS facts,
+      (SELECT COUNT(*) FROM review_items WHERE id = ? AND status = 'open') AS open`)
+      .bind(`evd_${review.reviewId}`, review.sourceRecordId, review.reviewId)
+      .first<{ decisions: number; facts: number; open: number }>();
+    expect(durable).toEqual({ decisions: 0, facts: 0, open: 1 });
+  });
+
+  it("fails before every write when source evidence drifts between review read and decision batch", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const evidence = robotoffEvidence(product.gtin, {
+      calories: 400, proteinGrams: 40, carbohydrateGrams: 30, sugarGrams: 5,
+      fatGrams: 10, saturatedFatGrams: 3, fibreGrams: 4, sodiumMg: 250,
+    });
+    const candidate = nutritionCandidateFromEvidence(evidence, product.gtin);
+    if (!candidate) throw new Error("Expected a valid model candidate");
+    const review = await insertRobotoffReview({ suffix: "transaction-race", evidence });
+    let raced = false;
+    const racingDb = new Proxy(env.DB, {
+      get(target, property, receiver) {
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (!raced) {
+              raced = true;
+              await target.prepare("UPDATE source_records SET content_hash = ? WHERE id = ?")
+                .bind("hash_changed_between_read_and_batch", review.sourceRecordId).run();
+            }
+            return target.batch(statements);
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as D1Database;
+
+    const result = await resolveReview(
+      racingDb,
+      review.reviewId,
+      "verify_nutrition",
+      "Exact current label transcription",
+      candidate.imageUrl,
+      null,
+      null,
+      {
+        basis: "per_100g",
+        nutritionPer100g: {
+          calories: 390, proteinGrams: 41, carbohydrateGrams: 28, sugarGrams: 4,
+          fatGrams: 9, saturatedFatGrams: 2.5, fibreGrams: 5, sodiumMg: 225,
+        },
+      },
+    );
+
+    expect(result).toBe("invalid_candidate");
+    expect(raced).toBe(true);
+    const durable = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE id = ?) AS decisions,
+      (SELECT COUNT(*) FROM nutrition_facts WHERE source_record_id = ?) AS facts,
+      (SELECT COUNT(*) FROM nutrient_values WHERE source_record_id = ?) AS nutrients,
+      (SELECT COUNT(*) FROM field_observations WHERE source_record_id = ? AND selected = 1) AS observations,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE source_record_id = ?) AS outcomes,
+      (SELECT COUNT(*) FROM review_items WHERE id = ? AND status = 'open') AS open`)
+      .bind(`evd_${review.reviewId}`, review.sourceRecordId, review.sourceRecordId,
+        review.sourceRecordId, review.sourceRecordId, review.reviewId)
+      .first<Record<string, number>>();
+    expect(durable).toEqual({ decisions: 0, facts: 0, nutrients: 0, observations: 0, outcomes: 0, open: 1 });
+  });
+
   it("records exact duplicate nutrition as redundant without mutating selected facts or verified coverage", async () => {
     const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
       .first<{ gtin: string }>();
@@ -1353,6 +1516,13 @@ describe("Worker catalog API", () => {
         decision: "verify_nutrition",
         rationale: "Synthetic current-label replay verification",
         evidenceUrl: "https://images.openfoodfacts.org/images/products/890/000/000/0012/901.jpg",
+        reviewedProjection: {
+          basis: "per_100g",
+          nutritionPer100g: {
+            calories: 370, proteinGrams: 26, carbohydrateGrams: 45, sugarGrams: null,
+            fatGrams: 9, saturatedFatGrams: 2, fibreGrams: 6, sodiumMg: 260,
+          },
+        },
       }),
     });
     expect(verifyResponse.status).toBe(200);
@@ -1366,12 +1536,20 @@ describe("Worker catalog API", () => {
     const source = await env.DB.prepare("SELECT product_id FROM source_records WHERE source_record_id = '8900000000012:901'")
       .first<{ product_id: string }>();
     if (!source?.product_id) throw new Error("Expected replay source product");
+    const replaySource = await env.DB.prepare("SELECT id FROM source_records WHERE source_record_id = '8900000000012:901'")
+      .first<{ id: string }>();
+    if (!replaySource) throw new Error("Expected replay source record");
     await env.DB.batch([
       env.DB.prepare("DELETE FROM nutrition_facts WHERE product_id = ?").bind(source.product_id),
       env.DB.prepare("DELETE FROM nutrient_values WHERE product_id = ? AND source_record_id IN (SELECT id FROM source_records WHERE source_id = 'open_food_facts_robotoff')").bind(source.product_id),
       env.DB.prepare("DELETE FROM field_observations WHERE product_id = ? AND field_path LIKE 'nutrition.%'").bind(source.product_id),
       env.DB.prepare("DELETE FROM evidence_outcomes WHERE product_id = ? AND field_family = 'nutrition'").bind(source.product_id),
     ]);
+    await env.DB.prepare(`INSERT INTO nutrient_values
+      (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at)
+      VALUES ('nut_replay_preserved_micronutrient', ?, ?, 'vitamin-c-review-replay', 12, 'mg', 'per_100g',
+        'as_sold', 'verified', '2026-07-01T00:00:00.000Z')`)
+      .bind(source.product_id, replaySource.id).run();
     await applyQueries(env.TEST_ROBOTOFF_REPLAY_QUERIES);
 
     const reconstructed = await env.DB.prepare(`SELECT status, confidence, authority, calories, protein_grams,
@@ -1381,12 +1559,29 @@ describe("Worker catalog API", () => {
       status: "verified",
       confidence: "high",
       authority: 100,
-      calories: 365,
-      protein_grams: 25,
-      carbohydrate_grams: 46.5,
-      fat_grams: 8.9,
+      calories: 370,
+      protein_grams: 26,
+      carbohydrate_grams: 45,
+      fat_grams: 9,
     });
     expect(reconstructed?.label_verified_at).toEqual(expect.any(String));
+    const replayedNutrients = await env.DB.prepare(`SELECT nutrient_code, quantity, basis FROM nutrient_values
+      WHERE product_id = ? AND nutrient_code IN ('calories', 'proteinGrams', 'carbohydrateGrams', 'sugarGrams',
+        'fatGrams', 'saturatedFatGrams', 'fibreGrams', 'sodiumMg') ORDER BY nutrient_code`)
+      .bind(source.product_id).all<{ nutrient_code: string; quantity: number; basis: string }>();
+    expect(replayedNutrients.results).toEqual([
+      { nutrient_code: "calories", quantity: 370, basis: "per_100g" },
+      { nutrient_code: "carbohydrateGrams", quantity: 45, basis: "per_100g" },
+      { nutrient_code: "fatGrams", quantity: 9, basis: "per_100g" },
+      { nutrient_code: "fibreGrams", quantity: 6, basis: "per_100g" },
+      { nutrient_code: "proteinGrams", quantity: 26, basis: "per_100g" },
+      { nutrient_code: "saturatedFatGrams", quantity: 2, basis: "per_100g" },
+      { nutrient_code: "sodiumMg", quantity: 260, basis: "per_100g" },
+    ]);
+    const preservedMicronutrient = await env.DB.prepare(`SELECT quantity FROM nutrient_values
+      WHERE product_id = ? AND nutrient_code = 'vitamin-c-review-replay'`).bind(source.product_id)
+      .first<{ quantity: number }>();
+    expect(preservedMicronutrient?.quantity).toBe(12);
     const unresolved = await env.DB.prepare(`SELECT COUNT(*) AS count FROM review_items r
       JOIN source_records s ON s.id = r.source_record_id
       WHERE s.source_record_id IN ('8900000000012:901', '8900000000012:902') AND r.status = 'open'`)

@@ -265,7 +265,7 @@ describe("redundant evidence reconciliation replay", () => {
       .toEqual({ decision: "reject", active: 1 });
   });
 
-  it.each(["verify", "reject"] as const)("does not deactivate legacy %s decisions during source drift", async (decision) => {
+  it.each(["verify", "reject"] as const)("deactivates drifted legacy %s decisions and permits exact re-review", async (decision) => {
     const database = await databaseWithMigrations();
     const product = candidateProduct();
     const firstSql = await importSql(product);
@@ -275,6 +275,17 @@ describe("redundant evidence reconciliation replay", () => {
     changed.contentHash = "e".repeat(64);
     database.exec(await importSql(changed, "2026-07-17T12:00:00.000Z"));
     expect(database.prepare("SELECT decision, active FROM evidence_decisions WHERE id = 'evd_redundant_replay'").get())
+      .toEqual({ decision, active: 0 });
+    database.prepare(`INSERT INTO evidence_decisions
+      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+        decided_by, decided_at, active)
+      SELECT ?, source_id, source_record_key, source_record_id, ?, product_id, candidate_hash,
+        field_family, ?, payload_json, evidence_url, 'Exact re-review after source drift',
+        'test_operator', '2026-07-17T12:30:00.000Z', 1
+      FROM evidence_decisions WHERE id = 'evd_redundant_replay'`)
+      .run(`evd_redecided_${decision}`, changed.contentHash, decision);
+    expect(database.prepare("SELECT decision, active FROM evidence_decisions WHERE id = ?").get(`evd_redecided_${decision}`))
       .toEqual({ decision, active: 1 });
   });
 });

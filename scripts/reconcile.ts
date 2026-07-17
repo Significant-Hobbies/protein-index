@@ -57,6 +57,11 @@ const NUTRITION_PROJECTION_COLUMNS = [
   "sodium_mg",
 ] as const;
 
+const REVIEWED_NUTRIENT_CODES = new Set([
+  "calories", "proteinGrams", "carbohydrateGrams", "sugarGrams",
+  "fatGrams", "saturatedFatGrams", "fibreGrams", "sodiumMg",
+]);
+
 export function nutritionProjectionCompletenessSql(alias: string): string {
   if (!/^[a-z_][a-z0-9_]*$/i.test(alias)) throw new Error("Nutrition SQL alias is invalid");
   return NUTRITION_PROJECTION_COLUMNS
@@ -351,6 +356,7 @@ export async function emitImportSql(input: {
   for await (const line of lines) {
     if (!line.trim()) continue;
     const product = JSON.parse(line) as StagedProduct;
+    const deferredNutritionDriftCleanup: string[] = [];
     const productId = productIdFor(product);
     const sourceRecordId = stableId("src", `${product.source}:${product.sourceRecordId}`);
     const identityHash = identityEvidenceHash(product);
@@ -438,14 +444,16 @@ export async function emitImportSql(input: {
     const nutritionDecisionWhere = nutritionCandidate && exactNutritionProjection
       ? `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.source_record_id = ${sql(sourceRecordId)} AND d.source_content_hash = ${sql(product.contentHash)} AND d.product_id = ${productIdSql} AND d.candidate_hash = ${sql(nutritionCandidate.candidateHash)} AND d.field_family = 'nutrition' AND d.active = 1 AND (d.decision <> 'redundant' OR ${exactNutritionProjection})`
       : null;
-    if (nutritionCandidate && nutritionDecisionWhere) {
-      const reviewedNutritionBasis = nutritionCandidateNormalizedBasis(nutritionCandidate.candidate);
-      const reviewedNutritionKey = reviewedNutritionBasis === "per_100ml" ? "nutritionPer100ml" : "nutritionPer100g";
-      const verifyWhere = `${nutritionDecisionWhere} AND d.decision = 'verify'`;
-      const driftWhere = `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.product_id = ${productIdSql} AND d.field_family = 'nutrition' AND d.active = 1 AND (d.source_content_hash <> ${sql(product.contentHash)} OR d.candidate_hash <> ${sql(nutritionCandidate.candidateHash)})`;
+    if (product.source === "open_food_facts_robotoff") {
+      const exactDecisionAbsent = nutritionDecisionWhere
+        ? `NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${nutritionDecisionWhere})`
+        : "1 = 1";
+      const driftWhere = `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.product_id = ${productIdSql} AND d.field_family = 'nutrition' AND d.active = 1 AND ${nutritionCandidate
+        ? `(d.source_content_hash <> ${sql(product.contentHash)} OR d.source_record_id <> ${sql(sourceRecordId)} OR d.candidate_hash <> ${sql(nutritionCandidate.candidateHash)})`
+        : "1 = 1"}`;
       await write(
         output,
-        `UPDATE nutrition_facts SET status = 'conflict', confidence = 'low', label_verified_at = NULL, updated_at = ${sql(now)} WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${nutritionDecisionWhere});`,
+        `UPDATE nutrition_facts SET status = 'conflict', confidence = 'low', label_verified_at = NULL, updated_at = ${sql(now)} WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND ${exactDecisionAbsent};`,
       );
       await write(
         output,
@@ -453,16 +461,42 @@ export async function emitImportSql(input: {
       );
       await write(
         output,
-        `DELETE FROM evidence_outcomes WHERE product_id = ${productIdSql} AND field_family = 'nutrition' AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${nutritionDecisionWhere});`,
+        `DELETE FROM evidence_outcomes WHERE product_id = ${productIdSql} AND field_family = 'nutrition' AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND ${exactDecisionAbsent};`,
       );
+      await write(
+        output,
+        `DELETE FROM nutrient_values WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND nutrient_code IN ('calories', 'proteinGrams', 'carbohydrateGrams', 'sugarGrams', 'fatGrams', 'saturatedFatGrams', 'fibreGrams', 'sodiumMg') AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND ${exactDecisionAbsent};`,
+      );
+      deferredNutritionDriftCleanup.push(
+        `UPDATE field_observations SET selected = 0 WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND authority = 100 AND field_path LIKE 'nutrition.%' AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND ${exactDecisionAbsent};`,
+        `UPDATE evidence_decisions AS d SET active = 0 WHERE ${driftWhere};`,
+      );
+    }
+    if (nutritionCandidate && nutritionDecisionWhere) {
+      const reviewedNutritionBasis = nutritionCandidateNormalizedBasis(nutritionCandidate.candidate);
+      const reviewedNutritionKey = reviewedNutritionBasis === "per_100ml" ? "nutritionPer100ml" : "nutritionPer100g";
+      const effectiveBasis = `COALESCE(json_extract(d.payload_json, '$.reviewedProjection.basis'), ${sql(reviewedNutritionBasis)})`;
+      const effectiveObservedAt = "COALESCE(json_extract(d.payload_json, '$.candidate.observedAt'), json_extract(d.payload_json, '$.observedAt'))";
+      const effectiveNutritionValue = (field: string): string => `CASE json_extract(d.payload_json, '$.reviewedProjection.basis') WHEN 'per_100g' THEN json_extract(d.payload_json, '$.reviewedProjection.nutritionPer100g.${field}') WHEN 'per_100ml' THEN json_extract(d.payload_json, '$.reviewedProjection.nutritionPer100ml.${field}') ELSE json_extract(d.payload_json, '$.${reviewedNutritionKey}.${field}') END`;
+      const verifyWhere = `${nutritionDecisionWhere} AND d.decision = 'verify'`;
       if (applyEvidenceDecisions) {
         await write(
           output,
-          `INSERT INTO nutrition_facts (product_id, source_record_id, status, confidence, authority, basis, preparation_state, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at, updated_at) SELECT d.product_id, d.source_record_id, 'verified', 'high', 100, ${sql(reviewedNutritionBasis)}, 'as_sold', json_extract(d.payload_json, '$.${reviewedNutritionKey}.calories'), json_extract(d.payload_json, '$.${reviewedNutritionKey}.proteinGrams'), json_extract(d.payload_json, '$.${reviewedNutritionKey}.carbohydrateGrams'), json_extract(d.payload_json, '$.${reviewedNutritionKey}.sugarGrams'), json_extract(d.payload_json, '$.${reviewedNutritionKey}.fatGrams'), json_extract(d.payload_json, '$.${reviewedNutritionKey}.saturatedFatGrams'), json_extract(d.payload_json, '$.${reviewedNutritionKey}.fibreGrams'), json_extract(d.payload_json, '$.${reviewedNutritionKey}.sodiumMg'), d.decided_at, json_extract(d.payload_json, '$.observedAt'), d.decided_at FROM evidence_decisions d WHERE ${verifyWhere} ORDER BY d.decided_at DESC LIMIT 1 ON CONFLICT(product_id) DO UPDATE SET source_record_id = excluded.source_record_id, status = excluded.status, confidence = excluded.confidence, authority = excluded.authority, basis = excluded.basis, preparation_state = excluded.preparation_state, calories = excluded.calories, protein_grams = excluded.protein_grams, carbohydrate_grams = excluded.carbohydrate_grams, sugar_grams = excluded.sugar_grams, fat_grams = excluded.fat_grams, saturated_fat_grams = excluded.saturated_fat_grams, fibre_grams = excluded.fibre_grams, sodium_mg = excluded.sodium_mg, label_verified_at = excluded.label_verified_at, observed_at = excluded.observed_at, updated_at = excluded.updated_at;`,
+          `INSERT INTO nutrition_facts (product_id, source_record_id, status, confidence, authority, basis, preparation_state, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at, updated_at) SELECT d.product_id, d.source_record_id, 'verified', 'high', 100, ${effectiveBasis}, 'as_sold', ${effectiveNutritionValue("calories")}, ${effectiveNutritionValue("proteinGrams")}, ${effectiveNutritionValue("carbohydrateGrams")}, ${effectiveNutritionValue("sugarGrams")}, ${effectiveNutritionValue("fatGrams")}, ${effectiveNutritionValue("saturatedFatGrams")}, ${effectiveNutritionValue("fibreGrams")}, ${effectiveNutritionValue("sodiumMg")}, d.decided_at, ${effectiveObservedAt}, d.decided_at FROM evidence_decisions d WHERE ${verifyWhere} ORDER BY d.decided_at DESC LIMIT 1 ON CONFLICT(product_id) DO UPDATE SET source_record_id = excluded.source_record_id, status = excluded.status, confidence = excluded.confidence, authority = excluded.authority, basis = excluded.basis, preparation_state = excluded.preparation_state, calories = excluded.calories, protein_grams = excluded.protein_grams, carbohydrate_grams = excluded.carbohydrate_grams, sugar_grams = excluded.sugar_grams, fat_grams = excluded.fat_grams, saturated_fat_grams = excluded.saturated_fat_grams, fibre_grams = excluded.fibre_grams, sodium_mg = excluded.sodium_mg, label_verified_at = excluded.label_verified_at, observed_at = excluded.observed_at, updated_at = excluded.updated_at;`,
+        );
+        const effectiveCalories = effectiveNutritionValue("calories");
+        const effectiveProtein = effectiveNutritionValue("proteinGrams");
+        await write(
+          output,
+          `WITH latest_verified AS (SELECT ${effectiveBasis} AS basis, ${effectiveCalories} AS calories, ${effectiveProtein} AS protein FROM evidence_decisions d WHERE ${verifyWhere} ORDER BY d.decided_at DESC LIMIT 1) UPDATE products SET nutritionally_protein_dense = CASE WHEN EXISTS (SELECT 1 FROM latest_verified v WHERE (v.protein / v.calories) * 100 >= 10 OR ((v.protein * 4) / v.calories) * 100 >= 20 OR (v.basis = 'per_100g' AND v.protein * products.serving_size_grams / 100.0 >= 10)) THEN 1 ELSE 0 END, nutrition_reasons_json = (SELECT json_group_array(reason) FROM (SELECT 'protein_at_least_10g_per_100kcal' AS reason FROM latest_verified v WHERE (v.protein / v.calories) * 100 >= 10 UNION ALL SELECT 'protein_at_least_20_percent_calories' FROM latest_verified v WHERE ((v.protein * 4) / v.calories) * 100 >= 20 UNION ALL SELECT 'protein_at_least_10g_per_serving' FROM latest_verified v WHERE v.basis = 'per_100g' AND v.protein * products.serving_size_grams / 100.0 >= 10)), classifier_version = 'protein-v1', updated_at = ${sql(now)} WHERE id = ${productIdSql} AND EXISTS (SELECT 1 FROM latest_verified);`,
         );
         await write(
           output,
           `UPDATE field_observations SET selected = 0 WHERE product_id = ${productIdSql} AND field_path LIKE 'nutrition.%' AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${verifyWhere});`,
+        );
+        await write(
+          output,
+          `DELETE FROM nutrient_values WHERE product_id = ${productIdSql} AND nutrient_code IN ('calories', 'proteinGrams', 'carbohydrateGrams', 'sugarGrams', 'fatGrams', 'saturatedFatGrams', 'fibreGrams', 'sodiumMg') AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${verifyWhere});`,
         );
         const reviewedNutritionFields = [
           ["calories", "kcal"],
@@ -475,22 +509,22 @@ export async function emitImportSql(input: {
           ["sodiumMg", "mg"],
         ] as const;
         for (const [field, unit] of reviewedNutritionFields) {
-          const path = `$.${reviewedNutritionKey}.${field}`;
+          const valueExpression = effectiveNutritionValue(field);
           const valueHash = `reviewed:${nutritionCandidate.candidateHash}:${field}`;
           const observationId = stableId("obs", `${sourceRecordId}:${valueHash}`);
           const nutrientId = stableId("nut", `${sourceRecordId}:${nutritionCandidate.candidateHash}:${field}`);
           await write(
             output,
-            `INSERT INTO field_observations (id, product_id, source_record_id, field_path, raw_value_json, normalized_value_json, confidence, authority, observed_at, evidence_url, selected, value_hash) SELECT ${sql(observationId)}, d.product_id, d.source_record_id, ${sql(`nutrition.${field}`)}, json(json_extract(d.payload_json, ${sql(path)})), json(json_extract(d.payload_json, ${sql(path)})), 'high', 100, json_extract(d.payload_json, '$.observedAt'), d.evidence_url, 1, ${sql(valueHash)} FROM evidence_decisions d WHERE ${verifyWhere} AND json_type(d.payload_json, ${sql(path)}) IN ('integer', 'real') ORDER BY d.decided_at DESC LIMIT 1 ON CONFLICT(source_record_id, field_path, value_hash) DO UPDATE SET product_id = excluded.product_id, confidence = excluded.confidence, authority = excluded.authority, observed_at = excluded.observed_at, evidence_url = excluded.evidence_url, selected = 1;`,
+            `INSERT INTO field_observations (id, product_id, source_record_id, field_path, raw_value_json, normalized_value_json, confidence, authority, observed_at, evidence_url, selected, value_hash) SELECT ${sql(observationId)}, d.product_id, d.source_record_id, ${sql(`nutrition.${field}`)}, json(${valueExpression}), json(${valueExpression}), 'high', 100, ${effectiveObservedAt}, d.evidence_url, 1, ${sql(valueHash)} FROM evidence_decisions d WHERE ${verifyWhere} AND ${valueExpression} IS NOT NULL ORDER BY d.decided_at DESC LIMIT 1 ON CONFLICT(source_record_id, field_path, value_hash) DO UPDATE SET product_id = excluded.product_id, raw_value_json = excluded.raw_value_json, normalized_value_json = excluded.normalized_value_json, confidence = excluded.confidence, authority = excluded.authority, observed_at = excluded.observed_at, evidence_url = excluded.evidence_url, selected = 1;`,
           );
           await write(
             output,
-            `INSERT INTO nutrient_values (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at) SELECT ${sql(nutrientId)}, d.product_id, d.source_record_id, ${sql(field)}, json_extract(d.payload_json, ${sql(path)}), ${sql(unit)}, ${sql(reviewedNutritionBasis)}, 'as_sold', 'verified', json_extract(d.payload_json, '$.observedAt') FROM evidence_decisions d WHERE ${verifyWhere} AND json_type(d.payload_json, ${sql(path)}) IN ('integer', 'real') ORDER BY d.decided_at DESC LIMIT 1 ON CONFLICT(source_record_id, nutrient_code, basis, preparation_state) DO UPDATE SET product_id = excluded.product_id, quantity = excluded.quantity, unit = excluded.unit, status = excluded.status, observed_at = excluded.observed_at;`,
+            `INSERT INTO nutrient_values (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at) SELECT ${sql(nutrientId)}, d.product_id, d.source_record_id, ${sql(field)}, ${valueExpression}, ${sql(unit)}, ${effectiveBasis}, 'as_sold', 'verified', ${effectiveObservedAt} FROM evidence_decisions d WHERE ${verifyWhere} AND ${valueExpression} IS NOT NULL ORDER BY d.decided_at DESC LIMIT 1 ON CONFLICT(source_record_id, nutrient_code, basis, preparation_state) DO UPDATE SET product_id = excluded.product_id, quantity = excluded.quantity, unit = excluded.unit, status = excluded.status, observed_at = excluded.observed_at;`,
           );
         }
         await write(
           output,
-          `INSERT INTO evidence_outcomes (product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by, notes) SELECT d.product_id, 'nutrition', 'verified', d.source_record_id, d.evidence_url, json_extract(d.payload_json, '$.observedAt'), d.decided_at, d.decided_by, d.rationale FROM evidence_decisions d WHERE ${verifyWhere} ORDER BY d.decided_at DESC LIMIT 1 ON CONFLICT(product_id, field_family) DO UPDATE SET outcome = excluded.outcome, source_record_id = excluded.source_record_id, evidence_url = excluded.evidence_url, observed_at = excluded.observed_at, verified_at = excluded.verified_at, decided_by = excluded.decided_by, notes = excluded.notes;`,
+          `INSERT INTO evidence_outcomes (product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by, notes) SELECT d.product_id, 'nutrition', 'verified', d.source_record_id, d.evidence_url, ${effectiveObservedAt}, d.decided_at, d.decided_by, d.rationale FROM evidence_decisions d WHERE ${verifyWhere} ORDER BY d.decided_at DESC LIMIT 1 ON CONFLICT(product_id, field_family) DO UPDATE SET outcome = excluded.outcome, source_record_id = excluded.source_record_id, evidence_url = excluded.evidence_url, observed_at = excluded.observed_at, verified_at = excluded.verified_at, decided_by = excluded.decided_by, notes = excluded.notes;`,
         );
       }
     }
@@ -552,9 +586,12 @@ export async function emitImportSql(input: {
 
     for (const nutrient of product.nutrients) {
       const nutrientId = stableId("nut", `${sourceRecordId}:${nutrient.code}:${nutrient.basis}:${nutrient.preparationState}`);
+      const reviewedCoreGuard = nutritionDecisionWhere && REVIEWED_NUTRIENT_CODES.has(nutrient.code)
+        ? `NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${nutritionDecisionWhere} AND d.decision = 'verify')`
+        : "1 = 1";
       await write(
         output,
-        `INSERT INTO nutrient_values (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at) VALUES (${sql(nutrientId)}, ${productIdSql}, ${sql(sourceRecordId)}, ${sql(nutrient.code)}, ${nutrient.quantity}, ${sql(nutrient.unit)}, ${sql(nutrient.basis)}, ${sql(nutrient.preparationState)}, ${sql(product.nutrition.status === "verified" ? "verified" : "unverified")}, ${sql(product.observedAt)}) ON CONFLICT(source_record_id, nutrient_code, basis, preparation_state) DO UPDATE SET product_id = excluded.product_id, quantity = excluded.quantity, unit = excluded.unit, status = excluded.status, observed_at = excluded.observed_at;`,
+        `INSERT INTO nutrient_values (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at) SELECT ${sql(nutrientId)}, ${productIdSql}, ${sql(sourceRecordId)}, ${sql(nutrient.code)}, ${nutrient.quantity}, ${sql(nutrient.unit)}, ${sql(nutrient.basis)}, ${sql(nutrient.preparationState)}, ${sql(product.nutrition.status === "verified" ? "verified" : "unverified")}, ${sql(product.observedAt)} WHERE ${reviewedCoreGuard} ON CONFLICT(source_record_id, nutrient_code, basis, preparation_state) DO UPDATE SET product_id = excluded.product_id, quantity = excluded.quantity, unit = excluded.unit, status = excluded.status, observed_at = excluded.observed_at;`,
       );
     }
 
@@ -621,6 +658,7 @@ export async function emitImportSql(input: {
       await write(output, `UPDATE field_observations SET selected = 0 WHERE product_id = ${productIdSql} AND field_path = ${sql(field)};`);
       await write(output, `UPDATE field_observations SET selected = 1 WHERE id = (SELECT id FROM field_observations WHERE product_id = ${productIdSql} AND field_path = ${sql(field)} ORDER BY authority DESC, observed_at DESC, id LIMIT 1);`);
     }
+    for (const cleanup of deferredNutritionDriftCleanup) await write(output, cleanup);
 
     for (const issue of product.validationIssues) {
       const isIngredientCandidate = issue.code === "robotoff_ingredient_candidate" && ingredientCandidate !== null;

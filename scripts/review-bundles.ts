@@ -4,12 +4,17 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import {
   canonicalJson,
+  effectiveNutritionProjection,
+  isCorrectedNutritionDecisionPayload,
+  nutritionDecisionCandidate,
   nutritionDecisionMatchesSelectedProjection,
-  nutritionCandidateFromEvidence,
   nutritionCandidateNormalizedBasis,
   nutritionCandidateValues,
+  parseNutritionDecisionPayload,
   validateEvidenceDecision,
+  type CorrectedNutritionEvidenceDecisionInput,
   type EvidenceDecisionInput,
+  type NutritionEvidenceDecisionInput,
   type SelectedNutritionProjection,
 } from "../shared/evidence-decisions";
 import {
@@ -20,7 +25,7 @@ import {
 import { normalizeGtin } from "../shared/gtin";
 import type { NormalizedIngredient } from "../shared/types";
 
-export type ReviewEvidenceDecision = EvidenceDecisionInput | IngredientEvidenceDecisionInput;
+export type ReviewEvidenceDecision = NutritionEvidenceDecisionInput | IngredientEvidenceDecisionInput;
 
 export interface ReviewDecisionManifest {
   schemaVersion: 1;
@@ -178,13 +183,15 @@ function parseDecision(value: unknown): ReviewEvidenceDecision {
   };
   const payloadRecord = record(input.payload);
   if (input.fieldFamily === "nutrition") {
-    const payloadBarcode = typeof payloadRecord?.barcode === "string" ? payloadRecord.barcode : null;
-    const payload = nutritionCandidateFromEvidence(
-      { code: "robotoff_nutrition_candidate", details: { candidate: input.payload } },
-      payloadBarcode,
-    );
-    if (!payload) throw new Error("Decision payload is not a valid nutrition candidate");
-    return { ...common, fieldFamily: "nutrition", payload };
+    const originalCandidate = record(payloadRecord?.candidate) ?? payloadRecord;
+    const payloadBarcode = typeof originalCandidate?.barcode === "string" ? originalCandidate.barcode : null;
+    const payload = parseNutritionDecisionPayload(input.payload, payloadBarcode);
+    if (!payload) throw new Error("Decision payload is not a valid nutrition decision payload");
+    if (isCorrectedNutritionDecisionPayload(payload)) {
+      if (decision !== "verify") throw new Error("Corrected nutrition decisions must verify");
+      return { ...common, decision: "verify", fieldFamily: "nutrition", payload } satisfies CorrectedNutritionEvidenceDecisionInput;
+    }
+    return { ...common, fieldFamily: "nutrition", payload } satisfies EvidenceDecisionInput;
   }
   if (input.fieldFamily === "ingredients") {
     if (decision === "redundant") throw new Error("Redundant decisions currently support nutrition only");
@@ -412,7 +419,7 @@ export function validateReviewDecisionSources(bundle: ReviewDecisionBundle, sour
     ) throw new Error(`Decision ${decision.id} source evidence has drifted`);
     const sourceGtin = normalizeGtin(source.productGtin);
     const candidateBarcode = decision.fieldFamily === "nutrition"
-      ? decision.payload.barcode
+      ? nutritionDecisionCandidate(decision.payload).barcode
       : decision.payload.candidate.barcode;
     if (!sourceGtin || sourceGtin !== normalizeGtin(candidateBarcode)) {
       throw new Error(`Decision ${decision.id} product GTIN does not match candidate evidence`);
@@ -596,8 +603,8 @@ export async function emitReviewDecisionSql(
           decided_by = excluded.decided_by, notes = excluded.notes;`);
       continue;
     }
-    const nutrition = nutritionCandidateValues(decision.payload);
-    const normalizedBasis = nutritionCandidateNormalizedBasis(decision.payload);
+    const { nutrition, basis: normalizedBasis } = effectiveNutritionProjection(decision.payload);
+    const originalCandidate = nutritionDecisionCandidate(decision.payload);
     statements.push(`INSERT INTO nutrition_facts
       (product_id, source_record_id, status, confidence, authority, basis, preparation_state,
         calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams,
@@ -606,7 +613,7 @@ export async function emitReviewDecisionSql(
         ${sql(normalizedBasis)}, 'as_sold', ${sql(nutrition.calories)}, ${sql(nutrition.proteinGrams)},
         ${sql(nutrition.carbohydrateGrams)}, ${sql(nutrition.sugarGrams)}, ${sql(nutrition.fatGrams)},
         ${sql(nutrition.saturatedFatGrams)}, ${sql(nutrition.fibreGrams)}, ${sql(nutrition.sodiumMg)},
-        ${sql(decision.decidedAt)}, ${sql(decision.payload.observedAt)}, ${sql(decision.decidedAt)})
+        ${sql(decision.decidedAt)}, ${sql(originalCandidate.observedAt)}, ${sql(decision.decidedAt)})
       ON CONFLICT(product_id) DO UPDATE SET source_record_id = excluded.source_record_id,
         status = excluded.status, confidence = excluded.confidence, authority = excluded.authority,
         basis = excluded.basis, preparation_state = excluded.preparation_state,
@@ -636,6 +643,9 @@ export async function emitReviewDecisionSql(
       WHERE id = ${sql(decision.productId)};`);
     statements.push(`UPDATE field_observations SET selected = 0
       WHERE product_id = ${sql(decision.productId)} AND field_path LIKE 'nutrition.%';`);
+    statements.push(`DELETE FROM nutrient_values WHERE product_id = ${sql(decision.productId)}
+      AND nutrient_code IN ('calories', 'proteinGrams', 'carbohydrateGrams', 'sugarGrams',
+        'fatGrams', 'saturatedFatGrams', 'fibreGrams', 'sodiumMg');`);
     for (const [field, unit] of nutritionFields) {
       const value = nutrition[field];
       if (value === null) continue;
@@ -646,7 +656,7 @@ export async function emitReviewDecisionSql(
           confidence, authority, observed_at, evidence_url, selected, value_hash)
         VALUES (${sql(stableId("obs", `${decision.id}:${field}`))}, ${sql(decision.productId)},
           ${sql(decision.sourceRecordId)}, ${sql(`nutrition.${field}`)}, ${sql(valueJson)}, ${sql(valueJson)},
-          'high', 100, ${sql(decision.payload.observedAt)}, ${sql(decision.evidenceUrl)}, 1, ${sql(valueHash)})
+          'high', 100, ${sql(originalCandidate.observedAt)}, ${sql(decision.evidenceUrl)}, 1, ${sql(valueHash)})
         ON CONFLICT(source_record_id, field_path, value_hash) DO UPDATE SET
           product_id = excluded.product_id, confidence = excluded.confidence, authority = excluded.authority,
           observed_at = excluded.observed_at, evidence_url = excluded.evidence_url, selected = 1;`);
@@ -654,7 +664,7 @@ export async function emitReviewDecisionSql(
         (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at)
         VALUES (${sql(stableId("nut", `${decision.id}:${field}`))}, ${sql(decision.productId)},
           ${sql(decision.sourceRecordId)}, ${sql(field)}, ${sql(value)}, ${sql(unit)}, ${sql(normalizedBasis)},
-          'as_sold', 'verified', ${sql(decision.payload.observedAt)})
+          'as_sold', 'verified', ${sql(originalCandidate.observedAt)})
         ON CONFLICT(source_record_id, nutrient_code, basis, preparation_state) DO UPDATE SET
           product_id = excluded.product_id, quantity = excluded.quantity, unit = excluded.unit,
           status = excluded.status, observed_at = excluded.observed_at;`);
@@ -663,7 +673,7 @@ export async function emitReviewDecisionSql(
       (product_id, field_family, outcome, source_record_id, evidence_url, observed_at,
         verified_at, decided_by, notes)
       VALUES (${sql(decision.productId)}, 'nutrition', 'verified', ${sql(decision.sourceRecordId)},
-        ${sql(decision.evidenceUrl)}, ${sql(decision.payload.observedAt)}, ${sql(decision.decidedAt)},
+        ${sql(decision.evidenceUrl)}, ${sql(originalCandidate.observedAt)}, ${sql(decision.decidedAt)},
         ${sql(decision.decidedBy)}, ${sql(decision.rationale)})
       ON CONFLICT(product_id, field_family) DO UPDATE SET outcome = excluded.outcome,
         source_record_id = excluded.source_record_id, evidence_url = excluded.evidence_url,
@@ -881,12 +891,11 @@ export function validateReviewPostconditions(bundle: ReviewDecisionBundle, value
   const verified = bundle.decisions.filter(({ decision }) => decision === "verify");
   for (const decision of verified) {
     const observedAt = decision.fieldFamily === "nutrition"
-      ? decision.payload.observedAt
+      ? nutritionDecisionCandidate(decision.payload).observedAt
       : decision.payload.candidate.observedAt;
     if (decision.fieldFamily === "nutrition") {
       const fact = nutritionFacts.get(decision.productId);
-      const nutrition = nutritionCandidateValues(decision.payload);
-      const normalizedBasis = nutritionCandidateNormalizedBasis(decision.payload);
+      const { nutrition, basis: normalizedBasis } = effectiveNutritionProjection(decision.payload);
       if (
         !fact || fact.source_record_id !== decision.sourceRecordId || fact.status !== "verified" || fact.authority !== 100 ||
         fact.basis !== normalizedBasis ||

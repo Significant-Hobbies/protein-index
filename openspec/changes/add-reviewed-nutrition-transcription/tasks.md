@@ -1,15 +1,15 @@
 ## 1. Backward-compatible evidence contract
 
-- [ ] 1.1 Add a corrected nutrition decision payload variant that retains the canonical original candidate and carries one explicit reviewed mass or volume projection.
-- [ ] 1.2 Add shared parsing, validation, canonicalization, and effective-projection helpers that preserve every existing candidate-only decision byte-for-byte.
-- [ ] 1.3 Add regression fixtures for missing keys, invalid values, ambiguous bases, correction-on-reject, candidate/source drift, and legacy bundle compatibility.
+- [x] 1.1 Add a corrected nutrition decision payload variant that retains the canonical original candidate and carries one explicit reviewed mass or volume projection.
+- [x] 1.2 Add shared parsing, validation, canonicalization, and effective-projection helpers that preserve every existing candidate-only decision byte-for-byte.
+- [x] 1.3 Add regression fixtures for missing keys, invalid values, ambiguous bases, correction-on-reject, candidate/source drift, and legacy bundle compatibility.
 
 ## 2. Review and publication paths
 
-- [ ] 2.1 Extend the local review API and Worker transaction to accept a corrected projection only for verified source-bound nutrition candidates.
-- [ ] 2.2 Make review-bundle read/write, publication SQL, postconditions, and exact replay use the shared effective projection without changing legacy bundles.
-- [ ] 2.3 Make reconciliation replay corrected mass and volume decisions atomically and revoke trust when the source or original candidate drifts.
-- [ ] 2.4 Add Worker+D1 and publication tests for corrected verification, exact replay, malformed input, and pre-write drift failure.
+- [x] 2.1 Extend the local review API and Worker transaction to accept a corrected projection only for verified source-bound nutrition candidates.
+- [x] 2.2 Make review-bundle read/write, publication SQL, postconditions, and exact replay use the shared effective projection without changing legacy bundles.
+- [x] 2.3 Make reconciliation replay corrected mass and volume decisions atomically and revoke trust when the source or original candidate drifts.
+- [x] 2.4 Add Worker+D1 and publication tests for corrected verification, exact replay, malformed input, and pre-write drift failure.
 
 ## 3. Operator experience and API
 

@@ -39,10 +39,13 @@ import {
 
 import {
   canonicalJson,
+  effectiveNutritionProjection,
   nutritionCandidateFromEvidence,
   nutritionCandidateHash,
   nutritionCandidateNormalizedBasis,
   nutritionCandidateValues,
+  nutritionDecisionCandidate,
+  type CorrectedNutritionEvidenceDecisionInput,
   type EvidenceDecisionInput,
 } from "../shared/evidence-decisions";
 import { ingredientCandidateHash, type IngredientEvidenceDecisionInput } from "../shared/ingredient-evidence";
@@ -534,6 +537,24 @@ async function volumeReviewDecision(id: string): Promise<EvidenceDecisionInput> 
   };
 }
 
+async function correctedNutritionReviewDecision(id: string): Promise<CorrectedNutritionEvidenceDecisionInput> {
+  const legacy = await reviewDecision(id, "verify");
+  return {
+    ...legacy,
+    decision: "verify",
+    payload: {
+      candidate: legacy.payload,
+      reviewedProjection: {
+        basis: "per_100ml",
+        nutritionPer100ml: {
+          calories: 64, proteinGrams: 12, carbohydrateGrams: 2, sugarGrams: null,
+          fatGrams: 0.8, saturatedFatGrams: 0.2, fibreGrams: null, sodiumMg: 35,
+        },
+      },
+    },
+  };
+}
+
 async function ingredientReviewDecision(id: string): Promise<IngredientEvidenceDecisionInput> {
   const parsed = parseRobotoffIngredientEvidence(
     { image_predictions: [ingredientPrediction] },
@@ -798,7 +819,7 @@ describe("Reviewed evidence bundles", () => {
       sourceRecordId: item.sourceRecordId,
       contentHash: item.sourceContentHash,
       productId: item.productId,
-      productGtin: item.fieldFamily === "nutrition" ? item.payload.barcode : item.payload.candidate.barcode,
+      productGtin: item.fieldFamily === "nutrition" ? nutritionDecisionCandidate(item.payload).barcode : item.payload.candidate.barcode,
     })))).not.toThrow();
     expect(() => validateReviewDecisionSources(parsed, parsed.decisions.map((item, index) => ({
       sourceId: item.sourceId,
@@ -806,7 +827,7 @@ describe("Reviewed evidence bundles", () => {
       sourceRecordId: item.sourceRecordId,
       contentHash: index === 0 ? "drifted" : item.sourceContentHash,
       productId: item.productId,
-      productGtin: item.fieldFamily === "nutrition" ? item.payload.barcode : item.payload.candidate.barcode,
+      productGtin: item.fieldFamily === "nutrition" ? nutritionDecisionCandidate(item.payload).barcode : item.payload.candidate.barcode,
     })))).toThrow("source evidence has drifted");
     expect(() => validateExistingEvidenceDecisions(parsed, [{ ...first, rationale: "Conflicting edit" }]))
       .toThrow("conflicts with an existing decision id");
@@ -825,7 +846,7 @@ describe("Reviewed evidence bundles", () => {
       source_record_id: item.sourceRecordId,
       content_hash: item.sourceContentHash,
       product_id: item.productId,
-      product_gtin: item.fieldFamily === "nutrition" ? item.payload.barcode : item.payload.candidate.barcode,
+      product_gtin: item.fieldFamily === "nutrition" ? nutritionDecisionCandidate(item.payload).barcode : item.payload.candidate.barcode,
     }));
     expect(() => validateReviewPublicationState(parsed, [
       { success: true, results: sourceRows },
@@ -907,8 +928,8 @@ describe("Reviewed evidence bundles", () => {
     const parsed = await readReviewDecisionBundle(bundle.directory);
     const exact = parsed.decisions[0];
     if (!exact || exact.fieldFamily !== "nutrition") throw new Error("Expected a volume nutrition decision");
-    expect(nutritionCandidateNormalizedBasis(exact.payload)).toBe("per_100ml");
-    expect(nutritionCandidateValues(exact.payload)).toMatchObject({ calories: 50, proteinGrams: 10 });
+    expect(effectiveNutritionProjection(exact.payload).basis).toBe("per_100ml");
+    expect(effectiveNutritionProjection(exact.payload).nutrition).toMatchObject({ calories: 50, proteinGrams: 10 });
 
     const sqlPath = join(directory, "volume-review.sql");
     await emitReviewDecisionSql(parsed, sqlPath);
@@ -956,7 +977,8 @@ describe("Reviewed evidence bundles", () => {
       (SELECT basis FROM nutrition_facts WHERE product_id = 'prd_volume_fixture') AS basis
     `).get()).toEqual({ decisions: 1, nutrients: 8, observations: 8, outcomes: 1, review_status: "resolved", basis: "per_100ml" });
 
-    const nutrition = nutritionCandidateValues(exact.payload);
+    const nutrition = effectiveNutritionProjection(exact.payload).nutrition;
+    const originalCandidate = nutritionDecisionCandidate(exact.payload);
     const decisionRow = {
       id: exact.id,
       source_id: exact.sourceId,
@@ -990,7 +1012,7 @@ describe("Reviewed evidence bundles", () => {
         fibre_grams: nutrition.fibreGrams,
         sodium_mg: nutrition.sodiumMg,
         label_verified_at: exact.decidedAt,
-        observed_at: exact.payload.observedAt,
+        observed_at: originalCandidate.observedAt,
       }] },
       { success: true, results: [] },
       { success: true, results: [] },
@@ -1000,7 +1022,7 @@ describe("Reviewed evidence bundles", () => {
         outcome: "verified",
         source_record_id: exact.sourceRecordId,
         evidence_url: exact.evidenceUrl,
-        observed_at: exact.payload.observedAt,
+        observed_at: originalCandidate.observedAt,
         verified_at: exact.decidedAt,
         decided_by: exact.decidedBy,
       }] },
@@ -1023,6 +1045,97 @@ describe("Reviewed evidence bundles", () => {
       { success: true, results: [{ ...postconditions[1]!.results[0], basis: "per_100g" }] },
       ...postconditions.slice(2),
     ])).toThrow("Verified nutrition postcondition failed");
+  });
+
+  it("round-trips and idempotently publishes corrected nutrition without stale core nutrients", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-review-corrected-"));
+    const decision = await correctedNutritionReviewDecision("evd_corrected");
+    const written = await writeReviewDecisionBundle({ decisions: [decision], outputRoot: directory });
+    const parsed = await readReviewDecisionBundle(written.directory);
+    const exact = parsed.decisions[0];
+    if (!exact || exact.fieldFamily !== "nutrition") throw new Error("Expected corrected nutrition decision");
+    expect(exact.payload).toEqual(decision.payload);
+    expect(nutritionDecisionCandidate(exact.payload)).toEqual(decision.payload.candidate);
+    expect(effectiveNutritionProjection(exact.payload)).toEqual({
+      basis: "per_100ml",
+      nutrition: decision.payload.reviewedProjection.nutritionPer100ml,
+    });
+    expect(exact.candidateHash).toBe(await nutritionCandidateHash(decision.payload.candidate));
+
+    const sourceRow = {
+      source_id: exact.sourceId,
+      source_record_key: exact.sourceRecordKey,
+      source_record_id: exact.sourceRecordId,
+      content_hash: exact.sourceContentHash,
+      product_id: exact.productId,
+      product_gtin: nutritionDecisionCandidate(exact.payload).barcode,
+    };
+    expect(() => validateReviewPublicationState(parsed, [
+      { success: true, results: [{ ...sourceRow, content_hash: "drifted" }] },
+      { success: true, results: [] },
+      { success: true, results: [] },
+    ])).toThrow("source evidence has drifted");
+
+    const sqlPath = join(directory, "corrected-review.sql");
+    await emitReviewDecisionSql(parsed, sqlPath);
+    const publicationSql = await readFile(sqlPath, "utf8");
+    expect(publicationSql).toContain('"candidate"');
+    expect(publicationSql).toContain('"reviewedProjection"');
+    expect(publicationSql).toContain("'per_100ml', 'as_sold', 64, 12");
+
+    const database = new DatabaseSync(":memory:");
+    for (const migration of (await readdir("migrations")).filter((name) => name.endsWith(".sql")).sort()) {
+      database.exec(await readFile(join("migrations", migration), "utf8"));
+    }
+    database.exec(`
+      INSERT INTO sources (id, name, kind, identity_authority, nutrition_authority, ingredient_authority,
+        license_url, retention_notes, credential_requirement, created_at)
+      VALUES ('open_food_facts_robotoff', 'Robotoff', 'open_data', 0, 20, 0, NULL, 'review only', NULL, '2026-07-15T00:00:00.000Z');
+      INSERT INTO ingestion_runs (id, source_id, adapter_version, mode, input_identifier, records_read,
+        india_records, staged_records, terminal_evidence, source_complete, market_complete, status, started_at, completed_at)
+      VALUES ('run_corrected', 'open_food_facts_robotoff', 'test', 'sample', 'fixture', 1, 1, 1,
+        'end_of_file', 1, 0, 'completed', '2026-07-15T00:00:00.000Z', '2026-07-15T00:00:00.000Z');
+      INSERT INTO products (id, gtin, brand, brand_normalized, name, name_normalized, category,
+        marketed_reasons_json, nutrition_reasons_json, classifier_version, completeness,
+        completeness_missing_json, identity_authority, created_at, updated_at)
+      VALUES ('prd_fixture', '08900000000012', 'Test', 'test', 'Corrected drink', 'corrected drink',
+        'ready_to_drink', '[]', '[]', 'protein-v1', 50, '[]', 100,
+        '2026-07-15T00:00:00.000Z', '2026-07-15T00:00:00.000Z');
+      INSERT INTO source_records (id, source_id, source_record_id, product_id, source_url, content_hash,
+        observed_at, first_seen_run_id, last_seen_run_id, raw_evidence_json, resolution_rule, identity_hash)
+      VALUES ('src_evd_corrected', 'open_food_facts_robotoff', '8900000000012:prediction-evd_corrected',
+        'prd_fixture', 'https://robotoff.openfoodfacts.org/', 'source_evd_corrected',
+        '2026-07-15T00:00:00.000Z', 'run_corrected', 'run_corrected', '{}', 'exact_gtin', 'identity-corrected'),
+      ('src_prior_core', 'open_food_facts_robotoff', '8900000000012:prior-core',
+        'prd_fixture', 'https://robotoff.openfoodfacts.org/', 'prior-core',
+        '2026-07-14T00:00:00.000Z', 'run_corrected', 'run_corrected', '{}', 'exact_gtin', 'identity-prior');
+      INSERT INTO nutrient_values
+        (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at)
+      VALUES ('nut_stale_sugar', 'prd_fixture', 'src_prior_core', 'sugarGrams', 99, 'g', 'per_100g', 'as_sold', 'verified', '2026-07-14T00:00:00.000Z'),
+        ('nut_keep_vitamin', 'prd_fixture', 'src_prior_core', 'vitamin-c', 12, 'mg', 'per_100g', 'as_sold', 'verified', '2026-07-14T00:00:00.000Z');
+      INSERT INTO review_items (id, type, priority, status, source_record_id, product_id,
+        candidate_product_ids_json, evidence_json, created_at)
+      VALUES ('rev_corrected', 'nutrition_validation', 50, 'open', 'src_evd_corrected', 'prd_fixture',
+        '[]', '{"details":{"candidateHash":"${exact.candidateHash}"}}', '2026-07-15T00:00:00.000Z');
+    `);
+    database.exec(publicationSql);
+    database.exec(publicationSql);
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions) AS decisions,
+      (SELECT basis FROM nutrition_facts WHERE product_id = 'prd_fixture') AS basis,
+      (SELECT calories FROM nutrition_facts WHERE product_id = 'prd_fixture') AS calories,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = 'prd_fixture' AND nutrient_code IN
+        ('calories', 'proteinGrams', 'carbohydrateGrams', 'sugarGrams', 'fatGrams',
+          'saturatedFatGrams', 'fibreGrams', 'sodiumMg')) AS core_nutrients,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = 'prd_fixture' AND nutrient_code = 'sugarGrams') AS stale_core,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = 'prd_fixture' AND nutrient_code = 'vitamin-c') AS micronutrients,
+      (SELECT COUNT(*) FROM field_observations WHERE product_id = 'prd_fixture' AND selected = 1) AS observations,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE product_id = 'prd_fixture' AND field_family = 'nutrition') AS outcomes,
+      (SELECT status FROM review_items WHERE id = 'rev_corrected') AS review_status
+    `).get()).toEqual({
+      decisions: 1, basis: "per_100ml", calories: 64, core_nutrients: 6, stale_core: 0,
+      micronutrients: 1, observations: 6, outcomes: 1, review_status: "resolved",
+    });
   });
 
   it("publishes exact redundant nutrition as a terminal fact no-op and fails closed on projection drift", async () => {
@@ -2456,6 +2569,207 @@ describe("Robotoff label evidence", () => {
     expect(automaticSql).toContain("UPDATE nutrition_facts SET status = 'conflict'");
     expect(automaticSql).not.toContain("SELECT d.product_id, d.source_record_id, 'verified'");
     expect(automaticSql).not.toContain("'nutrition', 'verified', d.source_record_id");
+  });
+
+  it("retires source-drifted nutrition trust, preserves micros, and permits same-candidate re-review", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-nutrition-drift-replay-"));
+    const result = parseRobotoffNutritionEvidence({ image_predictions: [prediction(70, "70", {
+      "energy-kcal_100g": nutrient(365, "kcal"),
+      proteins_100g: nutrient(25, "g"),
+      carbohydrates_100g: nutrient(46, "g"),
+      fat_100g: nutrient(9, "g"),
+    })] }, context);
+    const staged = result.staged[0];
+    const issue = staged?.validationIssues.find(({ code }) => code === "robotoff_nutrition_candidate");
+    const candidate = nutritionCandidateFromEvidence(issue, staged?.gtin ?? null);
+    if (!staged || !candidate) throw new Error("Expected a staged nutrition candidate");
+    const candidateHash = await nutritionCandidateHash(candidate);
+    const stagedPath = join(directory, "staged-products.jsonl");
+    const manifestPath = join(directory, "manifest.json");
+    const sqlPath = join(directory, "initial.sql");
+    const now = "2026-07-17T10:00:00.000Z";
+    const manifest: SourceManifest = {
+      schemaVersion: 1,
+      source: "open_food_facts_robotoff",
+      sourceKind: "open_data",
+      sourceAuthority: { identity: 0, nutrition: 20, ingredients: 0 },
+      sourceLicenseUrl: "https://opendatacommons.org/licenses/odbl/1-0/",
+      sourceRetentionNotes: "Drift replay fixture",
+      adapterVersion: "robotoff-drift-test",
+      input: "fixture",
+      inputHash: "7".repeat(64),
+      inputBytes: 1,
+      sourceUpdatedAt: null,
+      startedAt: now,
+      completedAt: now,
+      mode: "sample",
+      terminalEvidence: "end_of_file",
+      sourceComplete: true,
+      marketComplete: false,
+      advertisedTotal: 1,
+      recordsRead: 1,
+      indiaRecords: 1,
+      stagedRecords: 1,
+      invalidRecords: 0,
+      duplicateRecords: 0,
+      newRecords: 1,
+      changedRecords: 0,
+      unchangedRecords: 0,
+      missingSinceRecords: 0,
+      knownExclusions: [],
+      disconnectedSources: [],
+    };
+    await writeFile(stagedPath, `${JSON.stringify(staged)}\n`, "utf8");
+    await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`, "utf8");
+    await emitImportSql({ stagedPath, manifestPath, outputPath: sqlPath });
+
+    const database = new DatabaseSync(":memory:");
+    for (const migration of (await readdir("migrations")).filter((name) => name.endsWith(".sql")).sort()) {
+      database.exec(await readFile(join("migrations", migration), "utf8"));
+    }
+    database.exec(await readFile(sqlPath, "utf8"));
+    const bound = database.prepare(`SELECT s.id AS source_record_id, s.content_hash, s.product_id,
+      r.id AS review_id FROM source_records s JOIN review_items r ON r.source_record_id = s.id
+      WHERE s.source_id = 'open_food_facts_robotoff'`).get() as {
+      source_record_id: string; content_hash: string; product_id: string; review_id: string;
+    };
+    const oldProjection = {
+      basis: "per_100g" as const,
+      nutritionPer100g: {
+        calories: 360, proteinGrams: 26, carbohydrateGrams: 45, sugarGrams: null,
+        fatGrams: 8, saturatedFatGrams: null, fibreGrams: null, sodiumMg: 200,
+      },
+    };
+    const oldPayload = canonicalJson({ candidate, reviewedProjection: oldProjection });
+    database.prepare(`INSERT INTO evidence_decisions
+      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+        decided_by, decided_at, active)
+      VALUES ('evd_drift_old', 'open_food_facts_robotoff', ?, ?, ?, ?, ?, 'nutrition',
+        'verify', ?, ?, 'Old exact transcription', 'test_operator', ?, 1)`)
+      .run(staged.sourceRecordId, bound.source_record_id, bound.content_hash, bound.product_id,
+        candidateHash, oldPayload, candidate.imageUrl, now);
+    database.exec(`
+      UPDATE review_items SET status = 'resolved', decision = 'verify_nutrition' WHERE id = '${bound.review_id}';
+      INSERT INTO nutrition_facts
+        (product_id, source_record_id, status, confidence, authority, basis, preparation_state,
+          calories, protein_grams, sodium_mg, label_verified_at, observed_at, updated_at)
+      VALUES ('${bound.product_id}', '${bound.source_record_id}', 'verified', 'high', 100,
+        'per_100g', 'as_sold', 360, 26, 200, '${now}', '${candidate.observedAt}', '${now}');
+      INSERT INTO nutrient_values
+        (id, product_id, source_record_id, nutrient_code, quantity, unit, basis, preparation_state, status, observed_at)
+      VALUES ('nut_drift_calories', '${bound.product_id}', '${bound.source_record_id}', 'calories', 360,
+        'kcal', 'per_100g', 'as_sold', 'verified', '${candidate.observedAt}'),
+        ('nut_drift_vitamin', '${bound.product_id}', '${bound.source_record_id}', 'vitamin-c', 12,
+        'mg', 'per_100g', 'as_sold', 'verified', '${candidate.observedAt}');
+      INSERT INTO field_observations
+        (id, product_id, source_record_id, field_path, raw_value_json, normalized_value_json,
+          confidence, authority, observed_at, evidence_url, selected, value_hash)
+      VALUES ('obs_drift_calories', '${bound.product_id}', '${bound.source_record_id}', 'nutrition.calories',
+        '360', '360', 'high', 100, '${candidate.observedAt}', '${candidate.imageUrl}', 1,
+        'reviewed:${candidateHash}:calories');
+      INSERT INTO evidence_outcomes
+        (product_id, field_family, outcome, source_record_id, evidence_url, observed_at,
+          verified_at, decided_by, notes)
+      VALUES ('${bound.product_id}', 'nutrition', 'verified', '${bound.source_record_id}',
+        '${candidate.imageUrl}', '${candidate.observedAt}', '${now}', 'test_operator', 'Old review');
+    `);
+
+    const drifted = structuredClone(staged);
+    drifted.contentHash = "8".repeat(64);
+    const driftManifest = { ...manifest, inputHash: "8".repeat(64), startedAt: "2026-07-17T11:00:00.000Z", completedAt: "2026-07-17T11:00:00.000Z" };
+    await writeFile(stagedPath, `${JSON.stringify(drifted)}\n`, "utf8");
+    await writeFile(manifestPath, `${JSON.stringify(driftManifest)}\n`, "utf8");
+    const driftSqlPath = join(directory, "drift.sql");
+    await emitImportSql({ stagedPath, manifestPath, outputPath: driftSqlPath });
+    const driftSql = await readFile(driftSqlPath, "utf8");
+    database.exec(driftSql);
+    expect(database.prepare(`SELECT
+      (SELECT active FROM evidence_decisions WHERE id = 'evd_drift_old') AS old_active,
+      (SELECT status FROM nutrition_facts WHERE product_id = ?) AS nutrition_status,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND nutrient_code = 'calories' AND status = 'verified') AS trusted_core,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND nutrient_code = 'vitamin-c') AS micros,
+      (SELECT selected FROM field_observations WHERE id = 'obs_drift_calories') AS old_selected,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE product_id = ? AND field_family = 'nutrition') AS outcomes,
+      (SELECT COUNT(*) FROM review_items WHERE source_record_id = ? AND status = 'open'
+        AND json_extract(evidence_json, '$.details.candidateHash') = ?) AS open_reviews`)
+      .get(bound.product_id, bound.product_id, bound.product_id, bound.product_id,
+        bound.source_record_id, candidateHash)).toEqual({
+      old_active: 0, nutrition_status: "conflict", trusted_core: 0, micros: 1,
+      old_selected: 0, outcomes: 0, open_reviews: 1,
+    });
+    const driftCounts = database.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions) AS decisions,
+      (SELECT COUNT(*) FROM nutrient_values) AS nutrients,
+      (SELECT COUNT(*) FROM field_observations) AS observations,
+      (SELECT COUNT(*) FROM review_items) AS reviews`).get();
+    database.exec(driftSql);
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions) AS decisions,
+      (SELECT COUNT(*) FROM nutrient_values) AS nutrients,
+      (SELECT COUNT(*) FROM field_observations) AS observations,
+      (SELECT COUNT(*) FROM review_items) AS reviews`).get()).toEqual(driftCounts);
+
+    const currentReview = database.prepare(`SELECT id FROM review_items WHERE source_record_id = ? AND status = 'open'
+      AND json_extract(evidence_json, '$.details.candidateHash') = ?`).get(bound.source_record_id, candidateHash) as { id: string };
+    const newProjection = {
+      basis: "per_100ml" as const,
+      nutritionPer100ml: {
+        calories: 64, proteinGrams: 12, carbohydrateGrams: 2, sugarGrams: null,
+        fatGrams: 0.8, saturatedFatGrams: 0.2, fibreGrams: null, sodiumMg: 35,
+      },
+    };
+    database.prepare(`INSERT INTO evidence_decisions
+      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+        decided_by, decided_at, active)
+      VALUES (?, 'open_food_facts_robotoff', ?, ?, ?, ?, ?, 'nutrition', 'verify', ?, ?,
+        'Current exact transcription', 'test_operator', '2026-07-17T12:00:00.000Z', 1)`)
+      .run(`evd_${currentReview.id}`, staged.sourceRecordId, bound.source_record_id, drifted.contentHash,
+        bound.product_id, candidateHash, canonicalJson({ candidate, reviewedProjection: newProjection }), candidate.imageUrl);
+    database.exec(driftSql);
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE active = 1 AND candidate_hash = ?) AS current_decisions,
+      (SELECT status FROM review_items WHERE id = ?) AS review_status,
+      (SELECT basis FROM nutrition_facts WHERE product_id = ?) AS basis,
+      (SELECT calories FROM nutrition_facts WHERE product_id = ?) AS calories,
+      (SELECT normalized_value_json FROM field_observations WHERE source_record_id = ?
+        AND field_path = 'nutrition.calories' AND value_hash = ?) AS observation_value,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND nutrient_code = 'vitamin-c') AS micros`)
+      .get(candidateHash, currentReview.id, bound.product_id, bound.product_id, bound.source_record_id,
+        `reviewed:${candidateHash}:calories`, bound.product_id)).toEqual({
+      current_decisions: 1, review_status: "resolved", basis: "per_100ml", calories: 64,
+      observation_value: "64", micros: 1,
+    });
+
+    const candidateRemoved = structuredClone(drifted);
+    candidateRemoved.contentHash = "9".repeat(64);
+    candidateRemoved.validationIssues = candidateRemoved.validationIssues.filter(
+      ({ code }) => code !== "robotoff_nutrition_candidate",
+    );
+    const removedManifest = {
+      ...manifest,
+      inputHash: "9".repeat(64),
+      startedAt: "2026-07-17T13:00:00.000Z",
+      completedAt: "2026-07-17T13:00:00.000Z",
+    };
+    await writeFile(stagedPath, `${JSON.stringify(candidateRemoved)}\n`, "utf8");
+    await writeFile(manifestPath, `${JSON.stringify(removedManifest)}\n`, "utf8");
+    const removedSqlPath = join(directory, "candidate-removed.sql");
+    await emitImportSql({ stagedPath, manifestPath, outputPath: removedSqlPath });
+    database.exec(await readFile(removedSqlPath, "utf8"));
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE active = 1 AND field_family = 'nutrition') AS active_decisions,
+      (SELECT status FROM nutrition_facts WHERE product_id = ?) AS nutrition_status,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND nutrient_code = 'calories' AND status = 'verified') AS trusted_core,
+      (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND nutrient_code = 'vitamin-c') AS micros,
+      (SELECT selected FROM field_observations WHERE id = 'obs_drift_calories') AS old_selected,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE product_id = ? AND field_family = 'nutrition') AS outcomes`)
+      .get(bound.product_id, bound.product_id, bound.product_id, bound.product_id)).toEqual({
+      active_decisions: 0, nutrition_status: "conflict", trusted_core: 0,
+      micros: 1, old_selected: 0, outcomes: 0,
+    });
+    database.close();
   });
 
   it("normalizes an explicit serving basis only with serving mass", () => {
