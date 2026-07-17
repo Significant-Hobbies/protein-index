@@ -33,7 +33,12 @@ export interface CatalogProduct {
   nutritionallyProteinDense: boolean | null;
   nutritionReasons: string[];
   nutritionStatus: EvidenceStatus;
+  nutritionEvidenceUrl: string | null;
+  nutritionEvidenceKind: "label" | "source" | null;
   ingredientStatus: EvidenceStatus;
+  ingredientEvidenceUrl: string | null;
+  ingredientEvidenceKind: "label" | "source" | null;
+  ingredientTerminalOutcome: TerminalUnavailableOutcome | null;
   completeness: number;
   nutrition: {
     calories: number | null;
@@ -95,6 +100,7 @@ export interface ReviewItem {
   productName: string | null;
   brand: string | null;
   sourceRecordId: string | null;
+  sourceUrl: string | null;
   candidateProductIds: string[];
   candidates: Array<{
     id: string;
@@ -233,6 +239,7 @@ export interface CompletionLabelEvidence {
   contentSha256: string;
   fetchedAt: string;
   attemptedAt: string;
+  reasonCodes: string[];
 }
 
 export interface CompletionSummary {
@@ -271,6 +278,7 @@ export interface CompletionLedgerItem {
   primaryReviewId: string | null;
   primaryActionId: string;
   extraction: CompletionExtractionSummary;
+  reasonCodes: string[];
   labels: CompletionLabelEvidence[];
   labelsTruncated: boolean;
 }
@@ -297,6 +305,20 @@ export interface CompletionLabelEvidenceResponse {
   family: Exclude<CompletionFamily, "identity">;
   items: CompletionLabelEvidence[];
   pagination: { page: number; pageSize: number; total: number; pages: number };
+}
+
+export interface IdentityEvidenceDecisionRequest {
+  sourceRecordId: string;
+  evidenceUrl: string;
+  rationale: string;
+}
+
+export interface IdentityEvidenceDecisionResponse {
+  status: "verified";
+  productId: string;
+  sourceRecordId: string;
+  decisionId: string;
+  idempotent: boolean;
 }
 
 export interface HealthResponse {

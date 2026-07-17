@@ -11,8 +11,9 @@ all India-tagged foods first and classify protein products afterward.
 
 The dashboard has two explicit evidence boundaries:
 
-- **Trusted** shows protein-relevant products with verified nutrition only.
-- **All evidence** is the discovery view. It exposes comparison metrics only
+- **Trusted** shows protein-relevant products only when exact current identity,
+  authority-100 verified nutrition, and terminal ingredient evidence all agree.
+- **Discovery** exposes comparison metrics only
   when structured nutrition passes validation, keeps community evidence visibly
   unverified, and withholds missing or conflicting values.
 
@@ -112,11 +113,16 @@ and fetched again.
 ## Automatic fresh-evidence publication
 
 Successful default-branch runs of `Source sync`, API enrichment, nutrition-label
-extraction, and ingredient-label extraction automatically enter one serialized,
-protected publication path. The path accepts only the exact run artifact and
+extraction, and ingredient-label extraction currently enter one serialized,
+credential-scoped publication path. The path accepts only the exact run artifact and
 head commit from its four-workflow allowlist. It verifies portable checksums,
 source/cohort accounting, the fixed 20% discovery-drop ceiling, and every staged
 record before generating SQL.
+
+The repository's `production` environment currently has no required reviewer.
+Keep automatic publication fail-closed on pending migrations until that path is
+disabled or a hard human approval gate is configured; applying the pending
+migrations without one would allow a later successful producer run to write D1.
 
 Automatic publication has a deliberately narrower authority boundary than
 manual publication:

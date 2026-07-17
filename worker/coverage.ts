@@ -52,16 +52,24 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
       SUM(CASE WHEN n.status IS NULL OR n.status = 'missing' THEN 1 ELSE 0 END) AS missing_nutrition,
       SUM(CASE WHEN n.status IS NOT NULL AND n.status <> 'missing' THEN 1 ELSE 0 END) AS structured_nutrition,
       SUM(CASE WHEN p.nutrition_image_url IS NOT NULL THEN 1 ELSE 0 END) AS nutrition_label_images,
-      SUM(CASE WHEN n.status = 'verified' THEN 1 ELSE 0 END) AS verified_nutrition,
-      SUM(CASE WHEN n.status = 'unverified' THEN 1 ELSE 0 END) AS unverified_nutrition,
+      SUM(CASE WHEN n.status = 'verified' AND verified_nutrition.product_id IS NOT NULL THEN 1 ELSE 0 END) AS verified_nutrition,
+      SUM(CASE WHEN n.status = 'unverified' OR (
+        n.status = 'verified' AND verified_nutrition.product_id IS NULL
+      ) THEN 1 ELSE 0 END) AS unverified_nutrition,
       SUM(CASE WHEN n.status = 'conflict' THEN 1 ELSE 0 END) AS conflicting_nutrition,
-      SUM(CASE WHEN i.status = 'unverified' THEN 1 ELSE 0 END) AS unverified_ingredients,
-      SUM(CASE WHEN i.status = 'verified' THEN 1 ELSE 0 END) AS verified_ingredients,
+      SUM(CASE WHEN i.status = 'unverified' OR (
+        i.status = 'verified' AND verified_ingredients.product_id IS NULL
+      ) THEN 1 ELSE 0 END) AS unverified_ingredients,
+      SUM(CASE WHEN i.status = 'verified' AND verified_ingredients.product_id IS NOT NULL THEN 1 ELSE 0 END) AS verified_ingredients,
       SUM(CASE WHEN p.marketed_protein = 1 THEN 1 ELSE 0 END) AS marketed_protein,
       SUM(CASE WHEN p.nutritionally_protein_dense = 1 THEN 1 ELSE 0 END) AS nutritionally_protein_dense
       FROM products p
       LEFT JOIN nutrition_facts n ON n.product_id = p.id
       LEFT JOIN ingredient_statements i ON i.product_id = p.id
+      LEFT JOIN current_verified_nutrition_facts verified_nutrition
+        ON verified_nutrition.product_id = p.id
+      LEFT JOIN current_verified_ingredient_statements verified_ingredients
+        ON verified_ingredients.product_id = p.id
       WHERE p.is_active = 1`),
     db.prepare(`SELECT s.id, s.name, s.kind, r.status, r.completed_at, r.records_read,
       r.india_records, r.source_complete, r.manifest_json

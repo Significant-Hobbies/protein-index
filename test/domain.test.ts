@@ -133,7 +133,7 @@ describe("nutrition accuracy and classification", () => {
 
 describe("metrics and completeness", () => {
   it("defaults the dashboard to evidence-aware protein density", () => {
-    expect(initialFilters).toEqual({ q: "", category: "all", verification: "all", ingredientVerification: "all", scope: "all", sort: "protein_density" });
+    expect(initialFilters).toEqual({ q: "", category: "all", trust: "all", verification: "all", ingredientVerification: "all", scope: "all", sort: "protein_density" });
     expect(metricEvidenceLabel("unverified")).toBe("unverified nutrition");
     expect(metricEvidenceLabel("verified")).toBe("verified nutrition");
   });

@@ -19,6 +19,7 @@ import {
 } from "../../shared/extraction-outcomes";
 import { parseRobotoffIngredientEvidence } from "./robotoff-ingredients";
 import { startExtractionProgress, type ExtractionProgressSink } from "./extraction-progress";
+import { readCompletedResponseCodes } from "./response-cache";
 import {
   createExtractionAttempt,
   createExtractionAttemptLabel,
@@ -421,6 +422,7 @@ export async function extractRobotoffIngredientApi(
   const manifestPath = join(options.outputDirectory, "manifest.json");
   const reportPath = join(options.outputDirectory, "report.json");
   const checksumsPath = join(options.outputDirectory, "checksums.sha256");
+  const completedResponseCodes = await readCompletedResponseCodes(outcomesPath);
   const priorLabelAssets = await readReusableLabelAssets([
     join(options.outputDirectory, "prior-label-assets.jsonl"),
     labelAssetsPath,
@@ -533,6 +535,9 @@ export async function extractRobotoffIngredientApi(
       const errorPath = `${responsePath}.error.json`;
       let stored: StoredIngredientResponse;
       try {
+        if (!completedResponseCodes.has(context.code)) {
+          throw new Error("Response belongs to an incomplete prior extraction outcome.");
+        }
         const existing = JSON.parse(await readFile(responsePath, "utf8")) as StoredIngredientResponse;
         if (existing.requestedCode !== context.code
           || existing.requestSchema !== ROBOTOFF_INGREDIENT_REQUEST_SCHEMA
@@ -544,7 +549,9 @@ export async function extractRobotoffIngredientApi(
         stored = existing;
         resumedBarcodes += 1;
       } catch (error) {
-        if (error instanceof SyntaxError || (error instanceof Error && !error.message.includes("ENOENT"))) throw error;
+        const incompletePrior = error instanceof Error
+          && error.message === "Response belongs to an incomplete prior extraction outcome.";
+        if (!incompletePrior && (error instanceof SyntaxError || (error instanceof Error && !error.message.includes("ENOENT")))) throw error;
         try {
           stored = {
             requestedCode: context.code,

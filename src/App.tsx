@@ -21,15 +21,22 @@ import type {
 } from "../shared/api";
 import { NUTRITION_FIELDS } from "../shared/evidence-decisions";
 import type { ReviewedNutritionProjection, SelectedNutritionProjection } from "../shared/evidence-decisions";
+import type {
+  TerminalEvidenceHistoryEntry,
+  TerminalEvidenceOption,
+  TerminalEvidenceOptionsResponse,
+  TerminalUnavailableOutcome as ExactTerminalUnavailableOutcome,
+} from "../shared/terminal-evidence";
 import { validateNutrition } from "../shared/nutrition";
 import type { EvidenceStatus, MetricResult, NormalizedIngredient, NutritionPer100g } from "../shared/types";
-import { api } from "./api";
+import { api, TerminalEvidenceRequestError } from "./api";
 
 type Tab = "catalog" | "reviews" | "coverage";
 
 export const initialFilters = {
   q: "",
   category: "all",
+  trust: "all",
   verification: "all",
   ingredientVerification: "all",
   scope: "all",
@@ -287,6 +294,13 @@ function StatusBadge({ status }: { status: EvidenceStatus }) {
   return <span className={`status status-${status}`}><i aria-hidden="true" />{status}</span>;
 }
 
+function IngredientStatusBadge({ product }: { product: Pick<CatalogProduct, "ingredientStatus" | "ingredientTerminalOutcome"> }) {
+  if (product.ingredientTerminalOutcome) {
+    return <span className="status status-verified"><i aria-hidden="true" />{product.ingredientTerminalOutcome.replaceAll("_", " ")}</span>;
+  }
+  return <StatusBadge status={product.ingredientStatus} />;
+}
+
 function ProductVisual({ product, size = "small" }: { product: Pick<CatalogProduct, "imageUrl" | "brand" | "name">; size?: "small" | "large" }) {
   const [failed, setFailed] = useState(false);
   const initials = `${product.brand} ${product.name}`.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]?.toUpperCase()).join("");
@@ -304,7 +318,6 @@ function ClassificationBadges({ product }: { product: CatalogProduct }) {
     <div className="badge-row">
       {product.marketedProtein && <span className="tag tag-market">marketed protein</span>}
       {product.nutritionallyProteinDense === true && <span className="tag tag-dense">protein-dense</span>}
-      {product.nutritionallyProteinDense === null && <span className="tag">density unknown</span>}
     </div>
   );
 }
@@ -320,8 +333,8 @@ export function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
     return (
       <div className="empty empty-catalog">
         <span className="empty-mark" aria-hidden="true">0</span>
-        <strong>{data.trustedDefault ? "No label-verified products yet." : "No products match this view."}</strong>
-        <span>{data.trustedDefault ? "The catalog is live, but community nutrition is never promoted into trusted comparisons." : "Try a broader category, scope, or evidence filter."}</span>
+        <strong>{data.trustedDefault ? "No fully trusted products yet." : "No products match this view."}</strong>
+        <span>{data.trustedDefault ? "Trusted comparisons require exact current identity, verified nutrition, and terminal ingredient evidence." : "Try a broader category, scope, or evidence filter."}</span>
         {data.trustedDefault && <button onClick={onExplore}>Explore the discovery catalog</button>}
       </div>
     );
@@ -350,7 +363,7 @@ export function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
                 <div className="product-identity"><ProductVisual product={product} /><div><button className="product-link" onClick={() => onOpen(product.id)}><strong>{product.name}</strong><span>{product.brand}{product.flavour ? ` · ${product.flavour}` : ""}</span></button><ClassificationBadges product={product} /></div></div>
               </td>
               <td className="metric-primary"><strong>{metric(product.metrics.proteinPer100Calories, " g")}</strong><small>{metricEvidenceLabel(product.nutritionStatus)}</small></td>
-              <td><StatusBadge status={product.nutritionStatus} /><small>ingredients: {product.ingredientStatus}</small></td>
+              <td><StatusBadge status={product.nutritionStatus} /><small>ingredients: {product.ingredientTerminalOutcome?.replaceAll("_", " ") ?? product.ingredientStatus}</small></td>
               <td><strong>{formatNumber(product.nutrition.proteinGrams)} g</strong><small>{nutritionBasisLabel(product.nutrition.basis)}</small></td>
               <td><strong>{product.nutrition.calories === null ? "—" : `${formatNumber(product.nutrition.calories)} kcal`}</strong><small>{nutritionBasisLabel(product.nutrition.basis)}</small></td>
               <td>{metric(product.metrics.proteinCaloriePercentage, "%")}</td>
@@ -371,7 +384,11 @@ export function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
               <span className="card-arrow" aria-hidden="true">↗</span>
             </button>
             <div className="product-card-metric"><strong>{metric(product.metrics.proteinPer100Calories, " g")}</strong><span>protein / 100 kcal</span><small>{metricEvidenceLabel(product.nutritionStatus)}</small></div>
-            <div className="product-card-meta"><StatusBadge status={product.nutritionStatus} /><span>{product.nutrition.proteinGrams === null ? "Protein missing" : `${formatNumber(product.nutrition.proteinGrams)} g protein`} · {product.nutrition.calories === null ? "Energy missing" : `${formatNumber(product.nutrition.calories)} kcal`} · {nutritionBasisLabel(product.nutrition.basis)}</span><span>{product.completeness}% fields present</span></div>
+            <div className="product-card-evidence" aria-label="Evidence status">
+              <span>Nutrition <StatusBadge status={product.nutritionStatus} /></span>
+              <span>Ingredients <IngredientStatusBadge product={product} /></span>
+            </div>
+            <div className="product-card-meta"><span>{product.nutrition.proteinGrams === null ? "Protein missing" : `${formatNumber(product.nutrition.proteinGrams)} g protein`} · {product.nutrition.calories === null ? "Energy missing" : `${formatNumber(product.nutrition.calories)} kcal`} · {nutritionBasisLabel(product.nutrition.basis)}</span><span>{product.completeness}% fields present</span></div>
             <ClassificationBadges product={product} />
           </article>
         ))}
@@ -427,7 +444,9 @@ function ProductDrawer({ detail, loading, error, onClose }: {
     };
   }, [onClose]);
 
-  const nutritionImageUrl = publicEvidenceUrl(detail?.nutritionImageUrl ?? null);
+  const nutritionEvidenceUrl = publicEvidenceUrl(detail?.nutritionEvidenceUrl ?? null);
+  const nutritionSourceImageUrl = publicEvidenceUrl(detail?.nutritionImageUrl ?? null);
+  const ingredientEvidenceUrl = publicEvidenceUrl(detail?.ingredientEvidenceUrl ?? null);
 
   return (
     <div className="drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
@@ -446,13 +465,13 @@ function ProductDrawer({ detail, loading, error, onClose }: {
 
             <section className="trust-panel">
               <div><span>Nutrition</span><StatusBadge status={detail.nutritionStatus} /></div>
-              <div><span>Ingredients</span><StatusBadge status={detail.ingredientStatus} /></div>
+              <div><span>Ingredients</span><IngredientStatusBadge product={detail} /></div>
               <div><span>Field coverage</span><strong>{detail.completeness}%</strong></div>
               <div><span>Open reviews</span><strong>{detail.openReviewCount}</strong></div>
             </section>
 
             <section>
-              <div className="section-title"><div><h3>Nutrition · {nutritionBasisLabel(detail.nutrition.basis)}</h3><small>{detail.nutrition.labelVerifiedAt ? `label verified ${new Date(detail.nutrition.labelVerifiedAt).toLocaleDateString("en-IN")}` : "not label verified"}</small></div>{nutritionImageUrl && <a className="evidence-link" href={nutritionImageUrl} target="_blank" rel="noreferrer">View label evidence ↗</a>}</div>
+              <div className="section-title"><div><h3>Nutrition · {nutritionBasisLabel(detail.nutrition.basis)}</h3><small>{detail.nutrition.labelVerifiedAt ? `label verified ${new Date(detail.nutrition.labelVerifiedAt).toLocaleDateString("en-IN")}` : "not label verified"}</small></div>{nutritionEvidenceUrl ? <a className="evidence-link" href={nutritionEvidenceUrl} target="_blank" rel="noreferrer">Open verified {detail.nutritionEvidenceKind === "label" ? "label" : "source"} evidence ↗</a> : nutritionSourceImageUrl ? <a className="evidence-link" href={nutritionSourceImageUrl} target="_blank" rel="noreferrer">View source image ↗</a> : null}</div>
               <div className="nutrition-grid">
                 {[
                   ["Energy", detail.nutrition.calories, "kcal"],
@@ -493,8 +512,8 @@ function ProductDrawer({ detail, loading, error, onClose }: {
             </section>
 
             <section>
-              <div className="section-title"><h3>Ingredients</h3><StatusBadge status={detail.ingredientStatus} /></div>
-              <p className="ingredient-raw">{detail.ingredientStatement ?? "No ingredient statement available."}</p>
+              <div className="section-title"><h3>Ingredients</h3><div><IngredientStatusBadge product={detail} />{ingredientEvidenceUrl && <a className="evidence-link" href={ingredientEvidenceUrl} target="_blank" rel="noreferrer">Open {detail.ingredientEvidenceKind === "label" ? "label" : "source"} evidence ↗</a>}</div></div>
+              <p className="ingredient-raw">{detail.ingredientStatement ?? (detail.ingredientTerminalOutcome ? `Ingredients ${detail.ingredientTerminalOutcome.replaceAll("_", " ")} in the reviewed evidence.` : "No ingredient statement available.")}</p>
               <IngredientTree items={detail.ingredients} />
               <div className="evidence-groups">
                 <div><h4>Allergens</h4>{detail.allergens.length ? detail.allergens.map((item) => <span className={`tag allergen-${item.declaration}`} key={`${item.name}-${item.declaration}`}>{item.declaration.replace("_", " ")}: {item.name}</span>) : <span className="muted">{detail.ingredientStatus === "verified" ? "No allergens declared on the verified statement" : "No verified allergen declaration available"}</span>}</div>
@@ -887,7 +906,7 @@ function SelectedProjection({ projection }: { projection: SelectedNutritionProje
   );
 }
 
-function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, statusFilter, page, onType, onStatus, onPage, readOnly = false }: {
+export function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, statusFilter, page, onType, onStatus, onPage, readOnly = false }: {
   data: ReviewResponse | null;
   loading: boolean;
   error: string | null;
@@ -939,7 +958,7 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, s
       {data.items.length === 0 ? <div className="empty review-empty"><strong>No matching evidence items.</strong><span>Choose another evidence type or wait for the next source run.</span></div> : data.items.map((item) => {
         const candidate = reviewNutritionCandidate(item.evidence);
         const ingredientCandidate = reviewIngredientCandidate(item.evidence);
-        const evidenceUrl = evidenceUrls[item.id] ?? candidate?.imageUrl ?? ingredientCandidate?.imageUrl ?? "";
+        const evidenceUrl = evidenceUrls[item.id] ?? candidate?.imageUrl ?? ingredientCandidate?.imageUrl ?? item.sourceUrl ?? "";
         const rationale = rationales[item.id] ?? "";
         const redundantRationaleReady = rationale.trim().length >= 3;
         const reviewedText = reviewedTexts[item.id] ?? ingredientCandidate?.entityText ?? "";
@@ -975,19 +994,19 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, s
                     <span>{candidate.brand}{candidate.flavour ? ` · ${candidate.flavour}` : ""}</span>
                     <small>GTIN {candidate.gtin ?? "missing"} · {candidate.netQuantityGrams ? `${formatNumber(candidate.netQuantityGrams, 0)} g` : "pack missing"}</small>
                   </button>
-                  {!readOnly && <button disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "match", rationales[item.id] ?? "", null, candidate.id, null, null))}>Match</button>}
+                  {!readOnly && <button disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "match", rationales[item.id] ?? "", evidenceUrl || null, candidate.id, null, null))}>Match</button>}
                 </div>
               ))}
             </div>
           )}
           {!readOnly && item.status === "open" && <><label htmlFor={`review-rationale-${item.id}`}>Decision rationale<textarea id={`review-rationale-${item.id}`} name={`rationale-${item.id}`} value={rationales[item.id] ?? ""} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="What evidence supports this decision?" /></label>
-          {item.type !== "identity" && <label htmlFor={`review-evidence-${item.id}`}>Label or authoritative evidence URL<input id={`review-evidence-${item.id}`} name={`evidenceUrl-${item.id}`} type="url" value={evidenceUrl} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>}
+          <label htmlFor={`review-evidence-${item.id}`}>{item.type === "identity" ? "Current source or retained-label evidence URL" : "Label or authoritative evidence URL"}<input id={`review-evidence-${item.id}`} name={`evidenceUrl-${item.id}`} type="url" value={evidenceUrl} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>
           {actionErrors[item.id] && <div className="review-action-error" role="alert"><strong>Decision was not saved.</strong><span>{actionErrors[item.id]}</span></div>}
           <div className="review-actions">
             {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "verify_nutrition", rationale, evidenceUrl || null, null, null, null))}>{candidate ? "Verify exact label values" : "Verify nutrition"}</button><button className="secondary" disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "reject_nutrition", rationale, evidenceUrl || null, null, null, null))}>Reject candidate</button></> : null}
             {item.status === "open" && item.redundantEligible && confirmingRedundant !== item.id && <button className="redundant" disabled={working === item.id} onClick={() => setConfirmingRedundant(item.id)} aria-haspopup="dialog">Record redundant evidence</button>}
             {ingredientCandidate && <><button disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "verify_ingredients", rationale, evidenceUrl || null, null, reviewedText, null))}>Verify reviewed label text</button><button className="secondary" disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "reject_ingredients", rationale, evidenceUrl || null, null, null, null))}>Reject this candidate</button></>}
-            {item.type === "identity" && <><button disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "create_new", rationale, null, null, null, null))}>Create distinct product</button><button className="secondary" disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "no_match", rationale, null, null, null, null))}>Keep unmatched</button></>}
+            {item.type === "identity" && <><button disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "create_new", rationale, evidenceUrl || null, null, null, null))}>Create distinct product</button><button className="secondary" disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "no_match", rationale, null, null, null, null))}>Keep unmatched</button></>}
             <button className="ghost" disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "dismiss", rationale, evidenceUrl || null, null, null, null))}>Dismiss</button>
           </div>
           {item.status === "open" && item.redundantEligible && confirmingRedundant === item.id && <div className="redundant-confirmation" role="alertdialog" aria-labelledby={`redundant-confirm-${item.id}`} aria-describedby={`redundant-description-${item.id}`}>
@@ -1050,10 +1069,27 @@ function completionOutcomeLabel(outcome: CompletionLedgerItem["labels"][number][
   return "Extraction failed";
 }
 
+function completionReasonLabel(code: string): string {
+  const labels: Record<string, string> = {
+    evidence_binding_inconsistent: "Evidence binding is inconsistent",
+    evidence_conflict: "Evidence conflict",
+    review_candidate_pending: "Candidate awaiting review",
+    extraction_failed: "Extraction failed",
+    extraction_unattempted: "Extraction not attempted",
+    no_prediction: "No prediction",
+    automated_result_rejected: "Automated result rejected",
+    structured_evidence_unverified: "Structured evidence is unverified",
+    authoritative_source_missing: "Authoritative source missing",
+    stale_extraction_evidence: "Stale extraction evidence",
+  };
+  const fallback = code.replaceAll("_", " ").trim();
+  return labels[code] ?? (fallback ? `${fallback[0]?.toUpperCase() ?? ""}${fallback.slice(1)}` : code);
+}
+
 export function CompletionOutcomeEvidence({ item }: { item: CompletionLedgerItem }) {
   const summary = item.extraction;
   if (summary.labels === 0 && summary.unattempted === 0 && summary.stale === 0) {
-    return <div className="completion-outcomes"><span>No exact label extraction recorded</span></div>;
+    return <div className="completion-outcomes"><span>No exact label extraction recorded</span>{item.reasonCodes.length > 0 && <p className="completion-reason-codes"><strong>Why outstanding:</strong> {item.reasonCodes.map(completionReasonLabel).join(" · ")}</p>}</div>;
   }
   const summaryItems = [
     ["candidate", "candidate", summary.candidate],
@@ -1068,13 +1104,14 @@ export function CompletionOutcomeEvidence({ item }: { item: CompletionLedgerItem
       <dl className="completion-outcome-counts">
         {summaryItems.map(([label, className, count]) => <div key={label} className={`completion-outcome-${className}`}><dt>{label}</dt><dd>{count.toLocaleString("en-IN")}</dd></div>)}
       </dl>
+      {item.reasonCodes.length > 0 && <p className="completion-reason-codes"><strong>Why outstanding:</strong> {item.reasonCodes.map(completionReasonLabel).join(" · ")}</p>}
       {item.labels.length > 0 && <ol className="completion-label-list">
         {item.labels.map((label, index) => {
           const url = publicEvidenceUrl(label.labelUrl);
           const observed = Number.isFinite(Date.parse(label.attemptedAt))
             ? new Date(label.attemptedAt).toLocaleDateString("en-IN")
             : "time unavailable";
-          return <li key={`${label.attemptId}:${label.labelAssetId}:${label.role}`}><span><strong>{index + 1}. {completionOutcomeLabel(label.outcome)}</strong><small>{label.role} image · {observed} · SHA-256 {label.contentSha256.slice(0, 10)}…</small></span>{url && <a href={url} target="_blank" rel="noreferrer" aria-label={`Open ${item.family} label ${index + 1}, ${label.sourceImageId}, for ${item.product.name}`}>Label {index + 1} ↗</a>}</li>;
+          return <li key={`${label.attemptId}:${label.labelAssetId}:${label.role}`}><span><strong>{index + 1}. {completionOutcomeLabel(label.outcome)}</strong><small>{label.role} image · {observed} · SHA-256 {label.contentSha256.slice(0, 10)}…</small>{label.reasonCodes.length > 0 && <small>Reasons: {label.reasonCodes.map(completionReasonLabel).join(" · ")}</small>}</span>{url && <a href={url} target="_blank" rel="noreferrer" aria-label={`Open ${item.family} label ${index + 1}, ${label.sourceImageId}, for ${item.product.name}`}>Label {index + 1} ↗</a>}</li>;
         })}
       </ol>}
       {item.labelsTruncated && <a className="completion-label-more" href={`/api/completion-ledger/${encodeURIComponent(item.product.id)}/labels?family=${item.family}&page=1&pageSize=25`} target="_blank" rel="noreferrer" aria-label={`View all ${summary.labels} exact ${item.family} label outcomes for ${item.product.name}`}>View all {summary.labels.toLocaleString("en-IN")} exact label outcomes</a>}
@@ -1094,22 +1131,341 @@ function completionActionLabel(item: CompletionLedgerItem): string {
   return "Inspect terminal evidence";
 }
 
-export function CompletionPrimaryAction({ item, onOpenProduct, onOpenReview }: {
+export function IdentityEvidenceForm({ item, onVerified, onCancel }: {
+  item: CompletionLedgerItem;
+  onVerified: () => void;
+  onCancel: () => void;
+}) {
+  const sourceUrl = item.sourceUrl?.startsWith("https://") ? item.sourceUrl : "";
+  const [evidenceUrl, setEvidenceUrl] = useState(sourceUrl);
+  const [rationale, setRationale] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const sourceRecordId = item.sourceRecordId;
+  const fieldId = `identity-evidence-${item.product.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+
+  const submit = async () => {
+    setError(null);
+    if (!sourceRecordId) {
+      setError("This row has no current source record to bind.");
+      return;
+    }
+    if (!evidenceUrl.startsWith("https://")) {
+      setError("Use the current HTTPS source or label URL.");
+      return;
+    }
+    if (rationale.trim().length < 3) {
+      setError("Add a rationale of at least 3 characters.");
+      return;
+    }
+    if (!confirmed) {
+      setError("Confirm that the evidence identifies this exact product variant.");
+      return;
+    }
+    setWorking(true);
+    try {
+      await api.verifyIdentityEvidence(item.product.id, {
+        sourceRecordId,
+        evidenceUrl,
+        rationale: rationale.trim(),
+      });
+      onVerified();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <form className="completion-decision-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+      <div className="completion-decision-binding">
+        <span>Exact current binding</span>
+        <strong>{item.sourceId?.replaceAll("_", " ") ?? "Source unavailable"}</strong>
+        <small>Record {sourceRecordId ?? "not available"}</small>
+      </div>
+      <label htmlFor={`${fieldId}-url`}>Current source or label URL
+        <input id={`${fieldId}-url`} type="url" required value={evidenceUrl} onChange={(event) => setEvidenceUrl(event.target.value)} placeholder="https://…" autoComplete="url" />
+      </label>
+      <label htmlFor={`${fieldId}-rationale`}>Verification rationale
+        <textarea id={`${fieldId}-rationale`} required minLength={3} maxLength={2_000} value={rationale} onChange={(event) => setRationale(event.target.value)} placeholder="Why does this evidence identify the exact brand, product, flavour, and pack?" />
+      </label>
+      <label className="completion-decision-confirm" htmlFor={`${fieldId}-confirm`}>
+        <input id={`${fieldId}-confirm`} type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+        <span>I inspected the evidence and confirm this exact product identity. This creates immutable audit history.</span>
+      </label>
+      {error && <p className="completion-decision-error" role="alert"><strong>Identity was not verified.</strong><span>{error}</span></p>}
+      <div className="completion-decision-buttons">
+        <button type="submit" disabled={working}>{working ? "Recording verification…" : "Verify exact identity"}</button>
+        <button type="button" className="ghost" disabled={working} onClick={onCancel}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
+function terminalEvidenceHistoryForOption(
+  entry: TerminalEvidenceHistoryEntry,
+  option: TerminalEvidenceOption,
+): boolean {
+  const evidence = entry.decision.evidence;
+  return evidence.kind === option.kind
+    && evidence.sourceId === option.sourceId
+    && evidence.sourceRecordId === option.sourceRecordId
+    && evidence.sourceRecordKey === option.sourceRecordKey
+    && evidence.sourceContentHash === option.sourceContentHash
+    && (evidence.kind === "source" || (
+      option.kind === "label"
+      && evidence.labelAssetId === option.labelAssetId
+      && evidence.labelContentSha256 === option.labelContentSha256
+    ));
+}
+
+function terminalIdempotencyKey(): string {
+  const suffix = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `terminal:${suffix}`;
+}
+
+function terminalContradictionMessages(
+  response: TerminalEvidenceOptionsResponse,
+  family: "nutrition" | "ingredients",
+): string[] {
+  const messages: string[] = [];
+  if (response.contradiction.outcomes.length > 1) {
+    messages.push(`Current sources disagree: ${response.contradiction.outcomes.join(" versus ")}.`);
+  }
+  if (response.contradiction.factStatus) {
+    messages.push(`A ${response.contradiction.factStatus} ${family} fact conflicts with unavailable evidence.`);
+  }
+  if (response.contradiction.legacyProjection) {
+    messages.push("A legacy unavailable projection has no current immutable evidence decision.");
+  }
+  return messages;
+}
+
+export function TerminalEvidenceForm({ item, onRecorded, onCancel }: {
+  item: CompletionLedgerItem;
+  onRecorded: () => void;
+  onCancel: () => void;
+}) {
+  const family = item.family === "nutrition" || item.family === "ingredients" ? item.family : null;
+  const [options, setOptions] = useState<TerminalEvidenceOptionsResponse | null>(null);
+  const [selectedId, setSelectedId] = useState("");
+  const [outcome, setOutcome] = useState<ExactTerminalUnavailableOutcome>("not_declared");
+  const [rationale, setRationale] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState(terminalIdempotencyKey);
+  const [reloadRequest, setReloadRequest] = useState(0);
+  const staleRefreshMessageRef = useRef<string | null>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  const fieldId = `terminal-evidence-${item.product.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+
+  useEffect(() => {
+    if (!family) return;
+    const controller = new AbortController();
+    setLoading(true);
+    if (!staleRefreshMessageRef.current) setError(null);
+    api.terminalEvidence(item.product.id, family, controller.signal)
+      .then((result) => {
+        setOptions(result);
+        setSelectedId((current) => result.items.some(({ evidenceId }) => evidenceId === current) ? current : "");
+        if (staleRefreshMessageRef.current) {
+          setError(`${staleRefreshMessageRef.current} Current exact evidence is refreshed; reselect it before retrying. Your rationale was preserved.`);
+          staleRefreshMessageRef.current = null;
+        }
+        setLoading(false);
+      })
+      .catch((reason: unknown) => {
+        if (reason instanceof DOMException && reason.name === "AbortError") return;
+        setError(reason instanceof Error ? reason.message : String(reason));
+        setLoading(false);
+      });
+    return () => controller.abort();
+  }, [family, item.product.id, reloadRequest]);
+
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
+
+  const selected = options?.items.find(({ evidenceId }) => evidenceId === selectedId) ?? null;
+  const prior = selected && options
+    ? options.history.find((entry) => entry.current && terminalEvidenceHistoryForOption(entry, selected)) ?? null
+    : null;
+  const unchangedCurrent = prior?.decision.outcome === outcome;
+
+  const submit = async () => {
+    setError(null);
+    if (!family || !selected) {
+      setError("Choose exact current source or label evidence.");
+      return;
+    }
+    if (unchangedCurrent) {
+      setError("That outcome is already current for this exact evidence. Choose a correction only when the evidence supports it.");
+      return;
+    }
+    if (rationale.trim().length < 3) {
+      setError("Add a rationale of at least 3 characters.");
+      return;
+    }
+    if (!confirmed) {
+      setError("Confirm that you inspected the complete evidence before recording an unavailable outcome.");
+      return;
+    }
+    setWorking(true);
+    try {
+      await api.recordTerminalEvidence(item.product.id, {
+        family,
+        outcome,
+        evidenceId: selected.evidenceId,
+        sourceContentHash: selected.sourceContentHash,
+        labelContentSha256: selected.labelContentSha256,
+        idempotencyKey,
+        rationale: rationale.trim(),
+        supersedesDecisionId: prior?.decision.id ?? null,
+      });
+      onRecorded();
+    } catch (reason) {
+      if (reason instanceof TerminalEvidenceRequestError && reason.code === "stale_evidence") {
+        staleRefreshMessageRef.current = reason.message;
+        setOptions(null);
+        setSelectedId("");
+        setConfirmed(false);
+        setIdempotencyKey(terminalIdempotencyKey());
+        setError(`${reason.message} Refreshing current exact evidence… Your rationale is preserved.`);
+        setReloadRequest((current) => current + 1);
+      } else {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  if (!family) return null;
+  return (
+    <form className="completion-decision-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+      {loading && <div className="loading completion-decision-loading" role="status"><span className="loader" />Loading exact current evidence…</div>}
+      {options?.contradiction.hasConflict && <div className="completion-decision-conflict" role="alert"><strong>Evidence currently contradicts itself.</strong>{terminalContradictionMessages(options, family).map((message) => <span key={message}>{message}</span>)}<small>No unavailable outcome becomes terminal until every contradiction is resolved.</small></div>}
+      {options && options.items.length === 0 && <div className="completion-decision-error" role="alert"><strong>No eligible exact evidence.</strong><span>Retain a current source record or exact label before recording that {family} is unavailable.</span></div>}
+      {options && options.items.length > 0 && <fieldset className="completion-evidence-options"><legend>Select the exact evidence inspected</legend>{options.items.map((option) => {
+        const link = publicEvidenceUrl(option.labelUrl ?? option.sourceUrl);
+        const optionId = `${fieldId}-option-${option.evidenceId.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+        const kindLabel = option.kind === "label" ? "retained label" : "current source record";
+        return <div key={option.evidenceId} className={`completion-evidence-option${selectedId === option.evidenceId ? " selected" : ""}`}><label htmlFor={optionId}><input id={optionId} type="radio" name={`${fieldId}-option`} value={option.evidenceId} checked={selectedId === option.evidenceId} onChange={() => setSelectedId(option.evidenceId)} /><span><strong>{option.kind === "label" ? "Retained label bytes" : "Current source record"} · {option.sourceName}</strong><small>Observed {new Date(option.observedAt).toLocaleDateString("en-IN")} · authority {option.authority}/100</small><code>Record {option.sourceRecordKey} · source SHA-256 {option.sourceContentHash.slice(0, 16)}…</code>{option.kind === "label" && <code>Asset {option.labelAssetId} · label SHA-256 {option.labelContentSha256?.slice(0, 16)}…</code>}</span></label>{link && <a href={link} target="_blank" rel="noreferrer" aria-label={`Inspect ${kindLabel} from ${option.sourceName} for ${item.product.name}`}>Inspect evidence ↗</a>}</div>;
+      })}</fieldset>}
+      <fieldset className="completion-outcome-options"><legend>What does the complete evidence establish?</legend><label className={outcome === "not_declared" ? "selected" : ""}><input type="radio" name={`${fieldId}-outcome`} value="not_declared" checked={outcome === "not_declared"} onChange={() => setOutcome("not_declared")} /><span><strong>Not declared</strong><small>The complete current label or authoritative record does not declare this field.</small></span></label><label className={outcome === "not_applicable" ? "selected" : ""}><input type="radio" name={`${fieldId}-outcome`} value="not_applicable" checked={outcome === "not_applicable"} onChange={() => setOutcome("not_applicable")} /><span><strong>Not applicable</strong><small>This field genuinely does not apply to this exact product—not merely missing or unreadable.</small></span></label></fieldset>
+      {prior && <div className="completion-decision-prior"><span>Current decision on selected evidence</span><strong>{prior.decision.outcome.replaceAll("_", " ")}</strong><small>{prior.decision.rationale} · {new Date(prior.decision.decidedAt).toLocaleString("en-IN")}</small>{prior.decision.outcome !== outcome && <em>The new decision will append an explicit supersession; history will not be overwritten.</em>}</div>}
+      {options && options.history.length > 0 && <details className="completion-decision-history"><summary>Decision history · {options.history.length}{options.historyTruncated ? "+" : ""}</summary><ol>{options.history.map((entry) => { const evidence = entry.decision.evidence; return <li key={entry.decision.id}><span><strong>{entry.decision.outcome.replaceAll("_", " ")}</strong><small>{entry.current ? "current" : entry.superseded ? "superseded" : entry.stale ? "stale binding" : "historical"} · {new Date(entry.decision.decidedAt).toLocaleString("en-IN")}</small><small>{evidence.kind === "label" ? "retained label" : "source record"} · {evidence.sourceId} · record {evidence.sourceRecordKey}</small><code>Source SHA-256 {evidence.sourceContentHash}</code>{evidence.kind === "label" && <code>Asset {evidence.labelAssetId} · label SHA-256 {evidence.labelContentSha256}</code>}</span><p>{entry.decision.rationale}</p></li>; })}</ol></details>}
+      <label htmlFor={`${fieldId}-rationale`}>Decision rationale<textarea id={`${fieldId}-rationale`} required minLength={3} maxLength={2_000} value={rationale} onChange={(event) => setRationale(event.target.value)} placeholder={`What exact evidence establishes that ${family} is ${outcome.replaceAll("_", " ")}?`} /></label>
+      <label className="completion-decision-confirm" htmlFor={`${fieldId}-confirm`}><input id={`${fieldId}-confirm`} type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>I inspected the complete selected evidence. Missing, cropped, unreadable, or failed extraction is not enough for this decision.</span></label>
+      {error && <p ref={errorRef} className="completion-decision-error" role="alert" tabIndex={-1}><strong>Terminal evidence was not recorded.</strong><span>{error}</span></p>}
+      <div className="completion-decision-buttons"><button type="submit" disabled={working || loading || !selected || unchangedCurrent}>{working ? "Recording decision…" : prior ? "Record immutable correction" : "Record terminal evidence"}</button><button type="button" className="ghost" disabled={working} onClick={onCancel}>Cancel</button></div>
+    </form>
+  );
+}
+
+function canRestoreDialogFocus(element: HTMLElement | null): element is HTMLElement {
+  if (!element?.isConnected || (element instanceof HTMLButtonElement && element.disabled)) return false;
+  for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+    if (current.hidden || current.inert || current.getAttribute("aria-hidden") === "true") return false;
+    const style = window.getComputedStyle(current);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+  }
+  return true;
+}
+
+export function CompletionEvidenceDialog({ item, onCommitted, onClose }: {
+  item: CompletionLedgerItem;
+  onCommitted: () => void;
+  onClose: () => void;
+}) {
+  const dialogRef = useRef<HTMLElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    headingRef.current?.focus();
+    const keepFocusInDialog = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+      )].filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) {
+        event.preventDefault();
+        headingRef.current?.focus();
+        return;
+      }
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === headingRef.current || !dialog.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", keepFocusInDialog);
+    return () => {
+      window.removeEventListener("keydown", keepFocusInDialog);
+      const target = canRestoreDialogFocus(previousFocus)
+        ? previousFocus
+        : document.getElementById("completion-worklist-heading");
+      if (canRestoreDialogFocus(target)) target.focus();
+    };
+  }, []);
+  const dialogId = `${item.family}-${item.product.id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+  return (
+    <div className="completion-decision-backdrop">
+      <section ref={dialogRef} className="completion-decision-dialog" role="dialog" aria-modal="true" aria-labelledby={`completion-decision-heading-${dialogId}`} aria-describedby={`completion-decision-description-${dialogId}`}>
+        <header><div><p className="eyebrow">Human evidence decision</p><h2 id={`completion-decision-heading-${dialogId}`} ref={headingRef} tabIndex={-1}>{item.family === "identity" ? "Verify" : `Record ${item.family} for`} {item.product.name}</h2><p id={`completion-decision-description-${dialogId}`}>{item.family === "identity" ? "Identity verification is accepted only while this exact source record and normalized identity hash remain current." : "Unavailable is a terminal evidence decision—not a synonym for missing data, failed extraction, or an unreadable label."}</p></div><button type="button" className="drawer-close" onClick={onClose} aria-label="Close evidence decision">×</button></header>
+        {item.family === "identity"
+          ? <IdentityEvidenceForm item={item} onVerified={onCommitted} onCancel={onClose} />
+          : <TerminalEvidenceForm item={item} onRecorded={onCommitted} onCancel={onClose} />}
+      </section>
+    </div>
+  );
+}
+
+export function CompletionPrimaryAction({ item, onOpenProduct, onOpenReview, onRecordEvidence, readOnly = false }: {
   item: CompletionLedgerItem;
   onOpenProduct: (id: string) => void;
   onOpenReview: (item: CompletionLedgerItem) => void;
+  onRecordEvidence?: (item: CompletionLedgerItem) => void;
+  readOnly?: boolean;
 }) {
   const label = completionActionLabel(item);
   if (item.lane === "review_ready" && item.primaryReviewId) {
     return <button onClick={() => onOpenReview(item)} aria-label={`${label} for ${item.product.name}`}>{label}</button>;
   }
+  if (!readOnly && item.family === "identity" && item.state === "outstanding" && item.sourceRecordId && onRecordEvidence) {
+    return <button onClick={() => onRecordEvidence(item)} aria-label={`Verify exact identity for ${item.product.name}`}>Verify identity</button>;
+  }
+  if (!readOnly && item.family !== "identity" && item.state === "outstanding" && onRecordEvidence) {
+    return <button onClick={() => onRecordEvidence(item)} aria-label={`Record exact ${item.family} unavailable evidence for ${item.product.name}`}>Record unavailable</button>;
+  }
   return <button onClick={() => onOpenProduct(item.product.id)} aria-label={`${label} for ${item.product.name}`}>{label}</button>;
 }
 
-function CompletionDesktopRows({ items, onOpenProduct, onOpenReview }: {
+function CompletionDesktopRows({ items, onOpenProduct, onOpenReview, onRecordEvidence, readOnly }: {
   items: CompletionLedgerItem[];
   onOpenProduct: (id: string) => void;
   onOpenReview: (item: CompletionLedgerItem) => void;
+  onRecordEvidence: (item: CompletionLedgerItem) => void;
+  readOnly: boolean;
 }) {
   return (
     <div className="completion-desktop">
@@ -1121,29 +1477,31 @@ function CompletionDesktopRows({ items, onOpenProduct, onOpenReview }: {
           <td className="completion-status"><strong>{completionEvidenceLabel(item)}</strong><small>{completionEvidenceSourceLabel(item)}</small><small>{item.openReviewCount.toLocaleString("en-IN")} open review{item.openReviewCount === 1 ? "" : "s"}</small></td>
           <td><CompletionOutcomeEvidence item={item} /></td>
           <td className="completion-evidence"><CompletionEvidenceLinks item={item} /></td>
-          <td><div className="completion-actions"><CompletionPrimaryAction item={item} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} /><button className="ghost" onClick={() => onOpenProduct(item.product.id)} aria-label={`Inspect product details for ${item.product.name}`}>Inspect product</button></div></td>
+          <td><div className="completion-actions"><CompletionPrimaryAction item={item} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} onRecordEvidence={onRecordEvidence} readOnly={readOnly} /><button className="ghost" onClick={() => onOpenProduct(item.product.id)} aria-label={`Inspect product details for ${item.product.name}`}>Inspect product</button></div></td>
         </tr>)}</tbody>
       </table>
     </div>
   );
 }
 
-function CompletionMobileRows({ items, onOpenProduct, onOpenReview }: {
+function CompletionMobileRows({ items, onOpenProduct, onOpenReview, onRecordEvidence, readOnly }: {
   items: CompletionLedgerItem[];
   onOpenProduct: (id: string) => void;
   onOpenReview: (item: CompletionLedgerItem) => void;
+  onRecordEvidence: (item: CompletionLedgerItem) => void;
+  readOnly: boolean;
 }) {
   return (
     <div className="completion-mobile" role="list" aria-label="Completion worklist products">
       {items.map((item) => <article className="completion-card" role="listitem" key={item.product.id}>
         <div className="completion-card-head"><button className="completion-card-product" onClick={() => onOpenProduct(item.product.id)}><strong>{item.product.name}</strong><span>{item.product.brand}</span><small>GTIN {item.product.gtin ?? "not recorded"} · {item.product.category.replaceAll("_", " ")}</small></button><span className={`completion-state completion-state-${item.state}`}>{completionStateLabel(item.state)}</span></div>
-        <div className="completion-card-body"><div className="completion-status"><strong className="completion-lane">{completionLaneLabel(item.lane)}</strong><small>{completionEvidenceLabel(item)}</small><small>{item.openReviewCount} open review{item.openReviewCount === 1 ? "" : "s"}</small></div><CompletionOutcomeEvidence item={item} /><div className="completion-evidence"><CompletionEvidenceLinks item={item} /></div><div className="completion-actions"><CompletionPrimaryAction item={item} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} /><button className="ghost" onClick={() => onOpenProduct(item.product.id)} aria-label={`Inspect product details for ${item.product.name}`}>Inspect product</button></div></div>
+        <div className="completion-card-body"><div className="completion-status"><strong className="completion-lane">{completionLaneLabel(item.lane)}</strong><small>{completionEvidenceLabel(item)}</small><small>{item.openReviewCount} open review{item.openReviewCount === 1 ? "" : "s"}</small></div><CompletionOutcomeEvidence item={item} /><div className="completion-evidence"><CompletionEvidenceLinks item={item} /></div><div className="completion-actions"><CompletionPrimaryAction item={item} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} onRecordEvidence={onRecordEvidence} readOnly={readOnly} /><button className="ghost" onClick={() => onOpenProduct(item.product.id)} aria-label={`Inspect product details for ${item.product.name}`}>Inspect product</button></div></div>
       </article>)}
     </div>
   );
 }
 
-function CompletionWorklist({ data, fallbackSummary, fallbackSnapshotAt, loading, error, filters, focusRequest, onFamily, onState, onLane, onQuery, onPage, onRetry, onOpenProduct, onOpenReview }: {
+export function CompletionWorklist({ data, fallbackSummary, fallbackSnapshotAt, loading, error, filters, focusRequest, onFamily, onState, onLane, onQuery, onPage, onRetry, onOpenProduct, onOpenReview, onEvidenceCommitted, readOnly }: {
   data: CompletionLedgerResponse | null;
   fallbackSummary: CompletionSummary;
   fallbackSnapshotAt: string | null;
@@ -1159,17 +1517,39 @@ function CompletionWorklist({ data, fallbackSummary, fallbackSnapshotAt, loading
   onRetry: () => void;
   onOpenProduct: (id: string) => void;
   onOpenReview: (item: CompletionLedgerItem) => void;
+  onEvidenceCommitted: () => Promise<void>;
+  readOnly: boolean;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const commitNoticeRef = useRef<HTMLDivElement>(null);
+  const [decisionItem, setDecisionItem] = useState<CompletionLedgerItem | null>(null);
+  const [commitNotice, setCommitNotice] = useState<{ kind: "refreshing" | "success" | "refresh_failed"; message: string } | null>(null);
   useEffect(() => {
     if (focusRequest > 0) headingRef.current?.focus();
   }, [focusRequest]);
+  useEffect(() => {
+    if (commitNotice && commitNotice.kind !== "refreshing") commitNoticeRef.current?.focus();
+  }, [commitNotice]);
   const summary = data?.summary ?? fallbackSummary;
   const familyLabel = completionFamilyLabel(filters.family);
   const snapshotAt = data?.snapshotAt ?? fallbackSnapshotAt;
   const snapshotLabel = snapshotAt && Number.isFinite(Date.parse(snapshotAt))
     ? new Date(snapshotAt).toLocaleString("en-IN")
     : "No completed source run recorded";
+  const commitEvidence = async () => {
+    if (!decisionItem) return;
+    const subject = decisionItem.family === "identity" ? "Identity verification" : `${completionFamilyLabel(decisionItem.family)} evidence decision`;
+    const productName = decisionItem.product.name;
+    setDecisionItem(null);
+    setCommitNotice({ kind: "refreshing", message: `${subject} saved for ${productName}. Refreshing coverage and the worklist…` });
+    try {
+      await onEvidenceCommitted();
+      setCommitNotice({ kind: "success", message: `${subject} saved for ${productName}. Coverage and the worklist are current.` });
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setCommitNotice({ kind: "refresh_failed", message: `${subject} was saved for ${productName}, but the dashboard refresh failed. ${message}` });
+    }
+  };
   return (
     <section className="completion-worklist" aria-labelledby="completion-worklist-heading" aria-busy={loading}>
       <div className="completion-head">
@@ -1204,17 +1584,19 @@ function CompletionWorklist({ data, fallbackSummary, fallbackSnapshotAt, loading
         <div className="completion-toolbar-meta" aria-live="polite">{data ? <><strong>{data.pagination.total.toLocaleString("en-IN")}</strong> matching product{data.pagination.total === 1 ? "" : "s"}</> : "Waiting for ledger totals"}</div>
       </div>
 
+      {commitNotice && <div ref={commitNoticeRef} tabIndex={-1} className={`completion-commit-notice completion-commit-notice-${commitNotice.kind}`} role={commitNotice.kind === "refresh_failed" ? "alert" : "status"} aria-live={commitNotice.kind === "refresh_failed" ? "assertive" : "polite"}><strong>{commitNotice.kind === "refresh_failed" ? "Verification saved; refresh needed" : commitNotice.kind === "success" ? "Verification complete" : "Verification saved"}</strong><span>{commitNotice.message}</span></div>}
       {error && <div className="error-state" role="alert"><strong>Completion ledger unavailable</strong><span>{error}</span><button onClick={onRetry}>Try again</button></div>}
       {!data && loading && <div className="loading completion-loading" role="status"><span className="loader" />Building the exact {familyLabel.toLowerCase()} worklist…</div>}
       {data && <div className="completion-results">
-        {data.items.length === 0 && !error ? <div className="empty completion-empty"><span className="empty-mark" aria-hidden="true">0</span><strong>No products match this ledger view.</strong><span>Choose another state, action lane, or search term. A zero count does not erase products from the family equation.</span></div> : <><CompletionDesktopRows items={data.items} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} /><CompletionMobileRows items={data.items} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} /></>}
+        {data.items.length === 0 && !error ? <div className="empty completion-empty"><span className="empty-mark" aria-hidden="true">0</span><strong>No products match this ledger view.</strong><span>Choose another state, action lane, or search term. A zero count does not erase products from the family equation.</span></div> : <><CompletionDesktopRows items={data.items} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} onRecordEvidence={setDecisionItem} readOnly={readOnly} /><CompletionMobileRows items={data.items} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} onRecordEvidence={setDecisionItem} readOnly={readOnly} /></>}
         {data.pagination.pages > 1 && <nav className="pagination" aria-label="Completion worklist pages"><button disabled={data.pagination.page <= 1 || loading} onClick={() => onPage(data.pagination.page - 1)}>← Previous</button><span>Page <strong>{data.pagination.page}</strong> of {data.pagination.pages.toLocaleString("en-IN")}</span><button disabled={data.pagination.page >= data.pagination.pages || loading} onClick={() => onPage(data.pagination.page + 1)}>Next →</button></nav>}
       </div>}
+      {decisionItem && <CompletionEvidenceDialog key={`${decisionItem.family}:${decisionItem.product.id}`} item={decisionItem} onClose={() => setDecisionItem(null)} onCommitted={() => { void commitEvidence(); }} />}
     </section>
   );
 }
 
-function Coverage({ data, loading, error, completion, completionLoading, completionError, completionFilters, completionFocusRequest, onCompletionFamily, onCompletionState, onCompletionLane, onCompletionQuery, onCompletionPage, onCompletionRetry, onCompletionDrillDown, onOpenProduct, onOpenReview }: {
+function Coverage({ data, loading, error, completion, completionLoading, completionError, completionFilters, completionFocusRequest, onCompletionFamily, onCompletionState, onCompletionLane, onCompletionQuery, onCompletionPage, onCompletionRetry, onCompletionDrillDown, onOpenProduct, onOpenReview, onEvidenceCommitted, readOnly }: {
   data: CoverageResponse | null;
   loading: boolean;
   error: string | null;
@@ -1232,6 +1614,8 @@ function Coverage({ data, loading, error, completion, completionLoading, complet
   onCompletionDrillDown: (family: CompletionFamily, state: CompletionState, lane?: CompletionLaneFilter) => void;
   onOpenProduct: (id: string) => void;
   onOpenReview: (item: CompletionLedgerItem) => void;
+  onEvidenceCommitted: () => Promise<void>;
+  readOnly: boolean;
 }) {
   if (loading) return <div className="loading" role="status">Reconciling coverage…</div>;
   if (error) return <div className="error-state" role="alert">{error}</div>;
@@ -1253,7 +1637,7 @@ function Coverage({ data, loading, error, completion, completionLoading, complet
       <div className={`coverage-gate coverage-gate-${data.completion.status}`}><div><span>Data completion gate</span><strong>{data.completion.status}</strong></div><p>{data.completion.status === "complete" ? "Every active product has terminal verified evidence." : `${data.completion.outstandingNutrition.toLocaleString("en-IN")} nutrition, ${data.completion.outstandingIngredients.toLocaleString("en-IN")} ingredient, and ${data.completion.outstandingIdentity.toLocaleString("en-IN")} identity records still need terminal evidence.`}</p></div>
       <div className="coverage-warning"><strong>Coverage claim: configured sources only.</strong><span>Source exhaustion and verified product completeness are separate gates.</span></div>
       <div className="coverage-grid">{cards.map(({ label, value, action }) => action ? <button key={label} onClick={action}><span>{label}</span><strong>{value.toLocaleString("en-IN")}</strong><small>View product worklist →</small></button> : <div key={label}><span>{label}</span><strong>{value.toLocaleString("en-IN")}</strong></div>)}</div>
-      <CompletionWorklist data={completion} fallbackSummary={data.completion.families[completionFilters.family]} fallbackSnapshotAt={data.completion.snapshotAt} loading={completionLoading} error={completionError} filters={completionFilters} focusRequest={completionFocusRequest} onFamily={onCompletionFamily} onState={onCompletionState} onLane={onCompletionLane} onQuery={onCompletionQuery} onPage={onCompletionPage} onRetry={onCompletionRetry} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} />
+      <CompletionWorklist data={completion} fallbackSummary={data.completion.families[completionFilters.family]} fallbackSnapshotAt={data.completion.snapshotAt} loading={completionLoading} error={completionError} filters={completionFilters} focusRequest={completionFocusRequest} onFamily={onCompletionFamily} onState={onCompletionState} onLane={onCompletionLane} onQuery={onCompletionQuery} onPage={onCompletionPage} onRetry={onCompletionRetry} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} onEvidenceCommitted={onEvidenceCommitted} readOnly={readOnly} />
       <section className="panel"><h2>Source ledger</h2>{data.sources.map((source) => <div className="source-row" key={source.id}><div><strong>{source.name}</strong><span>{source.kind}</span></div><span className="tag">{source.sourceComplete ? "source complete" : "source incomplete"}</span><div><strong>{source.indiaRecords?.toLocaleString("en-IN") ?? "—"}</strong><span>India records</span></div><div><strong>{source.latestRunStatus ?? "never"}</strong><span>{source.latestRunAt ? new Date(source.latestRunAt).toLocaleString("en-IN") : "no completed run"}</span></div></div>)}</section>
       <section className="panel"><h2>Disconnected discovery sources</h2><div className="badge-row">{data.disconnectedSources.map((source) => <span className="tag" key={source}>{source.replaceAll("_", " ")}</span>)}</div></section>
     </div>
@@ -1316,8 +1700,8 @@ export function App() {
     setFilters((current) => ({ ...current, ...next }));
   };
 
-  const showTrusted = () => updateFilters({ verification: "verified", scope: "protein", sort: "protein_density" });
-  const showDiscovery = () => updateFilters({ verification: "all", ingredientVerification: "all", scope: "all", sort: "protein_density" });
+  const showTrusted = () => updateFilters({ trust: "strict", verification: "verified", ingredientVerification: "all", scope: "protein", sort: "protein_density" });
+  const showDiscovery = () => updateFilters({ trust: "all", verification: "all", ingredientVerification: "all", scope: "all", sort: "protein_density" });
 
   const loadCatalog = () => {
     const controller = new AbortController();
@@ -1424,6 +1808,42 @@ export function App() {
     setReviewId(item.primaryReviewId);
     setTab("reviews");
   };
+  const refreshAfterEvidenceDecision = async () => {
+    setCompletionState({ loading: true, error: null });
+    setCoverageState({ loading: true, error: null });
+    setCatalogState({ loading: true, error: null });
+    const [nextCompletion, nextCoverage, nextCatalog] = await Promise.allSettled([
+      api.completionLedger(completionParams),
+      api.coverage(),
+      api.catalog(params),
+    ]);
+    const failures: string[] = [];
+    if (nextCompletion.status === "fulfilled") {
+      setCompletion(nextCompletion.value);
+      setCompletionState({ loading: false, error: null });
+    } else {
+      const message = nextCompletion.reason instanceof Error ? nextCompletion.reason.message : String(nextCompletion.reason);
+      setCompletionState({ loading: false, error: message });
+      failures.push(`Completion worklist: ${message}`);
+    }
+    if (nextCoverage.status === "fulfilled") {
+      setCoverage(nextCoverage.value);
+      setCoverageState({ loading: false, error: null });
+    } else {
+      const message = nextCoverage.reason instanceof Error ? nextCoverage.reason.message : String(nextCoverage.reason);
+      setCoverageState({ loading: false, error: message });
+      failures.push(`Coverage: ${message}`);
+    }
+    if (nextCatalog.status === "fulfilled") {
+      setCatalog(nextCatalog.value);
+      setCatalogState({ loading: false, error: null });
+    } else {
+      const message = nextCatalog.reason instanceof Error ? nextCatalog.reason.message : String(nextCatalog.reason);
+      setCatalogState({ loading: false, error: message });
+      failures.push(`Catalog: ${message}`);
+    }
+    if (failures.length > 0) throw new Error(failures.join(" "));
+  };
 
   return (
     <div className="app-shell">
@@ -1451,14 +1871,14 @@ export function App() {
               <button onClick={() => setTab("coverage")}><span>Source state</span><strong>{coverage?.completion.sourceCoverageComplete ? "Exhausted" : "Checking"}</strong><small>configured sources only →</small></button>
             </section>
             <section className="trust-switch" aria-label="Comparison trust mode">
-              <div><p className="eyebrow">Choose your evidence boundary</p><strong>{catalog?.trustedDefault ? "Trusted comparisons" : "Discovery catalog"}</strong><span>{catalog?.trustedDefault ? "Only current, verified nutrition can produce rankings." : "Validation-passing community values can rank here with an unverified label; use Scope to explore every retained food."}</span></div>
+              <div><p className="eyebrow">Choose your evidence boundary</p><strong>{catalog?.trustedDefault ? "Trusted comparisons" : "Discovery catalog"}</strong><span>{catalog?.trustedDefault ? "Exact current identity, verified nutrition, and terminal ingredient evidence are required." : "Validation-passing community values can rank here with an unverified label; use Scope to explore every retained food."}</span></div>
               <div role="group" aria-label="Evidence boundary"><button className={catalog?.trustedDefault ? "active" : ""} aria-pressed={catalog?.trustedDefault ?? false} onClick={showTrusted}>Trusted</button><button className={catalog && !catalog.trustedDefault ? "active" : ""} aria-pressed={catalog ? !catalog.trustedDefault : false} onClick={showDiscovery}>Discovery</button></div>
             </section>
             <section className="filters" aria-label="Catalog filters">
               <label className="search-field" htmlFor="catalog-search"><span>Search the index</span><input id="catalog-search" name="catalogSearch" type="search" value={filters.q} onChange={(event) => updateFilters({ q: event.target.value })} placeholder="Try Amul, whey, paneer, or a GTIN" /></label>
               <label htmlFor="catalog-category">Category<select id="catalog-category" name="category" value={filters.category} onChange={(event) => updateFilters({ category: event.target.value })}><option value="all">All categories</option><option value="protein_powder">Protein powder</option><option value="protein_bar">Protein bars</option><option value="protein_snack">Protein snacks</option><option value="soy_product">Soy products</option><option value="dairy">Dairy</option><option value="ready_to_drink">Ready to drink</option><option value="breakfast">Breakfast</option><option value="spread">Spreads</option><option value="other">Other food</option></select></label>
-              <label htmlFor="catalog-evidence">Evidence<select id="catalog-evidence" name="evidence" value={filters.verification} onChange={(event) => updateFilters({ verification: event.target.value })}><option value="verified">Verified nutrition</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
-              <label htmlFor="catalog-ingredients">Ingredients<select id="catalog-ingredients" name="ingredientEvidence" value={filters.ingredientVerification} onChange={(event) => updateFilters({ ingredientVerification: event.target.value })}><option value="verified">Verified ingredients</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
+              <label htmlFor="catalog-evidence">Evidence<select id="catalog-evidence" name="evidence" value={filters.verification} onChange={(event) => updateFilters({ trust: "all", verification: event.target.value })}><option value="verified">Verified nutrition</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
+              <label htmlFor="catalog-ingredients">Ingredients<select id="catalog-ingredients" name="ingredientEvidence" value={filters.ingredientVerification} onChange={(event) => updateFilters({ trust: "all", ingredientVerification: event.target.value })}><option value="verified">Verified ingredients</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
               <label htmlFor="catalog-scope">Scope<select id="catalog-scope" name="scope" value={filters.scope} onChange={(event) => updateFilters({ scope: event.target.value })}><option value="protein">Protein cohorts</option><option value="all">All ingested foods</option></select></label>
               <label htmlFor="catalog-sort">Sort<select id="catalog-sort" name="sort" value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}><option value="protein_density">Protein density</option><option value="cost">Cost / 25 g</option><option value="completeness">Field coverage</option><option value="name">Name</option></select></label>
             </section>
@@ -1469,7 +1889,7 @@ export function App() {
           </>
         )}
         {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h1>Evidence review queue</h1><p>{isPublic ? "Inspect unresolved evidence and decision history. Production decisions remain read-only until operator authentication is in place." : "Resolve conflicts without discarding the original source record."}</p></section>{reviewId && <div className="read-only-notice"><strong>Focused review</strong><span>Showing the exact ledger-linked evidence item.</span><button className="ghost" onClick={() => setReviewId(null)}>Return to full queue</button></div>}<Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} typeFilter={reviewType} statusFilter={reviewStatus} page={reviewPage} onType={(type) => { setReviewId(null); setReviewPage(1); setReviewType(type); }} onStatus={(status) => { setReviewId(null); setReviewPage(1); setReviewStatus(status); }} onPage={setReviewPage} readOnly={isPublic} /></>}
-        {tab === "coverage" && <><section className="page-head"><p className="eyebrow">No fake completeness claims</p><h1>Coverage ledger</h1><p>Exhaustion is proved per configured source, with every active product reachable through an exact evidence worklist.</p></section><Coverage data={coverage} loading={coverageState.loading} error={coverageState.error} completion={completion} completionLoading={completionState.loading} completionError={completionState.error} completionFilters={completionFilters} completionFocusRequest={completionFocusRequest} onCompletionFamily={changeCompletionFamily} onCompletionState={changeCompletionState} onCompletionLane={changeCompletionLane} onCompletionQuery={changeCompletionQuery} onCompletionPage={changeCompletionPage} onCompletionRetry={loadCompletion} onCompletionDrillDown={drillIntoCompletion} onOpenProduct={setSelectedId} onOpenReview={openCompletionReview} /></>}
+        {tab === "coverage" && <><section className="page-head"><p className="eyebrow">No fake completeness claims</p><h1>Coverage ledger</h1><p>Exhaustion is proved per configured source, with every active product reachable through an exact evidence worklist.</p></section><Coverage data={coverage} loading={coverageState.loading} error={coverageState.error} completion={completion} completionLoading={completionState.loading} completionError={completionState.error} completionFilters={completionFilters} completionFocusRequest={completionFocusRequest} onCompletionFamily={changeCompletionFamily} onCompletionState={changeCompletionState} onCompletionLane={changeCompletionLane} onCompletionQuery={changeCompletionQuery} onCompletionPage={changeCompletionPage} onCompletionRetry={loadCompletion} onCompletionDrillDown={drillIntoCompletion} onOpenProduct={setSelectedId} onOpenReview={openCompletionReview} onEvidenceCommitted={refreshAfterEvidenceDecision} readOnly={isPublic} /></>}
       </main>
       <footer><span>Protein Index</span><p>Evidence before rankings. Configured-source coverage, never a claim of the whole Indian market.</p><button onClick={() => setTab("coverage")}>Read the coverage ledger</button></footer>
       {selectedId && <ProductDrawer detail={detail} loading={detailState.loading} error={detailState.error} onClose={() => setSelectedId(null)} />}

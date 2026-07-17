@@ -388,6 +388,54 @@ describe("Robotoff ingredient evidence", () => {
     await expect(validateRobotoffIngredientArtifact(outputDirectory)).rejects.toThrow("not source complete");
   });
 
+  it("refetches a cached ingredient response after an incomplete extraction outcome", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-ingredients-incomplete-resume-"));
+    const input = join(directory, "source.jsonl");
+    await writeFile(input, `${JSON.stringify({
+      ...indiaProduct,
+      code: "00001241000224",
+      image_ingredients_url: context.ingredientImageUrl,
+    })}\n`, "utf8");
+    const source = await stageOpenFoodFacts({ input, outputDirectory: join(directory, "source"), mode: "sample", limit: null });
+    const outputDirectory = join(directory, "extracted");
+    let responseRequests = 0;
+    const fetcher = async () => {
+      responseRequests += 1;
+      return new Response(JSON.stringify({ image_predictions: [ingredientPrediction] }), { status: 200 });
+    };
+
+    await expect(extractRobotoffIngredientApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      labelFetcher: async () => new Response("unavailable", { status: 503 }),
+      fetcher,
+    })).rejects.toThrow("incomplete");
+    expect(responseRequests).toBe(1);
+
+    const repaired = await extractRobotoffIngredientApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      labelFetcher: labelImageFetcher,
+      fetcher,
+    });
+    expect(responseRequests).toBe(2);
+    expect(repaired).toMatchObject({
+      fetchedBarcodes: 1,
+      resumedBarcodes: 0,
+      outcomes: { candidate: 1, failed: 0 },
+    });
+  });
+
   it("keeps exact multi-image and multi-entity ingredient outcomes", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-ingredients-mixed-"));
     const input = join(directory, "source.jsonl");
@@ -1796,6 +1844,7 @@ describe("Open Food Facts bulk staging", () => {
     expect(restore).toContain("expected-adapter-version:");
     expect(restore).toContain("restore-label-proofs:");
     expect(restore).toContain("prior-label-assets.jsonl");
+    expect(restore).toContain('outcomes.jsonl "$OUTPUT_DIRECTORY/outcomes.jsonl"');
     for (const sourceConsumerWorkflow of [
       ".github/workflows/enrich-open-food-facts.yml",
       ".github/workflows/extract-robotoff.yml",
@@ -3354,5 +3403,47 @@ describe("Robotoff label evidence", () => {
     expect(await readFile(result.stagedPath, "utf8")).toBe("");
     const exclusion = JSON.parse((await readFile(result.exclusionsPath, "utf8")).trim()) as { status: string; reasons: string[] };
     expect(exclusion).toEqual(expect.objectContaining({ status: "no_prediction", reasons: ["no_nutrition_extraction_prediction"] }));
+  });
+
+  it("refetches a cached nutrition response after an incomplete extraction outcome", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-incomplete-resume-"));
+    const source = await sourceWithNutritionImage(directory);
+    const outputDirectory = join(directory, "robotoff");
+    let responseRequests = 0;
+    const fetcher = async () => {
+      responseRequests += 1;
+      return new Response(JSON.stringify({ image_predictions: [prediction(31, "29", {
+        "energy-kcal_100g": nutrient(365, "kcal"),
+        proteins_100g: nutrient(25, "g"),
+      })] }), { status: 200 });
+    };
+
+    await expect(extractRobotoffApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      labelFetcher: async () => new Response("unavailable", { status: 503 }),
+      fetcher,
+    })).rejects.toThrow("incomplete");
+    expect(responseRequests).toBe(1);
+
+    const repaired = await extractRobotoffApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      labelFetcher: labelImageFetcher,
+      fetcher,
+    });
+    expect(responseRequests).toBe(2);
+    expect(repaired.outcomes).toEqual({ candidate: 1, no_prediction: 0, rejected: 0, failed: 0 });
+    expect(JSON.parse(await readFile(repaired.reportPath, "utf8"))).toMatchObject({ fetchedBarcodes: 1, resumedBarcodes: 0 });
   });
 });

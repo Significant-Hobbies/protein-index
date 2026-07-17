@@ -388,6 +388,14 @@ export async function emitImportSql(input: {
       output,
       `UPDATE products SET is_active = 1 WHERE id = ${sql(productId)} AND NOT EXISTS (SELECT 1 FROM identity_decisions d WHERE d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.identity_hash = ${sql(identityHash)} AND d.active = 1 AND (d.decision = 'no_match' OR d.target_product_id <> ${sql(productId)}));`,
     );
+    await write(
+      output,
+      `DELETE FROM evidence_outcomes AS outcome WHERE outcome.field_family = 'identity' AND outcome.source_record_id = ${sql(sourceRecordId)} AND NOT EXISTS (SELECT 1 FROM current_identity_evidence_decisions decision WHERE decision.product_id = outcome.product_id AND decision.source_record_id = outcome.source_record_id AND decision.evidence_url = outcome.evidence_url AND decision.source_observed_at = outcome.observed_at AND decision.decided_at = outcome.verified_at AND decision.decided_by = outcome.decided_by AND decision.rationale = outcome.notes);`,
+    );
+    await write(
+      output,
+      `WITH affected_products AS (SELECT decision.product_id FROM identity_evidence_decisions decision WHERE decision.source_record_id = ${sql(sourceRecordId)} UNION SELECT current_source.product_id FROM source_records current_source WHERE current_source.id = ${sql(sourceRecordId)} AND current_source.product_id IS NOT NULL), valid_identity_decisions AS (SELECT decision.*, ROW_NUMBER() OVER (PARTITION BY decision.product_id ORDER BY decision.decided_at DESC, decision.id DESC) AS decision_rank FROM current_identity_evidence_decisions decision JOIN affected_products affected ON affected.product_id = decision.product_id) INSERT INTO evidence_outcomes (product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by, notes) SELECT decision.product_id, 'identity', 'verified', decision.source_record_id, decision.evidence_url, decision.source_observed_at, decision.decided_at, decision.decided_by, decision.rationale FROM valid_identity_decisions decision WHERE decision.decision_rank = 1 ON CONFLICT(product_id, field_family) DO UPDATE SET outcome = excluded.outcome, source_record_id = excluded.source_record_id, evidence_url = excluded.evidence_url, observed_at = excluded.observed_at, verified_at = excluded.verified_at, decided_by = excluded.decided_by, notes = excluded.notes WHERE evidence_outcomes.outcome IS NOT excluded.outcome OR evidence_outcomes.source_record_id IS NOT excluded.source_record_id OR evidence_outcomes.evidence_url IS NOT excluded.evidence_url OR evidence_outcomes.observed_at IS NOT excluded.observed_at OR evidence_outcomes.verified_at IS NOT excluded.verified_at OR evidence_outcomes.decided_by IS NOT excluded.decided_by OR evidence_outcomes.notes IS NOT excluded.notes;`,
+    );
     if (product.source === "open_food_facts_robotoff") {
       const candidateHash = nutritionCandidate?.candidateHash ?? null;
       await write(

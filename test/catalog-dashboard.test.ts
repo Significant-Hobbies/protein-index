@@ -32,7 +32,12 @@ function product(input: { calories: number | null; proteinGrams: number | null }
     nutritionallyProteinDense: true,
     nutritionReasons: ["protein_at_least_10g_per_100kcal"],
     nutritionStatus: "verified",
+    nutritionEvidenceUrl: "https://images.openfoodfacts.org/fixture.jpg",
+    nutritionEvidenceKind: "label",
     ingredientStatus: "verified",
+    ingredientEvidenceUrl: "https://images.openfoodfacts.org/fixture-ingredients.jpg",
+    ingredientEvidenceKind: "label",
+    ingredientTerminalOutcome: null,
     completeness: 100,
     nutrition: {
       ...nutrition,
@@ -75,6 +80,25 @@ describe("catalog comparison surface", () => {
     expect(markup).toContain("Energy");
     expect(markup).toContain("52 g protein · 360 kcal · per 100 g");
     expect(markup.match(/360 kcal/g)).toHaveLength(2);
+  });
+
+  it("shows separate nutrition and ingredient evidence on mobile cards", () => {
+    const markup = renderCatalog(product({ calories: 360, proteinGrams: 52 }));
+    const mobile = markup.slice(markup.indexOf('class="catalog-mobile"'));
+
+    expect(mobile).toContain("Nutrition");
+    expect(mobile).toContain("Ingredients");
+    expect(mobile.match(/status-verified/g)).toHaveLength(2);
+  });
+
+  it("shows terminal ingredient evidence instead of calling it missing", () => {
+    const item = product({ calories: 360, proteinGrams: 52 });
+    item.ingredientStatus = "missing";
+    item.ingredientTerminalOutcome = "not_declared";
+    const markup = renderCatalog(item);
+
+    expect(markup).toContain("ingredients: not declared");
+    expect(markup).toContain("not declared");
   });
 
   it("keeps absent energy explicit instead of synthesizing a value", () => {

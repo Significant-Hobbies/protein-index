@@ -93,7 +93,9 @@ runs:
         set -e
         if [[ "$exact_status" -eq 0 ]]; then
           mkdir -p "$OUTPUT_DIRECTORY"
+          test -f .data/prior-exact/outcomes.jsonl
           cp -a .data/prior-exact/responses "$OUTPUT_DIRECTORY/"
+          cp .data/prior-exact/outcomes.jsonl "$OUTPUT_DIRECTORY/outcomes.jsonl"
           if [[ "$RESTORE_LABEL_PROOFS" == "true" ]]; then
             test -f .data/prior-exact/label-assets.jsonl
             cp .data/prior-exact/label-assets.jsonl "$OUTPUT_DIRECTORY/prior-label-assets.jsonl"

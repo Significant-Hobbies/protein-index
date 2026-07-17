@@ -19,6 +19,7 @@ import {
 } from "../../shared/extraction-outcomes";
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "./robotoff";
 import { startExtractionProgress, type ExtractionProgressSink } from "./extraction-progress";
+import { readCompletedResponseCodes } from "./response-cache";
 import {
   createExtractionAttempt,
   createExtractionAttemptLabel,
@@ -328,6 +329,7 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
   const manifestPath = join(options.outputDirectory, "manifest.json");
   const reportPath = join(options.outputDirectory, "report.json");
   const checksumsPath = join(options.outputDirectory, "checksums.sha256");
+  const completedResponseCodes = await readCompletedResponseCodes(outcomesPath);
   const priorLabelAssets = await readReusableLabelAssets([
     join(options.outputDirectory, "prior-label-assets.jsonl"),
     labelAssetsPath,
@@ -422,6 +424,9 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
       const errorPath = `${responsePath}.error.json`;
       let stored: StoredResponse;
       try {
+        if (!completedResponseCodes.has(context.code)) {
+          throw new Error("Response belongs to an incomplete prior extraction outcome.");
+        }
         const existing = JSON.parse(await readFile(responsePath, "utf8")) as StoredResponse;
         if (existing.requestedCode !== context.code || existing.requestSchema !== ROBOTOFF_API_REQUEST_SCHEMA
           || !isRecord(existing.response) || !Array.isArray(existing.response.image_predictions)) {
@@ -430,7 +435,9 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
         stored = existing;
         resumedBarcodes += 1;
       } catch (error) {
-        if (error instanceof SyntaxError || (error instanceof Error && !error.message.includes("ENOENT"))) throw error;
+        const incompletePrior = error instanceof Error
+          && error.message === "Response belongs to an incomplete prior extraction outcome.";
+        if (!incompletePrior && (error instanceof SyntaxError || (error instanceof Error && !error.message.includes("ENOENT")))) throw error;
         try {
           stored = {
             requestedCode: context.code,

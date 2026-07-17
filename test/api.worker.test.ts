@@ -1,6 +1,6 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
-import type { CatalogResponse, CoverageResponse, HealthResponse, ProductDetailResponse, ReviewResponse } from "../shared/api";
+import type { CatalogResponse, CompletionLedgerResponse, CoverageResponse, HealthResponse, ProductDetailResponse, ReviewResponse } from "../shared/api";
 import { canonicalJson, nutritionCandidateFromEvidence, nutritionCandidateHash } from "../shared/evidence-decisions";
 import { ingredientCandidateFromEvidence, ingredientCandidateHash } from "../shared/ingredient-evidence";
 import { resolveReview } from "../worker/reviews";
@@ -33,6 +33,34 @@ async function identityReview(sourceRecordId: string): Promise<ReviewResponse["i
   const review = reviews.items.find((item) => item.type === "identity" && item.sourceRecordId === source.id);
   if (!review?.productId) throw new Error("Expected an identity review with an incoming product");
   return review;
+}
+
+async function retainIdentityLabel(
+  sourceRecordId: string,
+  evidenceUrl: string,
+  suffix: string,
+): Promise<void> {
+  const source = await env.DB.prepare(`SELECT product_id, content_hash
+    FROM source_records WHERE id = ?`)
+    .bind(sourceRecordId)
+    .first<{ product_id: string; content_hash: string }>();
+  if (!source) throw new Error("Expected identity source for retained label evidence");
+  await env.DB.prepare(`INSERT OR IGNORE INTO label_evidence_assets
+    (id, subject_source_record_id, subject_source_content_hash, product_id,
+     field_family, source_image_id, source_image_revision, requested_url,
+     effective_url, content_sha256, byte_length, media_type, fetched_at)
+    VALUES (?, ?, ?, ?, 'nutrition', ?, '1', ?, ?, ?, 1024, 'image/jpeg',
+      '2026-07-17T00:00:00.000Z')`)
+    .bind(
+      `identity-label-${suffix}`,
+      sourceRecordId,
+      source.content_hash,
+      source.product_id,
+      `identity-${suffix}`,
+      evidenceUrl,
+      evidenceUrl,
+      suffix === "match" ? "a".repeat(64) : "b".repeat(64),
+    ).run();
 }
 
 async function insertRobotoffReview(input: {
@@ -536,9 +564,10 @@ describe("Worker catalog API", () => {
     expect(catalogResponse.status).toBe(200);
     const catalog = await json<CatalogResponse>(catalogResponse);
     expect(catalog.trustedDefault).toBe(false);
-    expect(catalog.filters).toMatchObject({ verification: "all", scope: "all", sort: "protein_density" });
+    expect(catalog.filters).toMatchObject({ trust: "all", verification: "all", scope: "all", sort: "protein_density" });
     expect(catalog.products.length).toBeGreaterThan(0);
-    expect(catalog.products.some((product) => product.nutritionStatus === "verified")).toBe(true);
+    expect(catalog.products.some((product) => product.nutritionStatus === "unverified")).toBe(true);
+    expect(catalog.products.some((product) => product.nutritionStatus === "verified")).toBe(false);
     expect(catalog.products.filter((product) => product.nutritionStatus === "conflict").every((product) => product.metrics.proteinPer100Calories.value === null)).toBe(true);
     const densityValues = catalog.products.map((product) => product.metrics.proteinPer100Calories.value).filter((value): value is number => value !== null);
     expect(densityValues).toEqual([...densityValues].sort((left, right) => right - left));
@@ -568,7 +597,7 @@ describe("Worker catalog API", () => {
     const unverified = discovery.products.find((product) => product.id === first.id);
     expect(unverified).toBeDefined();
     expect(unverified?.metrics.proteinPer100Calories.value).toBeGreaterThan(0);
-    const trustedResponse = await worker.fetch("http://localhost/api/products?verification=verified&scope=protein&sort=protein_density");
+    const trustedResponse = await worker.fetch("http://localhost/api/products?trust=strict&verification=verified&scope=protein&sort=protein_density");
     const trusted = await json<CatalogResponse>(trustedResponse);
     expect(trusted.trustedDefault).toBe(true);
     expect(trusted.products.some((product) => product.id === first.id)).toBe(false);
@@ -589,13 +618,167 @@ describe("Worker catalog API", () => {
       .bind(first.nutrition.calories, first.nutrition.proteinGrams, first.nutrition.carbohydrateGrams, first.nutrition.fatGrams, first.id).run();
   });
 
-  it("filters for products with both verified nutrition and verified ingredients", async () => {
+  it("keeps strict trust separate from discovery and revokes it on identity drift", async () => {
+    const observedAt = "2026-07-17T16:00:00.000Z";
+    const contentHash = "7".repeat(64);
+    const identityHash = "8".repeat(64);
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO sources
+        (id, name, kind, identity_authority, nutrition_authority, ingredient_authority,
+         retention_notes, created_at)
+        VALUES ('strict_brand', 'Strict Brand', 'brand', 100, 100, 100,
+          'Strict trust API fixture', ?)`)
+        .bind(observedAt),
+      env.DB.prepare(`INSERT INTO ingestion_runs
+        (id, source_id, adapter_version, mode, input_identifier, input_hash,
+         records_read, india_records, staged_records, invalid_records, duplicate_records,
+         source_complete, market_complete, status, started_at, completed_at)
+        VALUES ('strict_run', 'strict_brand', 'strict-v1', 'sample', 'strict-fixture', ?,
+          1, 1, 1, 0, 0, 1, 0, 'completed', ?, ?)`)
+        .bind("9".repeat(64), observedAt, observedAt),
+      env.DB.prepare(`INSERT INTO products
+        (id, gtin, brand, brand_normalized, name, name_normalized, category,
+         marketed_protein, marketed_reasons_json, nutritionally_protein_dense,
+         nutrition_reasons_json, classifier_version, completeness,
+         completeness_missing_json, created_at, updated_at, is_active)
+        VALUES ('strict_product', '08900000000995', 'Strict Brand', 'strict brand',
+          'Exact Protein', 'exact protein', 'protein_powder', 1, '["protein"]', 1,
+          '["protein_at_least_10g_per_100kcal"]', 'protein-v1', 100, '[]', ?, ?, 1)`)
+        .bind(observedAt, observedAt),
+      env.DB.prepare(`INSERT INTO source_records
+        (id, source_id, source_record_id, product_id, source_url, content_hash,
+         identity_hash, observed_at, first_seen_run_id, last_seen_run_id,
+         raw_evidence_json, resolution_rule)
+        VALUES ('strict_record', 'strict_brand', 'strict-key', 'strict_product',
+          'https://strict.example/product', ?, ?, ?, 'strict_run', 'strict_run', '{}',
+          'exact_gtin')`)
+        .bind(contentHash, identityHash, observedAt),
+    ]);
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO nutrition_facts
+        (product_id, source_record_id, status, confidence, authority, basis,
+         preparation_state, calories, protein_grams, carbohydrate_grams, fat_grams,
+         observed_at, updated_at)
+        VALUES ('strict_product', 'strict_record', 'verified', 'high', 100, 'per_100g',
+          'as_sold', 360, 52, 20, 8, ?, ?)`)
+        .bind(observedAt, observedAt),
+      env.DB.prepare(`INSERT INTO ingredient_statements
+        (product_id, source_record_id, raw_text, language, status, confidence,
+         authority, observed_at, updated_at)
+        VALUES ('strict_product', 'strict_record', 'Milk protein, cocoa', 'en',
+          'verified', 'high', 100, ?, ?)`)
+        .bind(observedAt, observedAt),
+      env.DB.prepare(`INSERT INTO nutrient_values
+        (id, product_id, source_record_id, nutrient_code, quantity, unit, basis,
+         preparation_state, status, observed_at)
+        VALUES ('strict_nutrient', 'strict_product', 'strict_record', 'calcium', 120,
+          'mg', 'per_100g', 'as_sold', 'verified', ?)`)
+        .bind(observedAt),
+      env.DB.prepare(`INSERT INTO identity_evidence_decisions
+        (id, product_id, source_id, source_record_key, source_record_id, identity_hash,
+         evidence_url, source_observed_at, rationale, decided_by, decided_at)
+        VALUES ('ied_abcdef0123456789abcdef01', 'strict_product', 'strict_brand',
+          'strict-key', 'strict_record', ?, 'https://strict.example/product', ?,
+          'Exact product variant reviewed', 'test_reviewer', ?)`)
+        .bind(identityHash, observedAt, observedAt),
+      env.DB.prepare(`INSERT INTO evidence_outcomes
+        (product_id, field_family, outcome, source_record_id, evidence_url,
+         observed_at, verified_at, decided_by, notes)
+        VALUES ('strict_product', 'identity', 'verified', 'strict_record',
+          'https://strict.example/product', ?, ?, 'test_reviewer',
+          'Exact product variant reviewed')`)
+        .bind(observedAt, observedAt),
+    ]);
+
+    const strictResponse = await worker.fetch(
+      "http://localhost/api/products?trust=strict&scope=all&sort=protein_density&pageSize=100",
+    );
+    expect(strictResponse.status).toBe(200);
+    const strict = await json<CatalogResponse>(strictResponse);
+    expect(strict.trustedDefault).toBe(true);
+    expect(strict.products.some(({ id }) => id === "strict_product")).toBe(true);
+    const beforeDiscovery = await json<CatalogResponse>(await worker.fetch(
+      "http://localhost/api/products?trust=all&scope=all&pageSize=100",
+    ));
+    expect(beforeDiscovery.products.find(({ id }) => id === "strict_product")).toMatchObject({
+      nutritionStatus: "verified",
+      ingredientStatus: "verified",
+    });
+    const beforeDetail = await json<ProductDetailResponse>(await worker.fetch(
+      "http://localhost/api/products/strict_product",
+    ));
+    expect(beforeDetail).toMatchObject({
+      nutritionEvidenceUrl: "https://strict.example/product",
+      nutritionEvidenceKind: "source",
+      ingredientEvidenceUrl: "https://strict.example/product",
+      ingredientEvidenceKind: "source",
+      ingredientTerminalOutcome: null,
+    });
+    expect(beforeDetail.nutrients.find(({ code }) => code === "calcium")?.status).toBe("verified");
+    const beforeCoverage = await json<CoverageResponse>(await worker.fetch("http://localhost/api/coverage"));
+    for (const family of ["identity", "nutrition", "ingredients"] as const) {
+      const completion = await json<CompletionLedgerResponse>(await worker.fetch(
+        `http://localhost/api/completion-ledger?family=${family}&state=all&q=Exact+Protein&pageSize=100`,
+      ));
+      expect(completion.items.find(({ product }) => product.id === "strict_product")).toMatchObject({
+        state: "verified",
+        lane: null,
+      });
+    }
+
+    await env.DB.prepare(`UPDATE source_records SET observed_at = ? WHERE id = 'strict_record'`)
+      .bind("2026-07-17T16:01:00.000Z").run();
+    const driftedStrict = await json<CatalogResponse>(await worker.fetch(
+      "http://localhost/api/products?trust=strict&scope=all&pageSize=100",
+    ));
+    expect(driftedStrict.products.some(({ id }) => id === "strict_product")).toBe(false);
+    const discovery = await json<CatalogResponse>(await worker.fetch(
+      "http://localhost/api/products?trust=all&scope=all&pageSize=100",
+    ));
+    expect(discovery.products.find(({ id }) => id === "strict_product")).toMatchObject({
+      nutritionStatus: "unverified",
+      ingredientStatus: "unverified",
+    });
+    const verified = await json<CatalogResponse>(await worker.fetch(
+      "http://localhost/api/products?verification=verified&ingredientVerification=verified&scope=all&pageSize=100",
+    ));
+    expect(verified.products.some(({ id }) => id === "strict_product")).toBe(false);
+    const unverified = await json<CatalogResponse>(await worker.fetch(
+      "http://localhost/api/products?verification=unverified&ingredientVerification=unverified&scope=all&pageSize=100",
+    ));
+    expect(unverified.products.some(({ id }) => id === "strict_product")).toBe(true);
+    const driftedDetail = await json<ProductDetailResponse>(await worker.fetch(
+      "http://localhost/api/products/strict_product",
+    ));
+    expect(driftedDetail).toMatchObject({
+      nutritionStatus: "unverified",
+      ingredientStatus: "unverified",
+    });
+    expect(driftedDetail.nutrients.find(({ code }) => code === "calcium")?.status).toBe("unverified");
+    const driftedCoverage = await json<CoverageResponse>(await worker.fetch("http://localhost/api/coverage"));
+    expect(driftedCoverage.catalog.verifiedNutrition).toBe(beforeCoverage.catalog.verifiedNutrition - 1);
+    expect(driftedCoverage.catalog.unverifiedNutrition).toBe(beforeCoverage.catalog.unverifiedNutrition + 1);
+    expect(driftedCoverage.catalog.verifiedIngredients).toBe(beforeCoverage.catalog.verifiedIngredients - 1);
+    expect(driftedCoverage.catalog.unverifiedIngredients).toBe(beforeCoverage.catalog.unverifiedIngredients + 1);
+    for (const family of ["identity", "nutrition", "ingredients"] as const) {
+      const completion = await json<CompletionLedgerResponse>(await worker.fetch(
+        `http://localhost/api/completion-ledger?family=${family}&state=all&q=Exact+Protein&pageSize=100`,
+      ));
+      expect(completion.items.find(({ product }) => product.id === "strict_product")).toMatchObject({
+        state: "outstanding",
+        lane: "evidence_inconsistent",
+      });
+    }
+    await env.DB.prepare("UPDATE products SET is_active = 0 WHERE id = 'strict_product'").run();
+  });
+
+  it("does not filter raw verified rows as verified without current evidence", async () => {
     const response = await worker.fetch(
       "http://localhost/api/products?verification=verified&ingredientVerification=verified&scope=all&sort=name&pageSize=100",
     );
     expect(response.status).toBe(200);
     const catalog = await json<CatalogResponse>(response);
-    expect(catalog.products.length).toBeGreaterThan(0);
+    expect(catalog.products).toHaveLength(0);
     expect(catalog.products.every((product) => (
       product.nutritionStatus === "verified" && product.ingredientStatus === "verified"
     ))).toBe(true);
@@ -607,6 +790,8 @@ describe("Worker catalog API", () => {
 
     const invalid = await worker.fetch("http://localhost/api/products?ingredientVerification=reviewed");
     expect(invalid.status).toBe(400);
+    const invalidTrust = await worker.fetch("http://localhost/api/products?trust=implied");
+    expect(invalidTrust.status).toBe(400);
     expect(await json<{ error: { message: string } }>(invalid)).toMatchObject({
       error: { message: "Invalid ingredient verification filter" },
     });
@@ -1870,6 +2055,9 @@ describe("Worker catalog API", () => {
 
   it("persists a manual identity match and reuses it on replay", async () => {
     const review = await identityReview("fixture-ambiguous-whey-listing");
+    const evidenceUrl = "https://example.invalid/identity-label.jpg";
+    if (!review.sourceRecordId) throw new Error("Expected identity review source record");
+    await retainIdentityLabel(review.sourceRecordId, evidenceUrl, "match");
     expect(review.candidates).toHaveLength(1);
     const candidate = review.candidates[0];
     if (!candidate) throw new Error("Expected an identity candidate");
@@ -1878,14 +2066,24 @@ describe("Worker catalog API", () => {
     const invalidCandidate = await worker.fetch(`http://localhost/api/reviews/${review.id}/resolve`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ decision: "match", rationale: "Wrong candidate proof", candidateProductId: "not-a-candidate" }),
+      body: JSON.stringify({
+        decision: "match",
+        rationale: "Wrong candidate proof",
+        candidateProductId: "not-a-candidate",
+        evidenceUrl,
+      }),
     });
     expect(invalidCandidate.status).toBe(400);
 
     const resolved = await worker.fetch(`http://localhost/api/reviews/${review.id}/resolve`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ decision: "match", rationale: "Same label identity; missing retailer pack metadata", candidateProductId: candidate.id }),
+      body: JSON.stringify({
+        decision: "match",
+        rationale: "Same label identity; missing retailer pack metadata",
+        candidateProductId: candidate.id,
+        evidenceUrl,
+      }),
     });
     expect(resolved.status).toBe(200);
 
@@ -1897,6 +2095,24 @@ describe("Worker catalog API", () => {
     const decision = await env.DB.prepare("SELECT decision, target_product_id, active FROM identity_decisions WHERE source_record_key = ?")
       .bind("fixture-ambiguous-whey-listing").first<{ decision: string; target_product_id: string; active: number }>();
     expect(decision).toEqual({ decision: "match", target_product_id: candidate.id, active: 1 });
+    const identityEvidence = await env.DB.prepare(`SELECT product_id, source_record_id, evidence_url
+      FROM identity_evidence_decisions WHERE product_id = ? AND source_record_id = ?`)
+      .bind(candidate.id, review.sourceRecordId)
+      .first<{ product_id: string; source_record_id: string; evidence_url: string }>();
+    expect(identityEvidence).toEqual({
+      product_id: candidate.id,
+      source_record_id: review.sourceRecordId,
+      evidence_url: evidenceUrl,
+    });
+    const identityOutcome = await env.DB.prepare(`SELECT outcome, source_record_id, evidence_url
+      FROM evidence_outcomes WHERE product_id = ? AND field_family = 'identity'`)
+      .bind(candidate.id)
+      .first<{ outcome: string; source_record_id: string; evidence_url: string }>();
+    expect(identityOutcome).toEqual({
+      outcome: "verified",
+      source_record_id: review.sourceRecordId,
+      evidence_url: evidenceUrl,
+    });
     const incoming = await env.DB.prepare("SELECT is_active FROM products WHERE id = ?").bind(review.productId).first<{ is_active: number }>();
     expect(incoming?.is_active).toBe(0);
     const openIdentity = await env.DB.prepare("SELECT COUNT(*) AS count FROM review_items WHERE type = 'identity' AND status = 'open' AND source_record_id = ?")
@@ -1913,10 +2129,26 @@ describe("Worker catalog API", () => {
 
   it("persists a create-new identity decision across replay", async () => {
     const review = await identityReview("fixture-distinct-whey-listing");
-    const resolved = await worker.fetch(`http://localhost/api/reviews/${review.id}/resolve`, {
+    const evidenceUrl = "https://example.invalid/distinct-identity-label.jpg";
+    if (!review.sourceRecordId) throw new Error("Expected identity review source record");
+    await retainIdentityLabel(review.sourceRecordId, evidenceUrl, "create");
+    const missingEvidence = await worker.fetch(`http://localhost/api/reviews/${review.id}/resolve`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ decision: "create_new", rationale: "Packaging evidence establishes a distinct product" }),
+    });
+    expect(missingEvidence.status).toBe(400);
+    const stillOpen = await env.DB.prepare("SELECT status FROM review_items WHERE id = ?")
+      .bind(review.id).first<{ status: string }>();
+    expect(stillOpen?.status).toBe("open");
+    const resolved = await worker.fetch(`http://localhost/api/reviews/${review.id}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "create_new",
+        rationale: "Packaging evidence establishes a distinct product",
+        evidenceUrl,
+      }),
     });
     expect(resolved.status).toBe(200);
 
@@ -1928,6 +2160,15 @@ describe("Worker catalog API", () => {
     const decision = await env.DB.prepare("SELECT decision, target_product_id FROM identity_decisions WHERE source_record_key = ?")
       .bind("fixture-distinct-whey-listing").first<{ decision: string; target_product_id: string }>();
     expect(decision).toEqual({ decision: "create_new", target_product_id: review.productId });
+    const exactEvidence = await env.DB.prepare(`SELECT product_id, source_record_id, evidence_url
+      FROM identity_evidence_decisions WHERE product_id = ? AND source_record_id = ?`)
+      .bind(review.productId, review.sourceRecordId)
+      .first<{ product_id: string; source_record_id: string; evidence_url: string }>();
+    expect(exactEvidence).toEqual({
+      product_id: review.productId,
+      source_record_id: review.sourceRecordId,
+      evidence_url: evidenceUrl,
+    });
     const incoming = await env.DB.prepare("SELECT is_active FROM products WHERE id = ?").bind(review.productId).first<{ is_active: number }>();
     expect(incoming?.is_active).toBe(1);
   });
@@ -1949,6 +2190,12 @@ describe("Worker catalog API", () => {
     const decision = await env.DB.prepare("SELECT decision, target_product_id FROM identity_decisions WHERE source_record_key = ?")
       .bind("fixture-unmatched-whey-listing").first<{ decision: string; target_product_id: string | null }>();
     expect(decision).toEqual({ decision: "no_match", target_product_id: null });
+    const terminalIdentity = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM identity_evidence_decisions WHERE source_record_id = ?) AS decisions,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE product_id = ? AND field_family = 'identity') AS outcomes`)
+      .bind(review.sourceRecordId, review.productId)
+      .first<{ decisions: number; outcomes: number }>();
+    expect(terminalIdentity).toEqual({ decisions: 0, outcomes: 0 });
     const incoming = await env.DB.prepare("SELECT is_active FROM products WHERE id = ?").bind(review.productId).first<{ is_active: number }>();
     expect(incoming?.is_active).toBe(0);
     const stillLinked = await env.DB.prepare("SELECT COUNT(*) AS count FROM source_records WHERE product_id = ?")
@@ -2023,5 +2270,112 @@ describe("Worker catalog API", () => {
         extraction_attempt_id: exactIngredient.extractionAttemptId,
         label_asset_id: exactIngredient.labelAssetId,
       });
+  });
+
+  it("downgrades exact-label verified nutrition when a newer retained label revision replaces it", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected an active product for current-label drift");
+    const evidence = robotoffEvidence(product.gtin, {
+      calories: 380,
+      proteinGrams: 32,
+      carbohydrateGrams: 42,
+      sugarGrams: 4,
+      fatGrams: 9,
+      saturatedFatGrams: 2,
+      fibreGrams: 5,
+      sodiumMg: 190,
+    });
+    const mutableEvidence = evidence as {
+      details: { candidate: { imageId: string; imageUrl: string } };
+    };
+    mutableEvidence.details.candidate.imageId = "catalog-label-drift-image";
+    mutableEvidence.details.candidate.imageUrl = "https://images.openfoodfacts.org/images/products/catalog-label-drift.jpg";
+    const candidate = nutritionCandidateFromEvidence(evidence, product.gtin);
+    if (!candidate) throw new Error("Expected a current-label nutrition candidate");
+    const review = await insertRobotoffReview({ suffix: "catalog-label-drift", evidence });
+    await env.DB.prepare(`UPDATE extraction_attempts SET is_current = 0
+      WHERE product_id = ? AND field_family = 'nutrition' AND is_current = 1`)
+      .bind(review.productId).run();
+    const exact = await attachExactExtraction(review, evidence, "nutrition");
+    const verifiedResponse = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "verify_nutrition",
+        rationale: "Exact current label used to test effective catalog status",
+        evidenceUrl: candidate.imageUrl,
+      }),
+    });
+    expect(verifiedResponse.status).toBe(200);
+
+    const currentCatalog = await json<CatalogResponse>(await worker.fetch(
+      `http://localhost/api/products?q=${product.gtin}&verification=verified&scope=all&pageSize=100`,
+    ));
+    expect(currentCatalog.products.find(({ id }) => id === review.productId)).toMatchObject({
+      nutritionStatus: "verified",
+      nutritionEvidenceUrl: candidate.imageUrl,
+      nutritionEvidenceKind: "label",
+    });
+    const beforeCoverage = await json<CoverageResponse>(await worker.fetch("http://localhost/api/coverage"));
+    const label = await env.DB.prepare(`SELECT subject_source_record_id,
+      subject_source_content_hash, product_id, field_family, source_image_id,
+      source_image_revision, requested_url, effective_url
+      FROM label_evidence_assets WHERE id = ?`)
+      .bind(exact.labelAssetId)
+      .first<{
+        subject_source_record_id: string;
+        subject_source_content_hash: string;
+        product_id: string;
+        field_family: string;
+        source_image_id: string;
+        source_image_revision: string | null;
+        requested_url: string;
+        effective_url: string;
+      }>();
+    if (!label) throw new Error("Expected retained exact label evidence");
+    await env.DB.prepare(`INSERT INTO label_evidence_assets
+      (id, subject_source_record_id, subject_source_content_hash, product_id,
+       field_family, source_image_id, source_image_revision, requested_url,
+       effective_url, content_sha256, byte_length, media_type, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 4097, 'image/jpeg', ?)`)
+      .bind(
+        `${exact.labelAssetId}-replacement`,
+        label.subject_source_record_id,
+        label.subject_source_content_hash,
+        label.product_id,
+        label.field_family,
+        label.source_image_id,
+        label.source_image_revision,
+        label.requested_url,
+        label.effective_url,
+        "a".repeat(64),
+        "2026-07-18T00:00:00.000Z",
+      ).run();
+
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS count
+      FROM current_exact_verified_evidence_decisions
+      WHERE product_id = ? AND field_family = 'nutrition'`)
+      .bind(review.productId).first<{ count: number }>()).toEqual({ count: 0 });
+    const verifiedAfterDrift = await json<CatalogResponse>(await worker.fetch(
+      `http://localhost/api/products?q=${product.gtin}&verification=verified&scope=all&pageSize=100`,
+    ));
+    expect(verifiedAfterDrift.products.some(({ id }) => id === review.productId)).toBe(false);
+    const unverifiedAfterDrift = await json<CatalogResponse>(await worker.fetch(
+      `http://localhost/api/products?q=${product.gtin}&verification=unverified&scope=all&pageSize=100`,
+    ));
+    expect(unverifiedAfterDrift.products.find(({ id }) => id === review.productId)?.nutritionStatus).toBe("unverified");
+    const detail = await json<ProductDetailResponse>(await worker.fetch(
+      `http://localhost/api/products/${review.productId}`,
+    ));
+    expect(detail).toMatchObject({
+      nutritionStatus: "unverified",
+      nutritionEvidenceUrl: null,
+      nutritionEvidenceKind: null,
+    });
+    expect(detail.nutrients.filter(({ status }) => status === "verified")).toHaveLength(0);
+    const afterCoverage = await json<CoverageResponse>(await worker.fetch("http://localhost/api/coverage"));
+    expect(afterCoverage.catalog.verifiedNutrition).toBe(beforeCoverage.catalog.verifiedNutrition - 1);
+    expect(afterCoverage.catalog.unverifiedNutrition).toBe(beforeCoverage.catalog.unverifiedNutrition + 1);
   });
 });

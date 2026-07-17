@@ -15,7 +15,13 @@ import {
   validateCompletionLedger,
 } from "./completion";
 import { getCoverage } from "./coverage";
+import { verifyProductIdentity } from "./identity-evidence";
 import { listReviews, resolveReview } from "./reviews";
+import {
+  listTerminalEvidence,
+  recordTerminalEvidence,
+  validateTerminalEvidenceList,
+} from "./terminal-evidence";
 
 export const app = new Hono<{ Bindings: Env }>();
 
@@ -82,6 +88,100 @@ app.get("/api/products", async (c) => {
 app.get("/api/products/:id", async (c) => {
   const product = await getProductDetail(c.env.DB, c.req.param("id"));
   return product ? c.json(product) : c.json(errorBody("not_found", "Product not found"), 404);
+});
+
+app.get("/api/products/:productId/terminal-evidence", async (c) => {
+  const hostname = new URL(c.req.url).hostname;
+  if (!["localhost", "127.0.0.1", "::1"].includes(hostname)) {
+    return c.json(errorBody(
+      "mutations_disabled",
+      "Terminal evidence review is local-only until operator authentication is configured",
+    ), 403);
+  }
+  const productId = c.req.param("productId");
+  if (!productId || productId.length > 512) {
+    return c.json(errorBody("validation_error", "Invalid product ID"), 400);
+  }
+  const parsed = validateTerminalEvidenceList(new URL(c.req.url).searchParams);
+  if (!parsed.value) return c.json(errorBody("validation_error", parsed.error ?? "Invalid evidence filters"), 400);
+  const response = await listTerminalEvidence(c.env.DB, productId, parsed.value);
+  return response ? c.json(response) : c.json(errorBody("not_found", "Product not found"), 404);
+});
+
+app.post("/api/products/:productId/terminal-evidence", async (c) => {
+  const hostname = new URL(c.req.url).hostname;
+  if (!["localhost", "127.0.0.1", "::1"].includes(hostname)) {
+    return c.json(errorBody(
+      "mutations_disabled",
+      "Terminal evidence mutations are local-only until operator authentication is configured",
+    ), 403);
+  }
+  const productId = c.req.param("productId");
+  if (!productId || productId.length > 512) {
+    return c.json(errorBody("validation_error", "Invalid product ID"), 400);
+  }
+  const body: unknown = await c.req.json().catch(() => null);
+  const result = await recordTerminalEvidence(c.env.DB, productId, body);
+  if (!("error" in result)) return c.json(result, result.status === "created" ? 201 : 200);
+  if (result.error === "validation_error") {
+    return c.json(errorBody("validation_error", result.message, result.details), 400);
+  }
+  if (result.error === "not_found") return c.json(errorBody("not_found", result.message, result.details), 404);
+  if (result.error === "stale_evidence") return c.json(errorBody("stale_evidence", result.message, result.details), 409);
+  return c.json(errorBody("conflict", result.message, result.details), 409);
+});
+
+app.post("/api/products/:productId/identity-evidence", async (c) => {
+  const hostname = new URL(c.req.url).hostname;
+  if (!["localhost", "127.0.0.1", "::1"].includes(hostname)) {
+    return c.json(errorBody(
+      "mutations_disabled",
+      "Identity evidence mutations are local-only until operator authentication is configured",
+    ), 403);
+  }
+  const body: unknown = await c.req.json().catch(() => null);
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return c.json(errorBody("validation_error", "Expected a JSON object"), 400);
+  }
+  const input = body as Record<string, unknown>;
+  const expectedKeys = ["sourceRecordId", "evidenceUrl", "rationale"];
+  if (Object.keys(input).some((key) => !expectedKeys.includes(key))) {
+    return c.json(errorBody("validation_error", "Identity evidence contains unsupported fields"), 400);
+  }
+  if (typeof input.sourceRecordId !== "string" || input.sourceRecordId.trim().length < 1 || input.sourceRecordId.length > 256) {
+    return c.json(errorBody("validation_error", "A current source record ID is required"), 400);
+  }
+  if (typeof input.rationale !== "string" || input.rationale.trim().length < 3 || input.rationale.length > 2_000) {
+    return c.json(errorBody("validation_error", "A rationale between 3 and 2,000 characters is required"), 400);
+  }
+  if (typeof input.evidenceUrl !== "string" || input.evidenceUrl.length > 2_048) {
+    return c.json(errorBody("validation_error", "A current HTTPS evidence URL is required"), 400);
+  }
+  let evidenceUrl: string;
+  try {
+    const parsed = new URL(input.evidenceUrl);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password) throw new Error("unsafe URL");
+    evidenceUrl = parsed.href;
+  } catch {
+    return c.json(errorBody("validation_error", "Evidence URL must use HTTPS without embedded credentials"), 400);
+  }
+  const result = await verifyProductIdentity(c.env.DB, c.req.param("productId"), {
+    sourceRecordId: input.sourceRecordId.trim(),
+    evidenceUrl,
+    rationale: input.rationale.trim(),
+  });
+  if (result.status === "not_found") return c.json(errorBody("not_found", "Active product not found"), 404);
+  if (result.status === "invalid_binding") {
+    return c.json(errorBody(
+      "validation_error",
+      "Source record is not a current exact identity binding for this product",
+      result.errors ? { errors: result.errors } : undefined,
+    ), 400);
+  }
+  if (result.status === "conflict") {
+    return c.json(errorBody("conflict", "A different immutable identity decision already exists for this binding"), 409);
+  }
+  return c.json(result, result.idempotent ? 200 : 201);
 });
 
 app.get("/api/coverage", async (c) => c.json(await getCoverage(c.env.DB)));
@@ -175,7 +275,7 @@ app.post("/api/reviews/:id/resolve", async (c) => {
       return c.json(errorBody("validation_error", "Evidence URL must be a valid HTTPS URL"), 400);
     }
   }
-  if (["verify_nutrition", "verify_ingredients"].includes(input.decision) && evidenceUrl === null) {
+  if (["verify_nutrition", "verify_ingredients", "match", "create_new"].includes(input.decision) && evidenceUrl === null) {
     return c.json(errorBody("validation_error", "Verification requires a current label or authoritative-source evidence URL"), 400);
   }
   if (input.decision === "redundant_nutrition" && evidenceUrl !== null) {

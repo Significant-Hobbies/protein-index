@@ -284,6 +284,134 @@ describe("extraction outcome contracts", () => {
 });
 
 describe("extraction outcome migration", () => {
+  it("revokes exact verified evidence when newer bytes replace the current label revision", async () => {
+    const database = new DatabaseSync(":memory:");
+    await applyAllMigrations(database);
+    seedExtractionSubject(database);
+    seedAcceptedExtractionRun(database);
+    seedLabelAsset(database);
+    insertAttempt(database, { id: "strict-attempt", isCurrent: 1 });
+    database.exec(`
+      INSERT INTO extraction_attempt_labels
+        (id, attempt_id, label_asset_id, role, outcome, prediction_count, candidate_count,
+         rejection_count, failure_count, conflict_count, candidate_hashes_json, reasons_json)
+      VALUES ('strict-attempt-label', 'strict-attempt', 'asset', 'prediction', 'candidate',
+        1, 1, 0, 0, 0, '["${hash("a")}"]', '[]');
+      INSERT INTO source_records
+        (id, source_id, source_record_id, product_id, content_hash, identity_hash,
+         observed_at, first_seen_run_id, last_seen_run_id, raw_evidence_json, resolution_rule)
+      VALUES ('strict-derived', 'source', 'strict-derived-key', 'product', '${hash("c")}',
+        '${hash("d")}', '${at}', 'extract-run', 'extract-run',
+        '{"extractionAttemptId":"strict-attempt","labelAssetId":"asset","labelContentSha256":"${hash("6")}","candidateHash":"${hash("a")}"}',
+        'exact_gtin');
+      INSERT INTO evidence_decisions
+        (id, source_id, source_record_key, source_record_id, source_content_hash,
+         product_id, candidate_hash, field_family, decision, payload_json,
+         evidence_url, rationale, decided_by, decided_at, active,
+         extraction_attempt_id, label_asset_id)
+      VALUES ('strict-verified', 'source', 'strict-derived-key', 'strict-derived', '${hash("c")}',
+        'product', '${hash("a")}', 'nutrition', 'verify', '{}',
+        'https://images.openfoodfacts.org/label.jpg', 'Exact current label reviewed',
+        'reviewer', '${at}', 1, 'strict-attempt', 'asset');
+    `);
+
+    expect(database.prepare("SELECT COUNT(*) AS count FROM current_exact_verified_evidence_decisions").get())
+      .toEqual({ count: 1 });
+    database.exec(`INSERT INTO label_evidence_assets
+      (id, subject_source_record_id, subject_source_content_hash, product_id,
+       field_family, source_image_id, source_image_revision, requested_url,
+       effective_url, content_sha256, byte_length, media_type, fetched_at)
+      VALUES ('asset-new-bytes', 'record', '${hash("2")}', 'product', 'nutrition',
+        'image-1', 'rev-1', 'https://images.openfoodfacts.org/label-new.jpg',
+        'https://images.openfoodfacts.org/label-new.jpg', '${hash("7")}', 4096,
+        'image/jpeg', '2026-07-17T00:01:00.000Z')`);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM current_exact_verified_evidence_decisions").get())
+      .toEqual({ count: 0 });
+
+    database.close();
+  });
+
+  it("requires an exact current identity observation for strict trust", async () => {
+    const database = new DatabaseSync(":memory:");
+    await applyAllMigrations(database);
+    seedExtractionSubject(database);
+    database.exec(`
+      UPDATE sources SET kind = 'brand' WHERE id = 'source';
+      UPDATE source_records
+      SET source_url = 'https://brand.example/product', identity_hash = '${hash("8")}'
+      WHERE id = 'record';
+      INSERT INTO nutrition_facts
+        (product_id, source_record_id, status, confidence, authority, basis,
+         preparation_state, calories, protein_grams, observed_at, updated_at)
+      VALUES ('product', 'record', 'verified', 'high', 100, 'per_100g', 'as_sold',
+        360, 52, '${at}', '${at}');
+      INSERT INTO ingredient_statements
+        (product_id, source_record_id, raw_text, language, status, confidence,
+         authority, observed_at, updated_at)
+      VALUES ('product', 'record', 'Milk protein', 'en', 'verified', 'high', 100,
+        '${at}', '${at}');
+      INSERT INTO identity_evidence_decisions
+        (id, product_id, source_id, source_record_key, source_record_id, identity_hash,
+         evidence_url, source_observed_at, rationale, decided_by, decided_at)
+      VALUES ('ied_0123456789abcdef01234567', 'product', 'source', 'record-key', 'record',
+        '${hash("8")}', 'https://brand.example/product', '${at}',
+        'Exact product identity reviewed', 'reviewer', '${at}');
+      INSERT INTO evidence_outcomes
+        (product_id, field_family, outcome, source_record_id, evidence_url,
+         observed_at, verified_at, decided_by, notes)
+      VALUES ('product', 'identity', 'verified', 'record', 'https://brand.example/product',
+        '${at}', '${at}', 'reviewer', 'Exact product identity reviewed');
+    `);
+
+    expect(database.prepare("SELECT id FROM strict_trusted_products").all())
+      .toEqual([{ id: "product" }]);
+    database.exec(`UPDATE source_records SET observed_at = '2026-07-17T00:01:00.000Z'
+      WHERE id = 'record'`);
+    expect(database.prepare("SELECT id FROM strict_trusted_products").all()).toEqual([]);
+    expect(database.prepare(`SELECT COUNT(*) AS count FROM evidence_outcomes
+      WHERE product_id = 'product' AND field_family = 'identity'`).get()).toEqual({ count: 0 });
+
+    database.close();
+  });
+
+  it("requires authoritative source metadata for terminal decisions but accepts exact retained labels", async () => {
+    const database = new DatabaseSync(":memory:");
+    await applyAllMigrations(database);
+    seedExtractionSubject(database);
+    seedLabelAsset(database);
+    database.exec("UPDATE source_records SET source_url = 'https://example.invalid/product' WHERE id = 'record'");
+
+    const insert = database.prepare(`INSERT INTO terminal_evidence_decisions
+      (id, idempotency_key, source_id, source_record_key, source_record_id,
+       source_content_hash, product_id, field_family, outcome, evidence_kind,
+       label_asset_id, label_content_sha256, rationale, decided_by, decided_at)
+      VALUES (?, ?, 'source', 'record-key', 'record', ?, 'product', 'nutrition',
+        'not_declared', ?, ?, ?, 'Reviewed exact current evidence', 'reviewer', ?)`);
+
+    expect(() => insert.run(
+      "source-decision",
+      "terminal:migration:source",
+      hash("2"),
+      "source",
+      null,
+      null,
+      at,
+    )).toThrow("terminal source evidence is not authoritative");
+    expect(() => insert.run(
+      "label-decision",
+      "terminal:migration:label",
+      hash("2"),
+      "label",
+      "asset",
+      hash("6"),
+      at,
+    )).not.toThrow();
+    expect(database.prepare(`SELECT evidence_kind FROM current_terminal_evidence_decisions
+      WHERE product_id = 'product'`).all()).toEqual([{ evidence_kind: "label" }]);
+
+    database.close();
+  });
+
   it("enforces immutable source/hash bindings, strict constraints, and one current attempt", async () => {
     const database = new DatabaseSync(":memory:");
     await applyAllMigrations(database);
@@ -444,6 +572,54 @@ describe("extraction outcome migration", () => {
       (product_id, field_family, outcome, evidence_url, observed_at, verified_at, decided_by, notes)
       VALUES ('product', 'nutrition', 'no_prediction', 'https://example.com/label.jpg',
         '${at}', '${at}', 'extractor', 'Automated outcome')`)).toThrow();
+
+    database.close();
+  });
+
+  it("revokes a terminal label projection when a newer source-image revision already exists", async () => {
+    const database = new DatabaseSync(":memory:");
+    const migrations = (await readdir("migrations"))
+      .filter((name) => name.endsWith(".sql"))
+      .sort();
+    for (const migration of migrations.filter((name) => name < "0012_")) {
+      database.exec(await readFile(join("migrations", migration), "utf8"));
+    }
+    seedExtractionSubject(database);
+    seedLabelAsset(database);
+
+    database.exec(`
+      INSERT INTO terminal_evidence_decisions
+        (id, idempotency_key, source_id, source_record_key, source_record_id,
+         source_content_hash, product_id, field_family, outcome, evidence_kind,
+         label_asset_id, label_content_sha256, rationale, decided_by, decided_at)
+      VALUES ('revision-decision', 'revision-drift-v1', 'source', 'record-key', 'record',
+        '${hash("2")}', 'product', 'nutrition', 'not_declared', 'label',
+        'asset', '${hash("6")}', 'Reviewed revision one', 'reviewer', '${at}');
+      INSERT INTO label_evidence_assets
+        (id, subject_source_record_id, subject_source_content_hash, product_id,
+         field_family, source_image_id, source_image_revision, requested_url,
+         effective_url, content_sha256, byte_length, media_type, fetched_at)
+      VALUES ('asset-revision-two', 'record', '${hash("2")}', 'product', 'nutrition',
+        'image-1', 'rev-2', 'https://images.openfoodfacts.org/label.2.jpg',
+        'https://images.openfoodfacts.org/label.2.jpg', '${hash("7")}', 4096,
+        'image/jpeg', '2026-07-17T00:01:00.000Z');
+    `);
+
+    expect(database.prepare("SELECT id FROM current_label_evidence_assets ORDER BY id").all())
+      .toEqual([{ id: "asset" }, { id: "asset-revision-two" }]);
+    expect(database.prepare(`SELECT COUNT(*) AS count FROM evidence_outcomes
+      WHERE decided_by = 'terminal_evidence_projection'`).get()).toEqual({ count: 1 });
+
+    database.exec(await readFile("migrations/0012_current_label_revision.sql", "utf8"));
+
+    expect(database.prepare("SELECT id FROM current_label_evidence_assets").all())
+      .toEqual([{ id: "asset-revision-two" }]);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM terminal_evidence_decisions").get())
+      .toEqual({ count: 1 });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM current_terminal_evidence_decisions").get())
+      .toEqual({ count: 0 });
+    expect(database.prepare(`SELECT COUNT(*) AS count FROM evidence_outcomes
+      WHERE decided_by = 'terminal_evidence_projection'`).get()).toEqual({ count: 0 });
 
     database.close();
   });

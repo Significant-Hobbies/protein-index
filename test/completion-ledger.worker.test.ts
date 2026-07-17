@@ -85,12 +85,23 @@ async function ensureRobotoffSource(family: "nutrition" | "ingredients"): Promis
   return sourceId;
 }
 
+async function ensureOfficialSource(family: "nutrition" | "ingredients"): Promise<string> {
+  const sourceId = `completion_official_${family}`;
+  await env.DB.prepare(`INSERT OR IGNORE INTO sources
+    (id, name, kind, identity_authority, nutrition_authority, ingredient_authority,
+      retention_notes, created_at)
+    VALUES (?, ?, 'official', 100, 100, 100, 'Exact current completion evidence', ?)`)
+    .bind(sourceId, `Completion official ${family} source`, observedAt).run();
+  return sourceId;
+}
+
 async function sourceRecord(input: {
   id: string;
   sourceId: string;
   productId: string;
   sourceUrl: string;
   observedAt?: string;
+  identityHash?: string;
 }): Promise<void> {
   const run = await env.DB.prepare("SELECT id FROM ingestion_runs ORDER BY started_at LIMIT 1")
     .first<{ id: string }>();
@@ -106,7 +117,7 @@ async function sourceRecord(input: {
       input.productId,
       input.sourceUrl,
       "a".repeat(64),
-      `identity-${input.id}`,
+      input.identityHash ?? `identity-${input.id}`,
       input.observedAt ?? observedAt,
       run.id,
       run.id,
@@ -136,6 +147,7 @@ async function currentExtraction(input: {
   subjectSourceRecordId: string;
   derivedSourceRecordId?: string;
   outcomes: Array<"candidate" | "no_prediction" | "rejected" | "failed">;
+  reasonCodes?: string[][];
 }): Promise<{ attemptId: string; labelAssetIds: string[]; candidateHash: string; candidateLabelAssetId: string | null }> {
   const subject = await env.DB.prepare(`SELECT sr.source_record_id, sr.content_hash, sr.source_id,
       sr.last_seen_run_id AS parent_run_id, parent.input_hash AS parent_input_hash
@@ -208,10 +220,10 @@ async function currentExtraction(input: {
     await env.DB.prepare(`INSERT INTO extraction_attempt_labels
       (id, attempt_id, label_asset_id, role, outcome, prediction_count, candidate_count,
         rejection_count, failure_count, conflict_count, candidate_hashes_json, reasons_json)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, '[]')`)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`)
       .bind(`${input.id}-link-${index}`, attemptId, labelAssetIds[index], index === 0 ? "requested" : "prediction",
         outcome, outcome === "no_prediction" ? 0 : 1, candidate, rejected, failed,
-        JSON.stringify(candidate ? [candidateHash] : [])).run();
+        JSON.stringify(candidate ? [candidateHash] : []), JSON.stringify(input.reasonCodes?.[index] ?? [])).run();
   }
   const candidateIndex = input.outcomes.findIndex((outcome) => outcome === "candidate");
   const bindingIndex = candidateIndex >= 0 ? candidateIndex : 0;
@@ -283,6 +295,16 @@ async function seedNutritionPartition(suffix: string) {
     outcomeStatement(ids.inactive, "nutrition", "not_declared"),
   ]);
 
+  const verifiedSourceId = await ensureOfficialSource("nutrition");
+  await sourceRecord({
+    id: id("verified-source"),
+    sourceId: verifiedSourceId,
+    productId: ids.verified,
+    sourceUrl: "https://example.invalid/official-verified-nutrition",
+  });
+  await env.DB.prepare("UPDATE nutrition_facts SET source_record_id = ? WHERE product_id = ?")
+    .bind(id("verified-source"), ids.verified).run();
+
   const sourceId = await ensureRobotoffSource("nutrition");
   await sourceRecord({
     id: id("terminal-unrelated-source"),
@@ -337,10 +359,10 @@ describe("completion ledger Worker API", () => {
     const byId = new Map(result.items.map((item) => [item.product.id, item]));
     expect([...byId]).toHaveLength(12);
     expect(byId.has(ids.inactive)).toBe(false);
-    expect(byId.get(ids.verified)).toMatchObject({ state: "verified", lane: null });
+    expect(byId.get(ids.verified)).toMatchObject({ state: "verified", lane: null, reasonCodes: [] });
     expect(byId.get(ids.terminal)).toMatchObject({
-      state: "terminal_unavailable",
-      lane: null,
+      state: "outstanding",
+      lane: "evidence_inconsistent",
       terminalOutcome: "not_declared",
       sourceUrl: "https://example.invalid/current-label.jpg",
       sourceId: null,
@@ -434,10 +456,38 @@ describe("completion ledger Worker API", () => {
       productStatement({ id: products.identityReview, name: "Ledger family identity review" }),
       ingredientStatement(products.ingredientVerified, "verified", 100),
       outcomeStatement(products.ingredientTerminal, "ingredients", "not_applicable"),
-      outcomeStatement(products.identityVerified, "identity", "verified"),
       outcomeStatement(products.identityUnavailable, "identity", "not_declared"),
     ]);
+    const verifiedIngredientSourceId = await ensureOfficialSource("ingredients");
+    await sourceRecord({
+      id: "ledger-family-ingredient-verified-source",
+      sourceId: verifiedIngredientSourceId,
+      productId: products.ingredientVerified,
+      sourceUrl: "https://example.invalid/official-verified-ingredients",
+    });
+    await env.DB.prepare("UPDATE ingredient_statements SET source_record_id = ? WHERE product_id = ?")
+      .bind("ledger-family-ingredient-verified-source", products.ingredientVerified).run();
     const ingredientSource = await ensureRobotoffSource("ingredients");
+    await sourceRecord({
+      id: "ledger-family-identity-verified-source",
+      sourceId: ingredientSource,
+      productId: products.identityVerified,
+      sourceUrl: "https://example.invalid/identity-verified-source",
+      identityHash: "b".repeat(64),
+    });
+    const identityVerification = await worker.fetch(
+      `http://localhost/api/products/${products.identityVerified}/identity-evidence`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sourceRecordId: "ledger-family-identity-verified-source",
+          evidenceUrl: "https://example.invalid/identity-verified-source",
+          rationale: "Exact current package label confirms this identity.",
+        }),
+      },
+    );
+    expect(identityVerification.status).toBe(201);
     await sourceRecord({
       id: "ledger-family-ingredient-subject",
       sourceId: ingredientSource,
@@ -486,8 +536,8 @@ describe("completion ledger Worker API", () => {
     const ingredientById = new Map(ingredients.items.map((item) => [item.product.id, item]));
     expect(ingredientById.get(products.ingredientVerified)).toMatchObject({ state: "verified", lane: null });
     expect(ingredientById.get(products.ingredientTerminal)).toMatchObject({
-      state: "terminal_unavailable",
-      lane: null,
+      state: "outstanding",
+      lane: "evidence_inconsistent",
       terminalOutcome: "not_applicable",
     });
     expect(ingredientById.get(products.ingredientCandidate)).toMatchObject({
@@ -643,7 +693,14 @@ describe("completion ledger Worker API", () => {
       productId: products.mixed,
       subjectSourceRecordId: `${products.mixed}-subject`,
       derivedSourceRecordId: `${products.mixed}-derived`,
-      outcomes: ["no_prediction", "candidate", "failed"],
+      outcomes: ["no_prediction", "candidate", "failed", "candidate", "rejected"],
+      reasonCodes: [
+        ["z_requested_reason", "a_requested_reason", "z_requested_reason"],
+        ["candidate_is_review_only"],
+        ["upstream_request_failed", "a_requested_reason"],
+        ["fourth_inline_reason"],
+        ["fifth_outside_inline_reason"],
+      ],
     });
     await review({
       id: "ledger-outcome-mixed-review",
@@ -687,44 +744,149 @@ describe("completion ledger Worker API", () => {
       lane: "review_ready",
       primaryReviewId: "ledger-outcome-mixed-review",
       primaryActionId: "ledger-outcome-mixed-review",
-      extraction: { labels: 3, candidate: 1, noPrediction: 1, failed: 1, unattempted: 0, stale: 0 },
-      labelsTruncated: false,
+      extraction: { labels: 5, candidate: 2, noPrediction: 1, rejected: 1, failed: 1, unattempted: 0, stale: 0 },
+      labelsTruncated: true,
+      reasonCodes: [
+        "a_requested_reason",
+        "automated_result_rejected",
+        "candidate_is_review_only",
+        "extraction_failed",
+        "fifth_outside_inline_reason",
+        "fourth_inline_reason",
+        "no_prediction",
+        "review_candidate_pending",
+        "upstream_request_failed",
+        "z_requested_reason",
+      ],
     });
-    expect(byId.get(products.mixed)?.labels.map(({ sourceImageId, outcome }) => [sourceImageId, outcome]))
-      .toEqual([["image-0", "no_prediction"], ["image-1", "candidate"], ["image-2", "failed"]]);
-    expect(byId.get(products.retry)).toMatchObject({ lane: "retry_extraction", extraction: { failed: 1 } });
+    expect(byId.get(products.mixed)?.labels.map(({ sourceImageId, outcome, reasonCodes }) => [sourceImageId, outcome, reasonCodes]))
+      .toEqual([
+        ["image-0", "no_prediction", ["z_requested_reason", "a_requested_reason", "z_requested_reason"]],
+        ["image-1", "candidate", ["candidate_is_review_only"]],
+        ["image-2", "failed", ["upstream_request_failed", "a_requested_reason"]],
+        ["image-3", "candidate", ["fourth_inline_reason"]],
+      ]);
+    expect(byId.get(products.retry)).toMatchObject({
+      lane: "retry_extraction",
+      extraction: { failed: 1 },
+      reasonCodes: ["extraction_failed"],
+    });
     expect(byId.get(products.manual)).toMatchObject({
       lane: "manual_label_review",
       extraction: { labels: 2, noPrediction: 1, rejected: 1 },
+      reasonCodes: ["automated_result_rejected", "no_prediction"],
     });
     expect(byId.get(products.stale)).toMatchObject({
       lane: "run_extraction",
       extraction: { labels: 0, unattempted: 1, stale: 1 },
       primaryActionId: products.stale,
+      reasonCodes: ["extraction_unattempted", "stale_extraction_evidence"],
     });
 
-    const labelPages = await Promise.all([1, 2, 3].map(async (page) => {
+    const labelPages = await Promise.all([1, 2, 3, 4, 5].map(async (page) => {
       const response = await worker.fetch(`http://localhost/api/completion-ledger/${products.mixed}/labels?family=nutrition&page=${page}&pageSize=1`);
       expect(response.status).toBe(200);
-      return json<{ items: Array<{ labelAssetId: string }>; pagination: { total: number; pages: number } }>(response);
+      return json<{ items: Array<{ labelAssetId: string; reasonCodes: string[] }>; pagination: { total: number; pages: number } }>(response);
     }));
-    expect(labelPages.every(({ pagination }) => pagination.total === 3 && pagination.pages === 3)).toBe(true);
-    expect(new Set(labelPages.flatMap(({ items }) => items.map(({ labelAssetId }) => labelAssetId))).size).toBe(3);
+    expect(labelPages.every(({ pagination }) => pagination.total === 5 && pagination.pages === 5)).toBe(true);
+    expect(new Set(labelPages.flatMap(({ items }) => items.map(({ labelAssetId }) => labelAssetId))).size).toBe(5);
+    expect(labelPages.flatMap(({ items }) => items).find(({ labelAssetId }) => labelAssetId === mixed.labelAssetIds[0])?.reasonCodes)
+      .toEqual(["z_requested_reason", "a_requested_reason", "z_requested_reason"]);
+    expect(byId.get(products.mixed)?.reasonCodes).toContain("fifth_outside_inline_reason");
     for (const query of ["family=identity", "page=0", "pageSize=101"]) {
       const response = await worker.fetch(`http://localhost/api/completion-ledger/${products.mixed}/labels?${query}`);
       expect(response.status).toBe(400);
     }
   });
 
+  it("removes an open candidate from review-ready when a newer retained byte revision replaces it", async () => {
+    const productId = "ledger-current-byte-review";
+    const sourceId = await ensureRobotoffSource("nutrition");
+    await env.DB.batch([productStatement({
+      id: productId,
+      name: "Ledger current byte review",
+      nutritionImageUrl: "https://example.invalid/current-byte-label.jpg",
+    })]);
+    await sourceRecord({
+      id: `${productId}-subject`,
+      sourceId,
+      productId,
+      sourceUrl: "https://example.invalid/current-byte-subject",
+    });
+    await sourceRecord({
+      id: `${productId}-derived`,
+      sourceId,
+      productId,
+      sourceUrl: "https://example.invalid/current-byte-derived",
+    });
+    const extraction = await currentExtraction({
+      id: "ledger-current-byte-review-extraction",
+      family: "nutrition",
+      productId,
+      subjectSourceRecordId: `${productId}-subject`,
+      derivedSourceRecordId: `${productId}-derived`,
+      outcomes: ["candidate"],
+    });
+    await review({
+      id: "ledger-current-byte-review-item",
+      productId,
+      sourceRecordId: `${productId}-derived`,
+      type: "nutrition_validation",
+      evidence: { details: {
+        extractionAttemptId: extraction.attemptId,
+        labelAssetId: extraction.candidateLabelAssetId,
+        candidateHash: extraction.candidateHash,
+      } },
+    });
+    const original = await env.DB.prepare(`SELECT subject_source_record_id,
+      subject_source_content_hash, product_id, field_family, source_image_id,
+      source_image_revision, requested_url, effective_url
+      FROM label_evidence_assets WHERE id = ?`)
+      .bind(extraction.candidateLabelAssetId).first<Record<string, string | null>>();
+    if (!original) throw new Error("Expected original candidate label");
+    await env.DB.prepare(`INSERT INTO label_evidence_assets
+      (id, subject_source_record_id, subject_source_content_hash, product_id,
+       field_family, source_image_id, source_image_revision, requested_url,
+       effective_url, content_sha256, byte_length, media_type, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 256, 'image/jpeg', ?)`)
+      .bind(
+        `${extraction.candidateLabelAssetId}-newer`,
+        original.subject_source_record_id,
+        original.subject_source_content_hash,
+        original.product_id,
+        original.field_family,
+        original.source_image_id,
+        original.source_image_revision,
+        original.requested_url,
+        original.effective_url,
+        "f".repeat(64),
+        "2026-07-18T00:00:00.000Z",
+      ).run();
+
+    const result = await ledger("family=nutrition&state=all&q=ledger+current+byte+review&pageSize=100");
+    expect(result.items[0]).toMatchObject({
+      product: { id: productId },
+      state: "outstanding",
+      lane: "run_extraction",
+      openCandidateCount: 0,
+      openReviewCount: 1,
+      primaryReviewId: null,
+      extraction: { labels: 0, stale: 1, unattempted: 1 },
+      reasonCodes: expect.arrayContaining(["extraction_unattempted", "stale_extraction_evidence"]),
+    });
+  });
+
   it("requires current exact linkage for verified Robotoff provenance", async () => {
     const sourceId = await ensureRobotoffSource("nutrition");
     const linkedProduct = "ledger-verified-linked";
     const legacyProduct = "ledger-verified-legacy";
+    const invalidEvidenceProduct = "ledger-verified-invalid-evidence";
     await env.DB.batch([
       productStatement({ id: linkedProduct, name: "Ledger verified linked" }),
       productStatement({ id: legacyProduct, name: "Ledger verified legacy" }),
+      productStatement({ id: invalidEvidenceProduct, name: "Ledger verified invalid evidence" }),
     ]);
-    for (const productId of [linkedProduct, legacyProduct]) {
+    for (const productId of [linkedProduct, legacyProduct, invalidEvidenceProduct]) {
       await sourceRecord({
         id: `${productId}-subject`,
         sourceId,
@@ -756,11 +918,29 @@ describe("completion ledger Worker API", () => {
         candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
         decided_by, decided_at, active, extraction_attempt_id, label_asset_id)
       SELECT 'ledger-verified-linked-decision', source_id, source_record_id, id, content_hash, product_id,
-        ?, 'nutrition', 'verify', '{}', 'https://example.invalid/verified-label.jpg',
+        ?, 'nutrition', 'verify', '{}', 'https://example.invalid/ledger-verified-linked-extraction-0.jpg',
         'Exact current label verification', 'completion_test', ?, 1, ?, ?
       FROM source_records WHERE id = ?`)
       .bind(extraction.candidateHash, observedAt, extraction.attemptId,
         extraction.candidateLabelAssetId, `${linkedProduct}-derived`).run();
+    const invalidEvidenceExtraction = await currentExtraction({
+      id: "ledger-verified-invalid-evidence-extraction",
+      family: "nutrition",
+      productId: invalidEvidenceProduct,
+      subjectSourceRecordId: `${invalidEvidenceProduct}-subject`,
+      derivedSourceRecordId: `${invalidEvidenceProduct}-derived`,
+      outcomes: ["candidate"],
+    });
+    await env.DB.prepare(`INSERT INTO evidence_decisions
+      (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+        candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+        decided_by, decided_at, active, extraction_attempt_id, label_asset_id)
+      SELECT 'ledger-verified-invalid-evidence-decision', source_id, source_record_id, id, content_hash, product_id,
+        ?, 'nutrition', 'verify', '{}', 'https://example.invalid/arbitrary-edited-evidence.jpg',
+        'URL does not identify the retained current label', 'completion_test', ?, 1, ?, ?
+      FROM source_records WHERE id = ?`)
+      .bind(invalidEvidenceExtraction.candidateHash, observedAt, invalidEvidenceExtraction.attemptId,
+        invalidEvidenceExtraction.candidateLabelAssetId, `${invalidEvidenceProduct}-derived`).run();
     await sourceRecord({
       id: `${legacyProduct}-other-derived`,
       sourceId,
@@ -788,10 +968,15 @@ describe("completion ledger Worker API", () => {
 
     const current = await ledger("family=nutrition&state=all&q=ledger+verified&pageSize=100");
     const currentById = new Map(current.items.map((entry) => [entry.product.id, entry]));
-    expect(currentById.get(linkedProduct)).toMatchObject({ state: "verified", lane: null });
+    expect(currentById.get(linkedProduct)).toMatchObject({ state: "verified", lane: null, reasonCodes: [] });
     expect(currentById.get(legacyProduct)).toMatchObject({
       state: "outstanding",
       lane: "evidence_inconsistent",
+    });
+    expect(currentById.get(invalidEvidenceProduct)).toMatchObject({
+      state: "outstanding",
+      lane: "evidence_inconsistent",
+      reasonCodes: expect.arrayContaining(["evidence_binding_inconsistent"]),
     });
 
     await env.DB.prepare("UPDATE extraction_attempts SET is_current = 0 WHERE id = ?")
@@ -824,15 +1009,39 @@ describe("completion ledger Worker API", () => {
       productId,
       sourceUrl: "https://example.invalid/official-terminal",
     });
-    await outcomeStatement(productId, "nutrition", "not_declared").run();
-    await env.DB.prepare(`UPDATE evidence_outcomes SET source_record_id = ? WHERE product_id = ? AND field_family = 'nutrition'`)
-      .bind(sourceRecordId, productId).run();
+    const evidence = await json<{ items: Array<{
+      evidenceId: string;
+      sourceContentHash: string;
+      labelContentSha256: string | null;
+    }> }>(await worker.fetch(
+      `http://localhost/api/products/${productId}/terminal-evidence?family=nutrition`,
+    ));
+    const option = evidence.items.find(({ evidenceId }) => evidenceId === `source:${sourceRecordId}`);
+    expect(option).toBeDefined();
+    const decision = await worker.fetch(
+      `http://localhost/api/products/${productId}/terminal-evidence`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          family: "nutrition",
+          outcome: "not_declared",
+          evidenceId: option?.evidenceId,
+          sourceContentHash: option?.sourceContentHash,
+          labelContentSha256: option?.labelContentSha256,
+          idempotencyKey: "terminal:completion:source-revision",
+          rationale: "The complete official source contains no nutrition declaration.",
+          supersedesDecisionId: null,
+        }),
+      },
+    );
+    expect(decision.status).toBe(201);
 
     const current = await ledger("family=nutrition&state=all&q=ledger+terminal+source+revision&pageSize=10");
     expect(current.items[0]).toMatchObject({ state: "terminal_unavailable", lane: null });
 
-    await env.DB.prepare("UPDATE source_records SET observed_at = '2026-07-18T00:00:00.000Z' WHERE id = ?")
-      .bind(sourceRecordId).run();
+    await env.DB.prepare("UPDATE source_records SET content_hash = ? WHERE id = ?")
+      .bind("b".repeat(64), sourceRecordId).run();
     const stale = await ledger("family=nutrition&state=all&q=ledger+terminal+source+revision&pageSize=10");
     expect(stale.items[0]).toMatchObject({
       state: "outstanding",

@@ -54,16 +54,20 @@ Run `pnpm exec tsx scripts/sync.ts datakart-status` to see the non-secret
 configuration checklist. Selecting DataKart without those inputs fails
 explicitly; it never substitutes Open Food Facts data and labels it official.
 
-## Future hosted apply
+## Hosted publication
 
-No scheduled workflow currently mutates D1. A future apply job must be a
-separate protected GitHub environment with manual approval. It should accept
-only a successful, checksummed snapshot artifact; verify its manifest and
-continuity result again; apply idempotent upserts; preserve the prior catalog on
-failure; and record the artifact and workflow run IDs in the ingestion run.
+Successful producer runs currently route exact checksummed artifacts into one
+serialized, credential-scoped D1 publication workflow. It revalidates the
+manifest, source/cohort accounting, portable checksums, immutable run identity,
+and authority boundary before generating idempotent SQL. Community observations
+remain unverified, model output remains review-only, and reviewed decisions are
+never accepted from this automatic path.
 
-That apply step requires explicit approval to provision D1/R2 and configure
-production access. Repository workflows must never contain credentials.
+Automatic publication cannot apply migrations and currently fails closed while
+the remote schema is behind. The GitHub `production` environment does not yet
+require a reviewer, so pending migrations must not be applied until automatic
+publication is disabled or protected by a hard human approval gate. Credentials
+remain environment-scoped and must never be written to repository files.
 
 ## Evidence policy
 
@@ -75,9 +79,10 @@ Nutrition and ingredients have independent states:
   authoritative source under an explicit policy;
 - `conflict`: plausible observations disagree and require review.
 
-Trusted comparisons default to verified nutrition. Raw observations and
-provenance remain available so verification decisions are auditable and can be
-revisited when packaging changes.
+Trusted comparisons require exact current identity, authority-100 verified
+nutrition, and terminal ingredient evidence, with contradictions failing
+closed. Raw observations and provenance remain available so verification
+decisions are auditable and can be revisited when packaging changes.
 
 Reviewed label evidence preserves its physical basis. Mass candidates use per
 100 g; liquid candidates use per 100 mL. Serving rows are normalized only from

@@ -31,6 +31,11 @@ establishes that a field is not applicable or not declared. Every configured
 source must also reconcile without unexplained gaps, and the rendered dashboard
 must pass desktop/mobile verification.
 
+A release may finish with a small, explicitly enumerated and reason-coded
+unverified exception queue. Those rows remain excluded from Trusted rankings,
+and the dashboard must continue to report data completion as incomplete until
+the strict terminal-evidence gate above is actually satisfied.
+
 ## Dependencies
 
 ### External
@@ -185,6 +190,12 @@ must pass desktop/mobile verification.
 - 2026-07-17 — exact label hashing now aborts any response or stalled body after 30 seconds instead of allowing one image to consume the four-hour workflow timeout. Multi-pass extraction also validates and reuses successful label assets written by the immediately preceding pass, so transient failures retry only incomplete evidence rather than re-downloading thousands of images; 72 focused tests plus typecheck pass and production remains unchanged.
 - 2026-07-17 — source-bound corrected nutrition transcription is implemented locally: operators can replace an incorrect model projection with explicit per-100-g or per-100-mL values while retaining the original candidate, exact source/product/label binding, and field-level audit history. Worker publication and drift replay fail closed, the editor is verified at desktop and 390 px without horizontal overflow, all 81 complete immutable review bundles validate, the corrected publication replay is idempotent, and the full 146-unit/45-Worker test, typecheck, and production build pass. No corrected production coverage is claimed before an exact reviewed decision is published.
 - 2026-07-17 — future exhaustive label runs now emit bounded one-minute progress heartbeats with barcode, outcome, response, and label-proof counters while keeping stdout artifacts deterministic. Extraction steps reserve fifteen minutes of job-time headroom and retain partial label-proof diagnostics on failure, so a slow or stalled run is observable and recoverable instead of consuming the full job timeout without evidence; production remains unchanged.
+- 2026-07-17 — immutable source/hash-bound identity verification and nutrition/ingredient not-declared or not-applicable decisions are implemented locally in migrations `0010_terminal_evidence_decisions.sql` and `0011_identity_evidence_decisions.sql`; deterministic replay preserves append-only history, invalidates stale projections, restores valid alternate sources, and fails closed on fact, source, legacy, and identity contradictions. Forward corrections `0012_current_label_revision.sql`, `0013_identity_evidence_provenance.sql`, and `0014_identity_evidence_projection_reconciliation.sql` revoke prior label decisions across stable-image revision changes, require identity evidence to match the current source URL or exact retained current-label bytes, and eagerly reconcile stale identity projections after source relinks, URL/content drift, label revisions, and source replay.
+- 2026-07-17 — the local completion worklist now provides deliberate exact-source/label selection, complete decision lineage, stale-evidence refresh without losing rationale, typed errors, bounded exhaustive option loading, responsive keyboard-safe dialogs, and success/refresh-failure announcements. Mobile catalog cards expose separate nutrition and ingredient evidence states, and the public CSP no longer advertises unused provider-analytics endpoints. Real Chrome checks at desktop and 390 px show zero horizontal overflow and zero console warnings/errors; the full `pnpm check` passes 188 unit and 53 Worker tests plus typecheck and production build.
+- 2026-07-17 — replacement nutrition run `29576061035` remains active with observable progress and sufficient timeout margin. Ingredient run `29574516752` exhaustively accounted for all 5,196 eligible GTINs but failed closed with 3,351 candidate, 1,242 no-prediction, 595 rejected, and 8 explicit failures (five label HTTP errors and three declared-size violations); its immutable diagnostics checksum and per-barcode reason ledger passed independent accounting, while automatic publication skipped with zero steps and production remained unchanged.
+- 2026-07-17 — extraction retry caching now requires a prior terminal non-failed outcome before reusing an exact API response. Failed, missing, and incomplete outcomes refetch on the next pass, while candidate, no-prediction, and rejected outcomes retain deterministic reuse; exact-snapshot restoration carries the checksummed outcome ledger with the response cache. Regression tests cover both nutrition and ingredient adapters. Because the failed ingredient artifact did not upload successful response files, one replacement exhaustive run is still required before later retries become network-bounded to only failed items.
+- 2026-07-17 — the GitHub `production` environment currently has repository Cloudflare credentials but no required reviewer or wait-time protection, while `publish-automatic-evidence.yml` reacts to successful extraction runs. Pending migrations still make the current downstream path fail closed before import, but automatic D1 publication must be disabled or given a hard manual approval gate before those migrations are applied.
+- 2026-07-17 — strict trust and explicit exception accounting are implemented locally. `0015_strict_trust_and_terminal_authority.sql` admits source-only unavailable evidence only from current official/brand authority-100 records, keeps exact retained label bytes eligible, and limits Trusted products to exact-current identity, verified nutrition, and terminal ingredient evidence. `0016_effective_current_evidence.sql` through `0018_reviewed_fact_time_boundary.sql` make completion, Discovery, coverage, detail evidence links, and Trusted share one exact-current boundary; stale source observations and replaced label bytes downgrade visibly, while stale unavailable history can recover through newer exact verified facts. Terminal ingredient evidence is displayed explicitly rather than as a misleading missing/unverified statement. Extraction reason codes survive the API and appear in the exhaustive worklist. The local migrations, 196 unit tests, 58 Worker tests, typecheck, production build, startup profile, deploy dry-run, desktop smoke test, and 390 px no-overflow check pass.
 
 ## Products
 
@@ -218,7 +229,7 @@ must pass desktop/mobile verification.
 - Guarded Cloudflare release command with type, test, build, startup, dry-run,
   clean-main, sync, and CI gates
 - Evidence-aware discovery defaults to protein grams per 100 kcal while Trusted
-  mode remains verified-only
+  mode additionally requires exact identity and terminal ingredient evidence
 - Resumable, rate-bounded richer Open Food Facts API enrichment with exhaustive
   barcode outcome accounting
 - Review-gated Robotoff label extraction with basis, unit, confidence, image,
@@ -259,7 +270,7 @@ must pass desktop/mobile verification.
 - Nutrition and ingredient decisions share a checksum-validated, commit-pinned,
   idempotent publication and postcondition path
 - Successful source and label-evidence workflows route exact checksummed
-  artifacts into one protected automatic publication lock; community data stays
+  artifacts into one credential-scoped automatic publication lock; community data stays
   unverified, model output stays review-only, pending migrations fail closed,
   and durable pre/post/live evidence is retained for manual recovery
 - Dimension-safe liquid-label evidence with explicit per-100-mL extraction,
@@ -274,6 +285,12 @@ must pass desktop/mobile verification.
   upload and retain a separate diagnostic report without production credentials
 - Bounded exact-label networking with a 30-second per-image deadline and
   same-run validated asset reuse across transient retry passes
+- Immutable exact-bound identity evidence decisions and nutrition/ingredient
+  unavailable decisions, with idempotent append-only history, supersession,
+  deterministic projection fallback, and drift-safe reconciliation
+- Accessible operator evidence dialogs with deliberate source/label selection,
+  typed stale/conflict errors, contradiction and lineage inspection, responsive
+  focus containment/restoration, and visible post-save refresh status
 
 ## Todo / Planned / Deferred / Blocked
 
@@ -307,7 +324,8 @@ must pass desktop/mobile verification.
     validation; every publication must verify the live coverage delta and retain
     workflow diagnostics.
 15. Pending explicit release approval: apply the compatible production
-    migrations, generate and publish fresh byte-hash-complete adapter-v8 and
+    migrations through `0018_reviewed_fact_time_boundary.sql`, generate and
+    publish fresh byte-hash-complete adapter-v8 and
     adapter-v3 artifacts, publish the compatible reviewed bundles in
     the guarded order, deploy the browser-verified dashboard,
     redundant-evidence, and completion-ledger code, then prove the live family
@@ -316,12 +334,16 @@ must pass desktop/mobile verification.
 16. Blocked data refresh: protected Cloudflare credentials are now configured,
     but pending migrations `0007_review_queue_indexes.sql`,
     `0008_redundant_evidence_decisions.sql`, and
-    `0009_extraction_outcome_ledger.sql` require an explicit production
+    `0009_extraction_outcome_ledger.sql` through
+    `0018_reviewed_fact_time_boundary.sql` require an explicit production
     migration before automatic publication can proceed. Automatic
     run `29511127992` proved the current credential and artifact route, then
     failed closed before import or write; earlier runs `29449999090`,
     `29474290721`, and `29495130626` remain durable evidence of the prior empty
     credential state.
+    Before applying those migrations, require manual approval for
+    `publish-automatic-evidence.yml`; the current `production` environment has
+    no platform reviewer gate.
 17. The 13 adapter-v7 replacement bundles are committed and all 18 allowed
     bundles pass portable checksums plus semantic bundle validation: 312 unique
     decisions across 312 source records, with 23 verifications and 289
@@ -393,9 +415,12 @@ must pass desktop/mobile verification.
     Historical v7 and earlier artifacts cannot establish exact label-content
     hashes, so production backfill requires fresh adapter-v8/v3 extraction after
     migration `0009`; do not infer or synthesize hashes for legacy evidence.
-24. Replace mutable projected unavailable outcomes with immutable,
-    source/hash-bound not-declared and not-applicable decisions, then prove
-    contradiction handling and idempotent replay.
-25. Extend identity-resolution publication to write explicit terminal identity
-    outcomes. GTIN or catalog presence alone must not mark identity verified, so
-    the global completion gate is intentionally unreachable until this exists.
+24. Completed locally: mutable projected unavailable outcomes are replaced by
+    immutable, source/hash-bound not-declared and not-applicable decisions with
+    contradiction handling, deterministic fallback, stale-evidence refresh,
+    and idempotent replay. Production migrations remain pending approval.
+25. Completed locally: identity-resolution publication writes immutable exact
+    source/hash-bound verification decisions whose evidence URL must match the
+    current source or retained current-label bytes. GTIN or catalog presence
+    alone never marks identity verified; remote migration and deployment remain
+    pending explicit approval.

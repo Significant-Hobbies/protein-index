@@ -22,7 +22,12 @@ interface ProductRow {
   completeness: number;
   completeness_missing_json: string;
   nutrition_status: EvidenceStatus | null;
+  nutrition_evidence_url: string | null;
+  nutrition_evidence_kind: "label" | "source" | null;
   ingredient_status: EvidenceStatus | null;
+  ingredient_evidence_url: string | null;
+  ingredient_evidence_kind: "label" | "source" | null;
+  ingredient_terminal_outcome: "not_declared" | "not_applicable" | null;
   calories: number | null;
   protein_grams: number | null;
   carbohydrate_grams: number | null;
@@ -113,7 +118,12 @@ function mapProduct(row: ProductRow): CatalogProduct {
     nutritionallyProteinDense: booleanValue(row.nutritionally_protein_dense),
     nutritionReasons: parseJson(row.nutrition_reasons_json, []),
     nutritionStatus: row.nutrition_status ?? "missing",
+    nutritionEvidenceUrl: row.nutrition_evidence_url,
+    nutritionEvidenceKind: row.nutrition_evidence_kind,
     ingredientStatus: row.ingredient_status ?? "missing",
+    ingredientEvidenceUrl: row.ingredient_evidence_url,
+    ingredientEvidenceKind: row.ingredient_evidence_kind,
+    ingredientTerminalOutcome: row.ingredient_terminal_outcome,
     completeness: row.completeness,
     nutrition,
     currentOffer: row.offer_retailer && row.selling_price !== null && row.offer_observed_at
@@ -132,6 +142,7 @@ function mapProduct(row: ProductRow): CatalogProduct {
 export interface SearchInput {
   q: string;
   category: string;
+  trust: string;
   marketed: string;
   dense: string;
   verification: string;
@@ -151,6 +162,7 @@ export function validateSearch(input: URLSearchParams): { value?: SearchInput; e
   const value: SearchInput = {
     q: input.get("q")?.trim() ?? "",
     category: input.get("category") ?? "all",
+    trust: input.get("trust") ?? "all",
     marketed: input.get("marketed") ?? "all",
     dense: input.get("dense") ?? "all",
     verification: input.get("verification") ?? "all",
@@ -165,6 +177,7 @@ export function validateSearch(input: URLSearchParams): { value?: SearchInput; e
   const searchTerms = normalizeText(value.q).split(" ").filter(Boolean);
   if (value.q.length > 200 || searchTerms.length > 12) return { error: "Search query is too long" };
   if (!["all", "true", "false"].includes(value.marketed)) return { error: "Invalid marketed filter" };
+  if (!["all", "strict"].includes(value.trust)) return { error: "Invalid trust filter" };
   if (!["all", "true", "false", "unknown"].includes(value.dense)) return { error: "Invalid dense filter" };
   if (!["all", "missing", "unverified", "verified", "conflict"].includes(value.verification)) return { error: "Invalid verification filter" };
   if (!["all", "missing", "unverified", "verified", "conflict"].includes(value.ingredientVerification)) {
@@ -183,7 +196,19 @@ const SELECT_PRODUCT = `
     p.net_quantity_grams, p.serving_size_grams, p.marketed_protein,
     p.marketed_reasons_json, p.nutritionally_protein_dense,
     p.nutrition_reasons_json, p.completeness, p.completeness_missing_json,
-    n.status AS nutrition_status, i.status AS ingredient_status,
+    CASE
+      WHEN n.status = 'verified' AND verified_nutrition.product_id IS NULL THEN 'unverified'
+      ELSE n.status
+    END AS nutrition_status,
+    CASE
+      WHEN i.status = 'verified' AND verified_ingredients.product_id IS NULL THEN 'unverified'
+      ELSE i.status
+    END AS ingredient_status,
+    verified_nutrition.evidence_url AS nutrition_evidence_url,
+    verified_nutrition.evidence_kind AS nutrition_evidence_kind,
+    COALESCE(verified_ingredients.evidence_url, ingredient_terminal.evidence_url) AS ingredient_evidence_url,
+    COALESCE(verified_ingredients.evidence_kind, ingredient_terminal_decision.evidence_kind) AS ingredient_evidence_kind,
+    ingredient_terminal.outcome AS ingredient_terminal_outcome,
     n.calories, n.protein_grams, n.carbohydrate_grams, n.sugar_grams,
     n.fat_grams, n.saturated_fat_grams, n.fibre_grams, n.sodium_mg, n.basis AS nutrition_basis,
     n.observed_at AS nutrition_observed_at, n.label_verified_at,
@@ -192,6 +217,24 @@ const SELECT_PRODUCT = `
   FROM products p
   LEFT JOIN nutrition_facts n ON n.product_id = p.id
   LEFT JOIN ingredient_statements i ON i.product_id = p.id
+  LEFT JOIN current_verified_nutrition_facts verified_nutrition
+    ON verified_nutrition.product_id = p.id
+  LEFT JOIN current_verified_ingredient_statements verified_ingredients
+    ON verified_ingredients.product_id = p.id
+  LEFT JOIN terminal_evidence_projection_candidates ingredient_terminal_decision
+    ON ingredient_terminal_decision.product_id = p.id
+    AND ingredient_terminal_decision.field_family = 'ingredients'
+    AND ingredient_terminal_decision.projection_rank = 1
+  LEFT JOIN evidence_outcomes ingredient_terminal
+    ON ingredient_terminal.product_id = ingredient_terminal_decision.product_id
+    AND ingredient_terminal.field_family = ingredient_terminal_decision.field_family
+    AND ingredient_terminal.outcome = ingredient_terminal_decision.outcome
+    AND ingredient_terminal.source_record_id = ingredient_terminal_decision.source_record_id
+    AND ingredient_terminal.evidence_url = ingredient_terminal_decision.evidence_url
+    AND ingredient_terminal.observed_at = ingredient_terminal_decision.source_observed_at
+    AND ingredient_terminal.verified_at = ingredient_terminal_decision.decided_at
+    AND ingredient_terminal.decided_by = 'terminal_evidence_projection'
+    AND ingredient_terminal.notes = 'terminal_evidence_decision:' || ingredient_terminal_decision.id
   LEFT JOIN offers o ON o.id = (
     SELECT latest.id FROM offers latest
     WHERE latest.product_id = p.id AND latest.available = 1
@@ -209,14 +252,24 @@ function filtersFor(input: SearchInput): { sql: string; bindings: Array<string |
     }
   }
   if (input.category !== "all") { clauses.push("p.category = ?"); bindings.push(input.category); }
+  if (input.trust === "strict") clauses.push("p.id IN (SELECT id FROM strict_trusted_products)");
   if (input.marketed !== "all") { clauses.push("p.marketed_protein = ?"); bindings.push(input.marketed === "true" ? 1 : 0); }
   if (input.dense !== "all") {
     clauses.push(input.dense === "unknown" ? "p.nutritionally_protein_dense IS NULL" : "p.nutritionally_protein_dense = ?");
     if (input.dense !== "unknown") bindings.push(input.dense === "true" ? 1 : 0);
   }
-  if (input.verification !== "all") { clauses.push("COALESCE(n.status, 'missing') = ?"); bindings.push(input.verification); }
+  if (input.verification !== "all") {
+    clauses.push(`COALESCE(CASE
+      WHEN n.status = 'verified' AND verified_nutrition.product_id IS NULL THEN 'unverified'
+      ELSE n.status
+    END, 'missing') = ?`);
+    bindings.push(input.verification);
+  }
   if (input.ingredientVerification !== "all") {
-    clauses.push("COALESCE(i.status, 'missing') = ?");
+    clauses.push(`COALESCE(CASE
+      WHEN i.status = 'verified' AND verified_ingredients.product_id IS NULL THEN 'unverified'
+      ELSE i.status
+    END, 'missing') = ?`);
     bindings.push(input.ingredientVerification);
   }
   if (input.scope === "protein") clauses.push("(p.marketed_protein = 1 OR p.nutritionally_protein_dense = 1)");
@@ -237,7 +290,11 @@ export async function searchProducts(db: D1Database, input: SearchInput): Promis
   const list = db.prepare(`${SELECT_PRODUCT}${filters.sql} ORDER BY ${order} LIMIT ? OFFSET ?`).bind(...filters.bindings, input.pageSize, offset);
   const count = db.prepare(`SELECT COUNT(*) AS total FROM products p
     LEFT JOIN nutrition_facts n ON n.product_id = p.id
-    LEFT JOIN ingredient_statements i ON i.product_id = p.id${filters.sql}`).bind(...filters.bindings);
+    LEFT JOIN ingredient_statements i ON i.product_id = p.id
+    LEFT JOIN current_verified_nutrition_facts verified_nutrition
+      ON verified_nutrition.product_id = p.id
+    LEFT JOIN current_verified_ingredient_statements verified_ingredients
+      ON verified_ingredients.product_id = p.id${filters.sql}`).bind(...filters.bindings);
   const batch = await db.batch<ProductRow | CountRow>([list, count]);
   const listResult = batch[0];
   const countResult = batch[1];
@@ -247,7 +304,7 @@ export async function searchProducts(db: D1Database, input: SearchInput): Promis
   return {
     products: rows.map(mapProduct),
     pagination: { page: input.page, pageSize: input.pageSize, total, pages: Math.ceil(total / input.pageSize) },
-    trustedDefault: input.verification === "verified" && input.scope === "protein",
+    trustedDefault: input.trust === "strict",
     filters: { ...input },
   };
 }
@@ -284,7 +341,21 @@ export async function getProductDetail(db: D1Database, id: string): Promise<Prod
     db.prepare("SELECT pi.id, pi.parent_id, pi.position, pi.raw_text, pi.normalized_name, pi.percentage FROM product_ingredients pi JOIN ingredient_statements s ON s.product_id = pi.product_id AND s.source_record_id = pi.source_record_id WHERE pi.product_id = ? ORDER BY pi.position").bind(id),
     db.prepare("SELECT DISTINCT name, declaration FROM product_allergens WHERE product_id = ? ORDER BY declaration, name").bind(id),
     db.prepare("SELECT DISTINCT identifier FROM product_additives WHERE product_id = ? ORDER BY identifier").bind(id),
-    db.prepare("SELECT DISTINCT nutrient_code, quantity, unit, basis, status, observed_at FROM nutrient_values WHERE product_id = ? ORDER BY nutrient_code LIMIT 300").bind(id),
+    db.prepare(`SELECT DISTINCT nutrient.nutrient_code, nutrient.quantity, nutrient.unit,
+      nutrient.basis,
+      CASE
+        WHEN nutrient.status = 'verified' AND NOT EXISTS (
+          SELECT 1
+          FROM current_verified_nutrition_facts verified
+          WHERE verified.product_id = nutrient.product_id
+            AND verified.source_record_id = nutrient.source_record_id
+        ) THEN 'unverified'
+        ELSE nutrient.status
+      END AS status,
+      nutrient.observed_at
+      FROM nutrient_values nutrient
+      WHERE nutrient.product_id = ?
+      ORDER BY nutrient.nutrient_code LIMIT 300`).bind(id),
     db.prepare("SELECT retailer, retailer_listing_id, pincode, seller, selling_price, mrp, available, url, observed_at FROM offers WHERE product_id = ? ORDER BY observed_at DESC LIMIT 100").bind(id),
     db.prepare("SELECT retailer, retailer_listing_id, stars, rating_count, review_count, observed_at FROM ratings WHERE product_id = ? ORDER BY observed_at DESC LIMIT 100").bind(id),
     db.prepare("SELECT f.field_path, f.raw_value_json, f.normalized_value_json, s.source_id, f.confidence, f.authority, f.observed_at, f.evidence_url, f.selected FROM field_observations f JOIN source_records s ON s.id = f.source_record_id WHERE f.product_id = ? ORDER BY f.field_path, f.authority DESC").bind(id),
