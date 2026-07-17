@@ -1712,6 +1712,10 @@ describe("Open Food Facts bulk staging", () => {
       expect(extraction).toContain("extraction-attempts.jsonl");
       expect(extraction).toContain("extraction-attempt-labels.jsonl");
       expect(extraction).toContain('restore-label-proofs: "true"');
+      expect(extraction).toContain("pnpm data:audit-decisions --");
+      expect(extraction).toContain("--fail-on candidate_key_active_state_ambiguous");
+      expect(extraction).toContain("decision-drift audit");
+      expect(extraction).toContain("if: always()");
     }
   });
 

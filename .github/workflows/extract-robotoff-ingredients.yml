@@ -162,6 +162,16 @@ jobs:
           if (failures.length) throw new Error(failures.join('; '));
           NODE
 
+      - name: Audit reviewed decisions against exact ingredient evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm data:audit-decisions -- \
+            --artifact .data/robotoff-ingredients \
+            --bundles review-decisions \
+            --output .data/decision-drift/ingredients-v3.json \
+            --fail-on candidate_key_active_state_ambiguous
+
       - name: Upload review-gated ingredient candidates
         uses: actions/upload-artifact@v7
         with:
@@ -183,6 +193,15 @@ jobs:
             .data/robotoff-ingredients/staged-products.jsonl
             .data/robotoff-ingredients/responses/*.json
             .data/robotoff-ingredients/checksums.sha256
+
+      - name: Upload ingredient decision-drift audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: robotoff-ingredient-decision-drift-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: .data/decision-drift/ingredients-v3.json
 
       - name: Upload extraction diagnostics
         if: failure()

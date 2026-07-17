@@ -155,6 +155,9 @@ that semantically matches fresh evidence is never upgraded in place: immutable
 exact extraction linkage requires a newly reviewed decision. Pass a comma-
 separated `--fail-on` list when automation should also reject selected ordinary
 finding categories. The command never connects to D1 or changes review ledgers.
+Fresh nutrition-v8 and ingredient-v3 producer workflows run this audit before
+uploading publishable candidates and retain the report as a separate 30-day
+artifact even when a failure prevents candidate publication.
 
 ## Reviewed catalog publication
 

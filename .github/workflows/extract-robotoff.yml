@@ -165,6 +165,16 @@ jobs:
           cd .data/robotoff
           sha256sum --check checksums.sha256
 
+      - name: Audit reviewed decisions against exact nutrition evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm data:audit-decisions -- \
+            --artifact .data/robotoff \
+            --bundles review-decisions \
+            --output .data/decision-drift/nutrition-v8.json \
+            --fail-on candidate_key_active_state_ambiguous
+
       - name: Upload review-gated label candidates
         uses: actions/upload-artifact@v7
         with:
@@ -185,6 +195,15 @@ jobs:
             .data/robotoff/staged-products.jsonl
             .data/robotoff/responses/*.json
             .data/robotoff/checksums.sha256
+
+      - name: Upload nutrition decision-drift audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: robotoff-label-decision-drift-${{ github.run_id }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: .data/decision-drift/nutrition-v8.json
 
       - name: Upload extraction diagnostics
         if: failure()
