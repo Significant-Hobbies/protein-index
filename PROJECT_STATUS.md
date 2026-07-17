@@ -174,6 +174,7 @@ must pass desktop/mobile verification.
 - 2026-07-17 — local adapter-v7 hardening now reconciles serving value and text against valid catalog context, ignores implausible label servings above a known pack or more than ten times the catalog serving, includes serving confidence in candidate confidence, and rejects energy above the physical 900 kcal-per-100-g ceiling. Exact offline replay restored all 5,944 responses with zero requests and reconciled them to 1,586 candidate, 806 no-prediction, 3,552 rejected, and zero failed outcomes. Against v5, 232 prediction records across 207 GTINs change (98 new candidates, 29 removed candidates, 96 changed candidates, and nine content-only changes); the ghee candidate returns exactly to the v5 900-kcal hash, the impossible cashew candidate is rejected, and 24 source records referenced by active v5 decisions require drift review after an official v7 artifact. No production data or verified coverage changed.
 - 2026-07-17 — local review of those 24 unique drifted source records found 18 semantically unchanged rejection decisions that can be rebound to v7, two obsolete decisions to omit because no candidate remains, three changed candidates requiring fresh rejection, and one corrected Mr Makhana candidate requiring fresh verification; no image blocker remains. A separate whole-wheat-bread label explicitly declares 253 kcal, 10 g protein, 49 g carbohydrate, 11 g sugar, 2 g fat, 0.3 g saturated fat, 10 g fibre, and 425 mg sodium per 100 g, so its mis-scaled 766.67-kcal serving candidate requires fresh rejection. Exact decision bundles still wait for the official v7 artifact hashes, and production remains unchanged.
 - 2026-07-17 — official adapter-v7 nutrition run `29554006451` on commit `b191958c3b76773fdfbf315fa20fc8e35050825b` restored the exact adapter-v6 response cohort and reconciled all 5,944 barcodes to 1,586 candidate, 806 no-prediction, 3,552 rejected, and zero failed outcomes. Artifact `8396783388` has immutable digest `7193f3845e2006bd3095fcfa093054033223c10555020649d32a5a4eababa2ff`, size 79,034,802 bytes, and all 5,950 checksums. Automatic publication run `29554063920` validated every checksum, then failed closed on pending remote D1 migration `0007_review_queue_indexes.sql` before import or live verification; production and verified coverage remain unchanged.
+- 2026-07-17 — the validated adapter-v7 decision plan rebuilds all 12 affected lineages and adds one whole-wheat-bread supplemental: `review-0793ac6010da3d71f11d` → `review-e380c0d96d4e55bc7963`, `review-9c7ac1f9e044ed7bce6e` → `review-e1c5dcaa7a70bbf66c0b`, `review-6b5e8b66259669560d75` → `review-e22b9494cc7630dddaed`, `review-faa4134c08f801a2e6b1` → `review-85eb6ae94d0b52de26e2`, `review-ca0eeaed8172acd296f7` → `review-22fa92e7ed8d92627afa`, `review-8883bc8d43df33874d89` → `review-b05156f6793aadb55c99`, `review-da7916603d7a22ce5438` → `review-6890ec21567c9cf15f00`, `review-27b91f477250983ad924` → `review-2960e3aee8761e63892c`, `review-6fff7ea5a1fd804e4dae` → `review-8b280c8db601d8c6e65b`, `review-0be1624d0d7aff83b24d` → `review-68fb6b0243dc187d0f16`, `review-ab8f46a1be339c4367c4` → `review-0e178dc60b1a55a12791`, and `review-2a0863c88dd1d8bd4b99` → `review-24d15bfc4330572bed80`; supplemental `review-5bc43cc6a4badbbd2718` rejects the bread candidate. The 13 new bundles contain 243 decisions, including 23 v7 decisions (22 rejections and one verification), with two obsolete decisions omitted. They have no internal overlap or global overlap with the five surviving bundles `review-230fca7ea00663c6c05e`, `review-35df940b2a5dff4da6b0`, `review-e9a215051b2fe4662517`, `review-174cdb19d84d9fd99525`, and `review-75a54506b4d31f98265d`. Read-only production preflight found only two intentional changed-hash same-source supersessions in the replacement for `review-0793ac6010da3d71f11d`, with no exact duplicates or decision conflicts; production remains unchanged.
 
 ## Products
 
@@ -282,59 +283,63 @@ must pass desktop/mobile verification.
     failed closed before import or write; earlier runs `29449999090`,
     `29474290721`, and `29495130626` remain durable evidence of the prior empty
     credential state.
-17. Use official adapter-v7 artifact `8396783388` from run `29554006451` to
-    build and checksum exact decision bundles; do not publish the superseded
-    adapter-v5 artifact `8395774354` or adapter-v6 artifact `8396363821`. Rebind
-    18 rejections, omit two non-candidates, freshly reject three changed
-    candidates, and freshly verify Mr Makhana against the official v7 hashes
-    before any publication. Freshly reject the separate whole-wheat-bread
-    serving candidate against its explicit per-100-g label row.
+17. Commit and source-check the 13 validated adapter-v7 decision bundles against
+    artifact `8396783388` from run `29554006451`; do not publish the superseded
+    adapter-v5 artifact `8395774354`, adapter-v6 artifact `8396363821`, or any of
+    the 12 superseded decision bundles listed in the timeline. The replacement
+    set retains 220 unchanged decisions, binds 22 replacement decisions to v7,
+    omits two non-candidates, and adds the separately reviewed whole-wheat-bread
+    rejection for 23 v7 decisions total.
     After pending production migration `0007_review_queue_indexes.sql` is
     explicitly approved, source-check and publish the surviving liquid bundles,
     including
     `review-230fca7ea00663c6c05e`,
-    `review-9c7ac1f9e044ed7bce6e`,
-    `review-6b5e8b66259669560d75`,
-    `review-faa4134c08f801a2e6b1`,
-    `review-ca0eeaed8172acd296f7`,
-    `review-8883bc8d43df33874d89`,
-    `review-da7916603d7a22ce5438`,
-    `review-27b91f477250983ad924`,
-    `review-6fff7ea5a1fd804e4dae`,
+    `review-e1c5dcaa7a70bbf66c0b`,
+    `review-e22b9494cc7630dddaed`,
+    `review-85eb6ae94d0b52de26e2`,
+    `review-22fa92e7ed8d92627afa`,
+    `review-b05156f6793aadb55c99`,
+    `review-6890ec21567c9cf15f00`,
+    `review-2960e3aee8761e63892c`,
+    `review-8b280c8db601d8c6e65b`,
     `review-35df940b2a5dff4da6b0`,
-    `review-0be1624d0d7aff83b24d`, and
-    `review-ab8f46a1be339c4367c4` with exact postconditions and replay. Add a
+    `review-68fb6b0243dc187d0f16`, and
+    `review-0e178dc60b1a55a12791` with exact postconditions and replay. Add a
     truthful terminal redundant-evidence outcome for the remaining two
     Coca-Cola images and one Local soda image; do not reject valid duplicates or
     verify the same canonical product twice in one publication. Do not claim the
     sixteen verified per-100-mL candidates until live publication proves them.
-18. Drift-audit, source-check, and publish mass-label bundle
-    `review-0793ac6010da3d71f11d` only after the exact adapter-v7 artifact is
-    live; rebuild any changed decisions from their exact images, then prove one
+18. Source-check and publish replacement mass-label bundle
+    `review-e380c0d96d4e55bc7963` only after the exact adapter-v7 artifact is
+    live; its changed decisions have been rebuilt from exact images, so prove one
     verified-product increase, ten resolved rejections, exact selected Epigamia
     values, and unchanged replay counts before claiming any coverage change.
-19. Drift-audit, source-check, and publish mass-label rejection bundle
+19. Source-check and publish surviving mass-label rejection bundle
     `review-e9a215051b2fe4662517` only after the exact adapter-v7 artifact is
-    live; rebuild any changed decisions from their exact images, then prove 17
-    resolved candidates, zero verified-fact promotions, unchanged trusted
-    coverage, and idempotent replay before claiming any live queue reduction.
+    live; prove 17 resolved candidates, zero verified-fact promotions, unchanged
+    trusted coverage, and idempotent replay before claiming any live queue
+    reduction.
 20. Source-check and publish rebuilt mass-label rejection bundle
     `review-174cdb19d84d9fd99525` only after the exact adapter-v7 artifact is
     live; its MuscleBlaze and Bimbo decisions are already rebound to the
     corrected calorie candidates, so prove 14 resolved candidates, zero
     verified-fact promotions, unchanged trusted coverage, and idempotent replay
     before claiming any live queue reduction.
-21. Rebuild, source-check, and publish adapter-v7 protein-priority decisions
-    only after the exact adapter-v7 artifact is live; the Optimum Nutrition
-    Performance Whey candidate changes under corrected serving conversion, so
-    re-review it rather than carrying its v5 rejection forward unchanged. Then
+21. Source-check and publish surviving protein-priority bundle
+    `review-75a54506b4d31f98265d` only after the exact adapter-v7 artifact is
+    live; Optimum Nutrition Performance Whey has a fresh exact-image rejection
+    in `review-e380c0d96d4e55bc7963`, already covered by item 18, and must not be
+    published a second time. Then
     prove the actual resolved-candidate and verified-fact deltas plus idempotent
     replay before claiming any live queue reduction.
-22. Rebuild and source-check complete-field adapter-v7 decisions only after the
-    exact adapter-v7 artifact is live. Mr Makhana Pickle Tickle is expected to
-    change from rejection to verification because its 25 g label serving now
-    converts exactly to 500 kcal, 8 g protein, 64 g carbohydrate, 0 g sugar,
+22. Source-check replacement complete-field bundle
+    `review-24d15bfc4330572bed80` only after the exact adapter-v7 artifact is
+    live. Mr Makhana Pickle Tickle now changes from rejection to verification
+    because its 25 g label serving converts exactly to 500 kcal, 8 g protein,
+    64 g carbohydrate, 0 g sugar,
     24 g fat, 4 g saturated fat, 4 g fibre, and 1,332 mg sodium per 100 g. Prove
     six verified-product increases, the actual verified-fact increase, exact
     selected values, and idempotent replay before claiming any live coverage
-    change.
+    change. Source-check supplemental rejection bundle
+    `review-5bc43cc6a4badbbd2718` against the explicit whole-wheat-bread per-100-g
+    row before claiming any queue reduction.
