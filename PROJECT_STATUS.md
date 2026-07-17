@@ -162,6 +162,7 @@ must pass desktop/mobile verification.
 - 2026-07-17 — original-resolution review resolved 19 of the final 22 liquid records in checksummed bundle `review-7fe63c92ea9f7e373c72`; all are rejected for omitted or incorrect declarations, wrong physical basis, or incomplete serving conversion. Both Campa images and the Paper Boat Swing label proved readable at original resolution, so all 209 GTINs now have at least one exact decision. Overall, 255 of 258 records are reviewed (16 pending verifications and 239 rejections); only two duplicate Coca-Cola images and one duplicate Local soda image remain, each exactly matching an already verified projection and requiring a truthful redundant-evidence outcome rather than rejection or a second product verification. Live coverage is unchanged before protected publication.
 - 2026-07-17 — protein-priority mass-label review checked 12 exact images from the current adapter-v4 artifact: Epigamia Everyday Mango Yogurt reproduces every supported 75 g serving value after exact per-100-g conversion, while ten candidates are rejected for omitted declarations, rounded serving conversions overriding direct rows, wrong nutrient mapping, doubled values, or unconverted serving data. One damaged Optimum Nutrition image was excluded rather than guessed. Checksummed bundle `review-0793ac6010da3d71f11d` contains one pending verification and ten rejections across eleven products; live coverage is unchanged before protected publication.
 - 2026-07-17 — a second protein-priority mass-label pass checked 17 exact, readable images from the same adapter-v4 artifact; all 17 candidates are rejected in checksummed bundle `review-e9a215051b2fe4662517` for omitted sodium, sugar, fibre, carbohydrate, or saturated-fat declarations, invented fibre, serving-derived values overriding direct rows, or severe decimal loss. The damaged Optimum Nutrition image remains deliberately undecided. Exact reviewed nutrition hashes increase from 389 to 406 and the remaining mass-candidate queue falls from 1,160 to 1,143, while live coverage remains unchanged before protected source and decision publication.
+- 2026-07-17 — a third protein-priority mass-label pass checked 14 exact images across bars, oats, paneer, tofu, bread, eggs, yogurt, and snacks; all 14 candidates are rejected in checksummed bundle `review-79103ffdc86b8c7127a6` for omitted label declarations or concrete parsing errors, including corrupted calorie values for MuscleBlaze oats and Bimbo high-protein bread. Exact reviewed nutrition hashes increase from 406 to 420 and the remaining mass-candidate queue falls from 1,143 to 1,129, with zero fact promotions and no live coverage change before protected publication.
 
 ## Products
 
@@ -296,5 +297,10 @@ must pass desktop/mobile verification.
 19. Source-check and publish mass-label rejection bundle
     `review-e9a215051b2fe4662517` only after the exact adapter-v4 artifact is
     live, then prove 17 resolved candidates, zero verified-fact promotions,
+    unchanged trusted coverage, and idempotent replay before claiming any live
+    queue reduction.
+20. Source-check and publish mass-label rejection bundle
+    `review-79103ffdc86b8c7127a6` only after the exact adapter-v4 artifact is
+    live, then prove 14 resolved candidates, zero verified-fact promotions,
     unchanged trusted coverage, and idempotent replay before claiming any live
     queue reduction.
