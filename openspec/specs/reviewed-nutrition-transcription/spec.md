@@ -97,4 +97,3 @@ model output, source enrichment, or a scheduled workflow.
 #### Scenario: Automated extraction finds a plausible correction
 - **WHEN** a model or source adapter can infer a missing or changed value
 - **THEN** it remains review evidence and verified coverage does not increase until a human submits a valid corrected decision
-
