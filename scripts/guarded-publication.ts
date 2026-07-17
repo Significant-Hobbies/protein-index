@@ -230,7 +230,6 @@ export async function emitGuardedSuccessorPublication(input: GuardedSuccessorPub
   await rm(temporaryOutputPath, { force: true });
   const output = await open(temporaryOutputPath, "w");
   try {
-    await writeLine(output, "PRAGMA foreign_keys = ON;");
     await writeLine(output, "DROP TABLE IF EXISTS temp._guarded_successor_publication;");
     await writeLine(output, "CREATE TEMP TABLE _guarded_successor_publication (ok INTEGER NOT NULL CHECK(ok = 1), label TEXT NOT NULL);");
     await writeLine(output, guard("pre_or_idempotent_state", preOrRetry));
