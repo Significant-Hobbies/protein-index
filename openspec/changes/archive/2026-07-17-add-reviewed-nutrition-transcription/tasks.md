@@ -22,4 +22,4 @@
 
 - [x] 4.1 Run focused domain, Worker, publication, and UI tests after each slice, then run `pnpm check`, every immutable review-bundle validation, and a local idempotent replay proof.
 - [x] 4.2 Complete sanctioned desktop/mobile rendered verification before deploying the review UI; do not migrate or publish production evidence as part of this change.
-- [ ] 4.3 Validate and archive the OpenSpec change, update `PROJECT_STATUS.md`, and publish the green repository change without claiming corrected coverage before live evidence publication.
+- [x] 4.3 Validate and archive the OpenSpec change, update `PROJECT_STATUS.md`, and publish the green repository change without claiming corrected coverage before live evidence publication.
