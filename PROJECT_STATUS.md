@@ -164,6 +164,8 @@ must pass desktop/mobile verification.
 - 2026-07-17 — a second protein-priority mass-label pass checked 17 exact, readable images from the same adapter-v4 artifact; all 17 candidates are rejected in checksummed bundle `review-e9a215051b2fe4662517` for omitted sodium, sugar, fibre, carbohydrate, or saturated-fat declarations, invented fibre, serving-derived values overriding direct rows, or severe decimal loss. The damaged Optimum Nutrition image remains deliberately undecided. Exact reviewed nutrition hashes increase from 389 to 406 and the remaining mass-candidate queue falls from 1,160 to 1,143, while live coverage remains unchanged before protected source and decision publication.
 - 2026-07-17 — a third protein-priority mass-label pass checked 14 exact images across bars, oats, paneer, tofu, bread, eggs, yogurt, and snacks; all 14 candidates are rejected in checksummed bundle `review-79103ffdc86b8c7127a6` for omitted label declarations or concrete parsing errors, including corrupted calorie values for MuscleBlaze oats and Bimbo high-protein bread. Exact reviewed nutrition hashes increase from 406 to 420 and the remaining mass-candidate queue falls from 1,143 to 1,129, with zero fact promotions and no live coverage change before protected publication.
 - 2026-07-17 — Robotoff adapter v5 detects a narrow upstream entity error where a plausible kcal value is labeled as per-100-g kJ but converting it would violate the declared protein-and-carbohydrate calorie floor; a source-complete offline replay corrects 273 image records across 253 GTINs, recovers 170 barcodes from rejected to reviewable (1,524 candidate, 806 no-prediction, 3,614 rejected, zero failed), and never promotes model output. Of 68 corrected records with official-source calories, 64 agree within 2%; exact original-image review confirms all four disagreements use the corrected label values (Milkmaid 303, Maggi 389, Sundrop 642, and iD chapati 270.37 kcal per 100 g), finding no false positive in the source-comparable cohort. Live data and verified coverage remain unchanged until an official v5 artifact is published and all affected decisions are drift-audited.
+- 2026-07-17 — official adapter-v5 nutrition run `29551181430` restored all 5,944 responses from the checksum-valid exact source snapshot, made zero upstream requests, and reconciled every barcode in 1m08s to 1,524 candidate, 806 no-prediction, 3,614 rejected, and zero failed outcomes; artifact `8395774354` independently passes the automatic-publication contract, all 5,950 checksums, 17,626 staged/source-index records, and terminal accounting, with 273 recorded energy-entity corrections.
+- 2026-07-17 — every pending nutrition decision was drift-audited against the official v5 artifact: 287 of 297 remained exact, eight rejection candidates changed only through corrected energy interpretation, and two former juice candidates now correctly fail closed on an internal basis conflict. Six replacement bundles preserve the still-valid exact-image rejection reasons, omit the two non-candidates, and bring all 295 retained decisions across 15 bundles (17 verifies, 278 rejects) into exact agreement with v5 source content, candidate hash, GTIN, and image URL; no production data or verified coverage changed.
 
 ## Products
 
@@ -272,23 +274,23 @@ must pass desktop/mobile verification.
     failed closed before import or write; earlier runs `29449999090`,
     `29474290721`, and `29495130626` remain durable evidence of the prior empty
     credential state.
-17. Produce and validate an official adapter-v5 nutrition artifact from the
-    current exact source snapshot, but publish it only after pending production
-    migration `0007_review_queue_indexes.sql` is explicitly approved. Drift-audit
-    every reviewed nutrition decision against the v5 source envelopes and
-    candidate hashes before source-checking any surviving liquid bundles,
-    including `review-230fca7ea00663c6c05e`,
+17. Publish official adapter-v5 nutrition artifact `8395774354` from run
+    `29551181430` only after pending production migration
+    `0007_review_queue_indexes.sql` is explicitly approved. The 295 retained
+    nutrition decisions are already drift-audited against v5; source-check and
+    publish the surviving liquid bundles, including
+    `review-230fca7ea00663c6c05e`,
     `review-9c7ac1f9e044ed7bce6e`,
     `review-6b5e8b66259669560d75`,
     `review-faa4134c08f801a2e6b1`,
     `review-ca0eeaed8172acd296f7`,
     `review-8883bc8d43df33874d89`,
-    `review-6f3e91617c0bb4bcf50d`,
-    `review-af930823bd0d8c430b9f`,
-    `review-c13277f3643949c99c92`,
+    `review-da7916603d7a22ce5438`,
+    `review-27b91f477250983ad924`,
+    `review-6fff7ea5a1fd804e4dae`,
     `review-35df940b2a5dff4da6b0`,
-    `review-ee74911697e3fe5a8a06`, and
-    `review-7fe63c92ea9f7e373c72` with exact postconditions and replay. Add a
+    `review-0be1624d0d7aff83b24d`, and
+    `review-ab8f46a1be339c4367c4` with exact postconditions and replay. Add a
     truthful terminal redundant-evidence outcome for the remaining two
     Coca-Cola images and one Local soda image; do not reject valid duplicates or
     verify the same canonical product twice in one publication. Do not claim the
@@ -303,9 +305,9 @@ must pass desktop/mobile verification.
     live; rebuild any changed decisions from their exact images, then prove 17
     resolved candidates, zero verified-fact promotions, unchanged trusted
     coverage, and idempotent replay before claiming any live queue reduction.
-20. Drift-audit, source-check, and publish mass-label rejection bundle
-    `review-79103ffdc86b8c7127a6` only after the exact adapter-v5 artifact is
-    live; rebuild changed decisions such as the corrected MuscleBlaze and Bimbo
-    calorie candidates from their exact images, then prove the actual resolved
-    count, zero verified-fact promotions, unchanged trusted coverage, and
-    idempotent replay before claiming any live queue reduction.
+20. Source-check and publish rebuilt mass-label rejection bundle
+    `review-174cdb19d84d9fd99525` only after the exact adapter-v5 artifact is
+    live; its MuscleBlaze and Bimbo decisions are already rebound to the
+    corrected calorie candidates, so prove 14 resolved candidates, zero
+    verified-fact promotions, unchanged trusted coverage, and idempotent replay
+    before claiming any live queue reduction.
