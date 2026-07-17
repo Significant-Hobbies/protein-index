@@ -19,12 +19,12 @@
 
 - [x] 4.1 Add boundary tests for absent confirmation, malformed operator/time inputs, every ineligible drift class, incomplete selection, duplicate keys, URL/hash/link mismatch, and historical immutability.
 - [x] 4.2 Prove deterministic repeated generation, portable checksums, exact predecessor accounting, family purity, and an all-`exact_link_valid` proposed audit.
-- [ ] 4.3 Run focused tests, full check, migration replay, workflow-contract tests, deploy dry-run, and strict OpenSpec validation.
+- [x] 4.3 Run focused tests, full check, migration replay, workflow-contract tests, deploy dry-run, and strict OpenSpec validation.
 - [x] 4.4 Reconcile the authoritative 55-product live nutrition selection, construct the checksummed 53-decision eligible predecessor set, and record the candidate-drift and candidate-missing exceptions.
-- [ ] 4.5 Add release guards that reject any live selected-state mismatch or final verified counts other than 76 nutrition and 65 ingredients.
+- [x] 4.5 Add release guards that reject any live selected-state mismatch or final verified counts other than 76 nutrition and 65 ingredients.
 
 ## 5. Authorized Data And Release
 
-- [ ] 5.1 After explicit expanded re-attestation approval, generate the exact 365-decision nutrition and 66-decision ingredient bundles from artifacts `8414045970` and `8414036638`, independently audit them, and commit the reviewed active manifest.
+- [x] 5.1 After explicit expanded re-attestation approval, generate the exact 365-decision nutrition and 66-decision ingredient bundles from artifacts `8414045970` and `8414036638`, independently audit them, and commit the reviewed active manifest.
 - [ ] 5.2 After separate production approval, apply migrations, publish each exact artifact with its replacement bundle through the guarded release path, and prove reviewed counts plus idempotent replay.
 - [ ] 5.3 Deploy and verify live API, completion, Trusted, desktop, mobile, and provider-neutral presentation; then sync/archive the change and update project status.

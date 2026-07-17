@@ -115,6 +115,7 @@ describe("guarded successor publication", () => {
     expect(sql).toContain("final_nutrition_set");
     expect(sql).toContain("final_ingredient_set");
     expect(sql).toContain("unresolved_successor_candidates");
+    expect(sql).toContain("json_valid(evidence_json) AND json_extract(evidence_json, '$.details.candidateHash')");
   });
 
   it("derives a portable exact final verified-product state from a family-pure successor bundle", async () => {

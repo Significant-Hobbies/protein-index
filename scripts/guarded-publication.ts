@@ -247,7 +247,7 @@ export async function emitGuardedSuccessorPublication(input: GuardedSuccessorPub
     await writeLine(output, guard("active_successor_decisions", activeDecisionSetPredicate(successor)));
     await writeLine(output, guard("final_nutrition_set", exactProductSetPredicate(input.expectedAfter.nutrition)));
     await writeLine(output, guard("final_ingredient_set", exactProductSetPredicate(input.expectedAfter.ingredients)));
-    await writeLine(output, guard("unresolved_successor_candidates", `NOT EXISTS (SELECT 1 FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes}))`));
+    await writeLine(output, guard("unresolved_successor_candidates", `NOT EXISTS (SELECT 1 FROM review_items WHERE status = 'open' AND json_valid(evidence_json) AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes}))`));
     await output.close();
     await rename(temporaryOutputPath, input.outputPath);
   } catch (error) {

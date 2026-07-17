@@ -552,6 +552,7 @@ export async function emitReviewDecisionSql(
       decided_by = ${sql(decision.decidedBy)}, resolved_at = ${sql(decision.decidedAt)}
       WHERE source_record_id = ${sql(decision.sourceRecordId)} AND status = 'open'
         AND product_id = ${sql(decision.productId)}
+        AND json_valid(evidence_json)
         AND json_extract(evidence_json, '$.details.candidateHash') = ${sql(decision.candidateHash)}${
           redundantGuard === null
             ? ""
@@ -691,7 +692,7 @@ export async function emitReviewDecisionSql(
     const decisionIds = bundle.decisions.map(({ id }) => sql(id)).join(", ");
     const candidateHashes = bundle.decisions.map(({ candidateHash }) => sql(candidateHash)).join(", ");
     statements.push(`SELECT COUNT(*) AS applied_decisions FROM evidence_decisions WHERE id IN (${decisionIds}) AND active = 1;`);
-    statements.push(`SELECT COUNT(*) AS unresolved_candidates FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes});`);
+    statements.push(`SELECT COUNT(*) AS unresolved_candidates FROM review_items WHERE status = 'open' AND json_valid(evidence_json) AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes});`);
   }
   const portableStatements = statements.map(compactSql);
   await writeFile(outputPath, `${portableStatements.join("\n")}\n`, "utf8");
@@ -867,7 +868,7 @@ export async function emitReviewPostconditionQuery(bundle: ReviewDecisionBundle,
     `SELECT product_id, source_record_id, raw_text, language, status, confidence, authority, observed_at, updated_at FROM ingredient_statements WHERE product_id IN (${ingredientVerifyProducts}) ORDER BY product_id;`,
     `SELECT id, product_id, source_record_id, parent_id, position, raw_text, normalized_name, percentage, resolved FROM product_ingredients WHERE product_id IN (${ingredientVerifyProducts}) ORDER BY product_id, parent_id, position, id;`,
     `SELECT product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by FROM evidence_outcomes WHERE (field_family = 'nutrition' AND product_id IN (${nutritionPostconditionProducts})) OR (field_family = 'ingredients' AND product_id IN (${ingredientVerifyProducts})) ORDER BY field_family, product_id;`,
-    `SELECT id, source_record_id, json_extract(evidence_json, '$.details.candidateHash') AS candidate_hash FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes}) ORDER BY id;`,
+    `SELECT id, source_record_id, json_extract(evidence_json, '$.details.candidateHash') AS candidate_hash FROM review_items WHERE status = 'open' AND json_valid(evidence_json) AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes}) ORDER BY id;`,
     `SELECT (SELECT COUNT(*) FROM nutrition_facts WHERE source_record_id IN (${redundantSourceRecordIds})) AS redundant_facts, (SELECT COUNT(*) FROM evidence_outcomes WHERE source_record_id IN (${redundantSourceRecordIds})) AS redundant_outcomes, (SELECT COUNT(*) FROM field_observations WHERE source_record_id IN (${redundantSourceRecordIds}) AND selected = 1 AND authority = 100) AS redundant_observations, (SELECT COUNT(*) FROM nutrient_values WHERE source_record_id IN (${redundantSourceRecordIds}) AND status = 'verified') AS redundant_nutrients;`,
   ];
   await writeFile(outputPath, `${statements.join("\n")}\n`, "utf8");
