@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "selectedState": {
+    "expected": 55,
+    "actual": 55,
+    "products": 55,
+    "decisions": 55,
+    "stateSha256": "d5fc75f83b49a396602c8a82faf655481af91003c03b533102cc6fa5ec6c5098",
+    "publishedBundleIds": [
+      "review-01003af83d9cbd50b96b",
+      "review-09c880a7671494a2715a",
+      "review-14a9a56f9ca787977668",
+      "review-54faa8d0bdd98b530bb8",
+      "review-949e50ad0a870989312b"
+    ]
+  },
+  "artifact": {
+    "directory": "audit-nutrition-29598465329",
+    "fieldFamily": "nutrition",
+    "sourceId": "open_food_facts_robotoff",
+    "adapterVersion": "robotoff-api-v8",
+    "inputHash": "f9d29ba427f6835e2984b0dd09cabcbdd1d47dbe6426649adfbf1c0469b99b9f",
+    "extractionRunId": "xrun_ad389116246a5e31d4abd175",
+    "parentSourceRunId": "run_1bf411cc19a4b2aa3ebd7d01",
+    "sourceComplete": true,
+    "candidateCount": 1896
+  },
+  "classifications": {
+    "candidate_key_active_state_ambiguous": 0,
+    "unsupported_source_or_family": 0,
+    "artifact_candidate_missing": 1,
+    "candidate_drift": 1,
+    "identity_drift": 0,
+    "source_revision_drift_candidate_unchanged": 53,
+    "exact_proof_incomplete_or_inconsistent": 0,
+    "linked_proof_drift": 0,
+    "requires_selected_projection_state": 0,
+    "legacy_proof_match_requires_new_decision": 0,
+    "exact_link_valid": 0
+  },
+  "eligible": {
+    "expected": 53,
+    "actual": 53,
+    "bundleId": "review-7ee07d3d849f0d175571",
+    "ledgerSha256": "7ee07d3d849f0d175571d48076610b7c31826a2bd7479931e605e9bfaaa75ca0"
+  },
+  "exceptions": [
+    {
+      "decisionId": "evd_rev_43c56dcbb1577f18f1a1ae2b",
+      "productId": "prd_a93d79f79cce37ab41f84dad",
+      "sourceRecordKey": "08906162071310:16153890",
+      "candidateHash": "2d70bb3ede1c67426d365f646b196f539c3cb0ec9f5ddb65979dc7359a44ae24",
+      "classification": "candidate_drift",
+      "differences": [
+        "candidate_hash"
+      ]
+    },
+    {
+      "decisionId": "evd_rev_bd216e32d9f8c53df66ba23e",
+      "productId": "prd_d3c46e3c096eb60403a194b4",
+      "sourceRecordKey": "00692058015732:14679096",
+      "candidateHash": "0dae7852fb9ad8c8a1ed7071617c809f8c3b107886fae787ecbf8471224dece2",
+      "classification": "artifact_candidate_missing",
+      "differences": [
+        "source_record_key"
+      ]
+    }
+  ],
+  "expandedActiveSet": {
+    "file": "active-bundles.expanded.json",
+    "sha256": "48ef8713eb1b60d5977efc68ba73891ead84109aac1649559d111427ad591925",
+    "nutritionDecisions": 365,
+    "pendingDecisions": 312,
+    "eligibleLiveDecisions": 53
+  }
+}

@@ -1,17 +1,25 @@
 ## Why
 
 The publishable nutrition-v8 and ingredient-v3 artifacts preserve exact label
-bytes, but all 378 active human decisions predate that lineage and differ from
-the current candidates only by source revision. Publishing the artifacts as-is
-would invalidate 23 verified nutrition decisions and 65 verified ingredient
-decisions, while ingredient reconciliation would also leave the stale rows
-active and block exact replacements at the database uniqueness boundary.
+bytes, but the original 378-decision active-set audit omitted every currently
+selected live nutrition fact. A second audit found 55 live verified nutrition
+products disjoint from the 23 pending verifies: 53 have unchanged candidates
+with valid current exact proof, one has candidate drift, and one has no current
+candidate. Publishing against only the tracked active set would silently
+invalidate all 55 live nutrition facts. Ingredient reconciliation would also
+leave stale rows active and block exact replacements at the database uniqueness
+boundary.
 
 ## What Changes
 
 - Add an operator-confirmed, offline re-attestation command that converts only
   proven source-revision-only drift into new immutable decisions bound to the
   current extraction attempt and label asset.
+- Bind confirmation to the exact artifact run, active-set hash, family, and
+  decision count; a generic approval phrase is insufficient.
+- Reconcile the authoritative selected live nutrition state to a checksummed
+  53-decision predecessor selection, account for the two ineligible live facts
+  explicitly, and combine it with the 312 pending nutrition decisions.
 - Require exact candidate, product, GTIN, source record, evidence URL, label
   content hash, and current proof agreement; reject every other drift class.
 - Preserve the reviewed decision and payload without silently mutating the old
@@ -25,6 +33,9 @@ active and block exact replacements at the database uniqueness boundary.
   under the active-decision uniqueness constraint.
 - Keep artifact ingestion, reviewed-decision publication, migrations, and
   deployment separately authorized; this change does not write production.
+- Require final postconditions of 76 verified nutrition products and 65
+  verified ingredient products, with the two ineligible former nutrition facts
+  visible as outstanding rather than silently retained or lost.
 
 ## Capabilities
 
@@ -41,6 +52,8 @@ None.
 ## Impact
 
 - Decision-drift reports, review-bundle utilities, and the data CLI.
+- Authoritative read-only production selected-fact accounting and guarded
+  release preflight.
 - Nutrition and ingredient reconciliation symmetry for stale active decisions.
 - The checked-in active review-bundle manifest and producer/publisher audits.
 - Unit, reconciliation replay, workflow-contract, and exact-artifact tests.

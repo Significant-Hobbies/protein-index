@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "bundleId": "review-7ee07d3d849f0d175571",
+  "createdAt": "2026-07-17T00:00:00.000Z",
+  "decisionCount": 53,
+  "verifyCount": 53,
+  "rejectCount": 0,
+  "sourceRecordCount": 53,
+  "ledgerSha256": "7ee07d3d849f0d175571d48076610b7c31826a2bd7479931e605e9bfaaa75ca0"
+}

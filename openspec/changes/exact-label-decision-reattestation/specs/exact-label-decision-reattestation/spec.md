@@ -4,7 +4,8 @@
 The system SHALL create exact-lineage replacement decisions only after an
 operator supplies the required confirmation, reviewer identity, and fixed
 decision timestamp for one explicitly selected artifact and active decision
-set.
+set. The confirmation MUST bind the artifact extraction run, active-set
+SHA-256, field family, and exact decision count.
 
 #### Scenario: Confirmation is absent or malformed
 - **WHEN** a re-attestation command omits the hard confirmation, reviewer identity, fixed timestamp, artifact, or active bundle set
@@ -50,12 +51,27 @@ states, hard proof failures, or selected decisions left outside the replacement
 set.
 
 #### Scenario: Complete nutrition and ingredient replacements
-- **WHEN** the audited nutrition and ingredient batches contain 312 and 66 eligible active decisions respectively
-- **THEN** the proposed manifest selects exactly the new family bundles and the audit reports 312 and 66 exact links
+- **WHEN** the audited nutrition and ingredient batches contain 365 and 66 eligible active decisions respectively
+- **THEN** the proposed manifest selects exactly the new family bundles and the audit reports 365 and 66 exact links
 
 #### Scenario: Generated bundle or active set is incomplete
 - **WHEN** a replacement is missing, duplicated, mixed across families, checksum-invalid, or not exact-link-valid
 - **THEN** the active manifest is not updated and publication remains ineligible
+
+### Requirement: Live verified nutrition preservation is exhaustively accounted
+Before nutrition replacement generation, the system SHALL reconcile every
+currently selected authority-100 verified nutrition fact to its active reviewed
+decision and the current exact artifact. Exactly 53 source-revision-only live
+decisions SHALL join the 312 pending decisions; the one candidate-drift and one
+candidate-missing live facts SHALL be explicit outstanding exceptions.
+
+#### Scenario: Authoritative live selection matches the audited baseline
+- **WHEN** the read-only selected-fact query returns 55 unique verified products and the artifact classifies 53 as source-revision-only, one as candidate drift, and one as candidate missing
+- **THEN** only the 53 eligible decisions enter the predecessor selection and all 55 rows remain accounted
+
+#### Scenario: Live selection or classification differs
+- **WHEN** the selected-fact query is not exactly one row per verified product, differs from the expected baseline, or produces any unenumerated classification
+- **THEN** generation and production publication fail without guessing a predecessor
 
 ### Requirement: Ingredient drift supersession matches nutrition safety
 Ingredient reconciliation SHALL deactivate an active prior decision when the
@@ -73,9 +89,9 @@ candidate hash and no exact current decision exists.
 ### Requirement: Production remains separately gated and ordered
 Creating or selecting replacement bundles SHALL NOT apply migrations, publish
 artifacts or decisions, or deploy the Worker. Production release MUST publish
-the exact artifact before its replacement decisions, restore reviewed
-postconditions, and verify live coverage before deployment completion is
-claimed.
+each exact artifact with its already-audited replacement decisions through one
+guarded path, restore reviewed postconditions, and verify live coverage before
+deployment completion is claimed.
 
 #### Scenario: Bundles exist without production authorization
 - **WHEN** exact replacement bundles pass all local audits but no separate production approval is supplied
@@ -83,4 +99,4 @@ claimed.
 
 #### Scenario: Authorized serialized release
 - **WHEN** production approval is supplied
-- **THEN** migrations, exact artifacts, replacement decisions, and deployment execute in the reviewed order with live pre/post counts and replay evidence
+- **THEN** migrations, exact artifacts, replacement decisions, and deployment execute in the reviewed order with 76 verified nutrition products, 65 verified ingredient products, two explicit nutrition exceptions, and idempotent replay evidence

@@ -107,6 +107,7 @@ export interface DecisionDriftFinding {
   sourceContentHash: string;
   productId: string;
   candidateHash: string;
+  evidenceUrl: string;
   extractionAttemptId: string | null;
   labelAssetId: string | null;
   classification: DecisionDriftClassification;
@@ -117,10 +118,12 @@ export interface DecisionDriftFinding {
     productId: string;
     gtin: string | null;
     candidateHash: string;
+    evidenceUrl: string;
     extractionAttemptId: string;
     labelAssetId: string;
     labelContentSha256: string;
     proofValid: boolean;
+    proofIssues: string[];
   };
   bundles: DecisionBundleProvenance[];
 }
@@ -591,6 +594,7 @@ function finding(
     sourceContentHash: decision.sourceContentHash,
     productId: decision.productId,
     candidateHash: decision.candidateHash,
+    evidenceUrl: decision.evidenceUrl,
     extractionAttemptId: decision.extractionAttemptId ?? null,
     labelAssetId: decision.labelAssetId ?? null,
     classification: result.classification,
@@ -601,10 +605,12 @@ function finding(
       productId: result.current.productId,
       gtin: result.current.gtin,
       candidateHash: result.current.candidateHash,
+      evidenceUrl: result.current.evidenceUrl,
       extractionAttemptId: result.current.extractionAttemptId,
       labelAssetId: result.current.labelAssetId,
       labelContentSha256: result.current.labelContentSha256,
       proofValid: result.current.proofValid,
+      proofIssues: result.current.proofIssues,
     } : null,
     bundles: provenance,
   };

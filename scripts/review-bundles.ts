@@ -64,6 +64,10 @@ export interface ReviewDecisionSqlPlan {
   expectedResolvedCandidates: number;
 }
 
+export interface ReviewDecisionSqlOptions {
+  composed?: boolean;
+}
+
 interface D1JsonResult {
   success?: boolean;
   results?: Array<Record<string, unknown>>;
@@ -508,9 +512,11 @@ function redundantBoundReviewExists(decision: EvidenceDecisionInput): string {
 export async function emitReviewDecisionSql(
   bundle: ReviewDecisionBundle,
   outputPath: string,
-  includeTransaction = true,
+  options: boolean | ReviewDecisionSqlOptions = true,
 ): Promise<ReviewDecisionSqlPlan> {
-  const statements: string[] = ["PRAGMA foreign_keys = ON;"];
+  const composed = typeof options === "object" && options.composed === true;
+  const includeTransaction = typeof options === "boolean" ? options : !composed;
+  const statements: string[] = composed ? [] : ["PRAGMA foreign_keys = ON;"];
   if (includeTransaction) statements.push("BEGIN IMMEDIATE;");
   const nutritionFields = [
     ["calories", "kcal"],
@@ -681,10 +687,12 @@ export async function emitReviewDecisionSql(
         decided_by = excluded.decided_by, notes = excluded.notes;`);
   }
   if (includeTransaction) statements.push("COMMIT;");
-  const decisionIds = bundle.decisions.map(({ id }) => sql(id)).join(", ");
-  const candidateHashes = bundle.decisions.map(({ candidateHash }) => sql(candidateHash)).join(", ");
-  statements.push(`SELECT COUNT(*) AS applied_decisions FROM evidence_decisions WHERE id IN (${decisionIds}) AND active = 1;`);
-  statements.push(`SELECT COUNT(*) AS unresolved_candidates FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes});`);
+  if (!composed) {
+    const decisionIds = bundle.decisions.map(({ id }) => sql(id)).join(", ");
+    const candidateHashes = bundle.decisions.map(({ candidateHash }) => sql(candidateHash)).join(", ");
+    statements.push(`SELECT COUNT(*) AS applied_decisions FROM evidence_decisions WHERE id IN (${decisionIds}) AND active = 1;`);
+    statements.push(`SELECT COUNT(*) AS unresolved_candidates FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes});`);
+  }
   const portableStatements = statements.map(compactSql);
   await writeFile(outputPath, `${portableStatements.join("\n")}\n`, "utf8");
   return {

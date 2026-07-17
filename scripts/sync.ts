@@ -35,6 +35,19 @@ import {
   validateReviewSourceState,
   writeReviewDecisionBundle,
 } from "./review-bundles";
+import {
+  generateExactLabelReattestation,
+} from "./reattest-decisions";
+import {
+  liveNutritionSelectionQuery,
+  prepareLiveNutritionSelection,
+} from "./live-nutrition-selection";
+import {
+  emitGuardedSuccessorPublication,
+  parseVerifiedProductState,
+  verifiedProductStateQuery,
+  writeExpectedVerifiedProductState,
+} from "./guarded-publication";
 
 function option(name: string): string | null {
   const index = process.argv.indexOf(`--${name}`);
@@ -354,6 +367,170 @@ async function reviewExportCommand(): Promise<void> {
   }, null, 2)}\n`);
 }
 
+async function reviewReattestCommand(): Promise<void> {
+  const artifactDirectory = option("artifact");
+  const bundlesDirectory = option("bundles");
+  const activeSetFile = option("active-set");
+  const family = option("family");
+  const expectedDecisionCount = Number(option("expected-count"));
+  const outputRoot = option("output");
+  const decidedBy = option("decided-by");
+  const decidedAt = option("decided-at");
+  const confirmation = option("confirmation");
+  if (!artifactDirectory || !bundlesDirectory || !activeSetFile || !family || !outputRoot
+    || !decidedBy || !decidedAt || !confirmation || !Number.isSafeInteger(expectedDecisionCount) || expectedDecisionCount <= 0) {
+    throw new Error("review-reattest requires --artifact, --bundles, --active-set, --family, --expected-count, --output, --decided-by, --decided-at, and --confirmation");
+  }
+  if (family !== "nutrition" && family !== "ingredients") throw new Error("--family must be nutrition or ingredients");
+  const report = await generateExactLabelReattestation({
+    artifactDirectory,
+    bundlesDirectory,
+    activeSetFile,
+    fieldFamily: family,
+    expectedDecisionCount,
+    outputRoot,
+    decidedBy,
+    decidedAt,
+    confirmation,
+  });
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+}
+
+async function liveNutritionSelectionCommand(command: "review-live-selection-query" | "review-live-selection-prepare"): Promise<void> {
+  const output = option("output");
+  if (!output) throw new Error(`${command} requires --output`);
+  if (command === "review-live-selection-query") {
+    await writeFile(output, `${liveNutritionSelectionQuery()}\n`, "utf8");
+    process.stdout.write(`${JSON.stringify({ command, output }, null, 2)}\n`);
+    return;
+  }
+  const publishedBundleIds = (option("published-bundles") ?? "").split(",").map((value) => value.trim()).filter(Boolean).sort();
+  const artifactDirectory = option("artifact");
+  const bundlesDirectory = option("bundles");
+  const activeSetFile = option("active-set");
+  const stateFile = option("state");
+  const scratchRoot = option("scratch");
+  const expectedSelected = Number(option("expected-selected"));
+  const expectedEligible = Number(option("expected-eligible"));
+  const expectedPending = Number(option("expected-pending"));
+  const expectedCandidateDriftId = option("expected-candidate-drift-id");
+  const expectedMissingId = option("expected-missing-id");
+  if (!artifactDirectory || !bundlesDirectory || !activeSetFile || !stateFile || !scratchRoot
+    || !expectedCandidateDriftId || !expectedMissingId || publishedBundleIds.length === 0
+    || !Number.isSafeInteger(expectedSelected) || expectedSelected <= 0
+    || !Number.isSafeInteger(expectedEligible) || expectedEligible <= 0
+    || !Number.isSafeInteger(expectedPending) || expectedPending <= 0) {
+    throw new Error("review-live-selection-prepare requires exact artifact, bundle, active-set, state, scratch, output, published-bundle, count, and exception inputs");
+  }
+  const report = await prepareLiveNutritionSelection({
+    artifactDirectory,
+    bundlesDirectory,
+    activeSetFile,
+    publishedBundleIds,
+    stateFile,
+    outputRoot: output,
+    scratchRoot,
+    expectedSelected,
+    expectedEligible,
+    expectedPending,
+    expectedCandidateDriftId,
+    expectedMissingId,
+  });
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+}
+
+async function guardedReleasePrepareCommand(): Promise<void> {
+  const artifactDirectory = option("artifact");
+  const bundleDirectory = option("bundle");
+  const fieldFamily = option("family");
+  const output = option("output");
+  const scratch = option("scratch");
+  const beforeNutrition = option("before-nutrition");
+  const beforeIngredients = option("before-ingredients");
+  const afterNutrition = option("after-nutrition");
+  const afterIngredients = option("after-ingredients");
+  const expectedDecisionCount = Number(option("expected-count"));
+  const expectedVerifyCount = Number(option("expected-verify-count"));
+  if (!artifactDirectory || !bundleDirectory || !output || !scratch || !beforeNutrition || !beforeIngredients
+    || !afterNutrition || !afterIngredients || (fieldFamily !== "nutrition" && fieldFamily !== "ingredients")
+    || !Number.isSafeInteger(expectedDecisionCount) || expectedDecisionCount <= 0
+    || !Number.isSafeInteger(expectedVerifyCount) || expectedVerifyCount <= 0) {
+    throw new Error("guarded-release-prepare requires exact artifact, bundle, family, state, count, scratch, and output inputs");
+  }
+  const snapshot = await validateAutomaticPublicationSnapshot(artifactDirectory, {
+    workflowName: option("workflow-name") ?? "",
+    runId: Number(option("upstream-run-id")),
+    headSha: option("upstream-head-sha") ?? "",
+    headBranch: option("upstream-head-branch") ?? "",
+    repository: option("upstream-repository") ?? "",
+    artifactName: option("artifact-name") ?? "",
+    artifactDigest: option("artifact-digest") ?? "",
+    artifactBytes: Number(option("artifact-bytes")),
+  });
+  if (!snapshot.extractionImport) throw new Error("Guarded successor publication requires exact extraction evidence");
+  const bundle = await readReviewDecisionBundle(bundleDirectory);
+  await mkdir(scratch, { recursive: true });
+  const artifactSqlPath = join(scratch, "artifact-mutations.sql");
+  const successorSqlPath = join(scratch, "successor-mutations.sql");
+  await emitImportSql({
+    stagedPath: snapshot.stagedPath,
+    manifestPath: snapshot.manifestPath,
+    outputPath: artifactSqlPath,
+    includeTransaction: false,
+    includePragma: false,
+    applyEvidenceDecisions: false,
+    extraction: snapshot.extractionImport,
+  });
+  await emitReviewDecisionSql(bundle, successorSqlPath, { composed: true });
+  await emitGuardedSuccessorPublication({
+    fieldFamily,
+    artifactSqlPath,
+    successorSqlPath,
+    outputPath: output,
+    successor: bundle,
+    before: {
+      nutrition: parseVerifiedProductState("nutrition", JSON.parse(await readFile(beforeNutrition, "utf8")) as unknown),
+      ingredients: parseVerifiedProductState("ingredients", JSON.parse(await readFile(beforeIngredients, "utf8")) as unknown),
+    },
+    expectedAfter: {
+      nutrition: parseVerifiedProductState("nutrition", JSON.parse(await readFile(afterNutrition, "utf8")) as unknown),
+      ingredients: parseVerifiedProductState("ingredients", JSON.parse(await readFile(afterIngredients, "utf8")) as unknown),
+    },
+    expectedDecisionCount,
+    expectedVerifyCount,
+  });
+  process.stdout.write(`${JSON.stringify({
+    output,
+    fieldFamily,
+    bundleId: bundle.manifest.bundleId,
+    decisionCount: bundle.manifest.decisionCount,
+    verifyCount: bundle.manifest.verifyCount,
+    artifact: snapshot.manifest.inputHash,
+    extractionRunId: snapshot.exactExtraction?.extractionRunId ?? null,
+  }, null, 2)}\n`);
+}
+
+async function guardedReleaseStateQueryCommand(): Promise<void> {
+  const fieldFamily = option("family");
+  const output = option("output");
+  if (!output || (fieldFamily !== "nutrition" && fieldFamily !== "ingredients")) {
+    throw new Error("guarded-release-state-query requires --family nutrition|ingredients and --output");
+  }
+  await writeFile(output, `${verifiedProductStateQuery(fieldFamily)}\n`, "utf8");
+  process.stdout.write(`${JSON.stringify({ output, fieldFamily }, null, 2)}\n`);
+}
+
+async function guardedReleaseFinalStateCommand(): Promise<void> {
+  const bundleDirectory = option("bundle");
+  const fieldFamily = option("family");
+  const output = option("output");
+  if (!bundleDirectory || !output || (fieldFamily !== "nutrition" && fieldFamily !== "ingredients")) {
+    throw new Error("guarded-release-final-state requires --bundle, --family nutrition|ingredients, and --output");
+  }
+  const state = await writeExpectedVerifiedProductState(await readReviewDecisionBundle(bundleDirectory), fieldFamily, output);
+  process.stdout.write(`${JSON.stringify({ output, fieldFamily, verifiedProducts: state.productIds.length }, null, 2)}\n`);
+}
+
 async function reviewBundleCommand(command: "review-query" | "review-source-check" | "review-prepare" | "review-postquery" | "review-postcheck"): Promise<void> {
   const directory = option("input");
   const output = option("output");
@@ -409,6 +586,13 @@ async function main(): Promise<void> {
   if (command === "coverage") return coverageCommand();
   if (command === "publish") return publishCommand();
   if (command === "review-export") return reviewExportCommand();
+  if (command === "review-reattest") return reviewReattestCommand();
+  if (command === "review-live-selection-query" || command === "review-live-selection-prepare") {
+    return liveNutritionSelectionCommand(command);
+  }
+  if (command === "guarded-release-prepare") return guardedReleasePrepareCommand();
+  if (command === "guarded-release-state-query") return guardedReleaseStateQueryCommand();
+  if (command === "guarded-release-final-state") return guardedReleaseFinalStateCommand();
   if (command === "review-query" || command === "review-source-check" || command === "review-prepare" || command === "review-postquery" || command === "review-postcheck") {
     return reviewBundleCommand(command);
   }
@@ -416,7 +600,7 @@ async function main(): Promise<void> {
     process.stdout.write(`${JSON.stringify(DATAKART_ADAPTER_STATUS, null, 2)}\n`);
     return;
   }
-  throw new Error("Usage: sync.ts <stage|enrich|extract|seed|coverage|publish|review-export|review-query|review-source-check|review-prepare|review-postquery|review-postcheck|datakart-status> [options]");
+  throw new Error("Usage: sync.ts <stage|enrich|extract|seed|coverage|publish|review-export|review-reattest|review-live-selection-query|review-live-selection-prepare|guarded-release-prepare|guarded-release-state-query|guarded-release-final-state|review-query|review-source-check|review-prepare|review-postquery|review-postcheck|datakart-status> [options]");
 }
 
 main().catch((error: unknown) => {

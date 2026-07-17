@@ -1009,6 +1009,32 @@ async function ingredientReviewDecision(id: string): Promise<IngredientEvidenceD
 }
 
 describe("Reviewed evidence bundles", () => {
+  it("emits a mutation-only SQL fragment for guarded composition without changing legacy boolean output", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-composed-review-sql-"));
+    const decision = await reviewDecision("evd_composed_sql", "reject");
+    const bundle = await writeReviewDecisionBundle({ decisions: [decision], outputRoot: directory });
+
+    const composedPath = join(directory, "composed.sql");
+    await emitReviewDecisionSql(bundle, composedPath, { composed: true });
+    const composed = await readFile(composedPath, "utf8");
+    expect(composed).toContain("INSERT INTO evidence_decisions");
+    expect(composed).toContain("UPDATE review_items SET status = 'resolved'");
+    expect(composed).not.toContain("PRAGMA foreign_keys");
+    expect(composed).not.toContain("BEGIN IMMEDIATE");
+    expect(composed).not.toContain("COMMIT;");
+    expect(composed).not.toContain("SELECT COUNT(*) AS applied_decisions");
+    expect(composed).not.toContain("SELECT COUNT(*) AS unresolved_candidates");
+
+    const legacyPath = join(directory, "legacy-transaction-free.sql");
+    await emitReviewDecisionSql(bundle, legacyPath, false);
+    const legacy = await readFile(legacyPath, "utf8");
+    expect(legacy).toContain("PRAGMA foreign_keys = ON;");
+    expect(legacy).not.toContain("BEGIN IMMEDIATE");
+    expect(legacy).not.toContain("COMMIT;");
+    expect(legacy).toContain("SELECT COUNT(*) AS applied_decisions");
+    expect(legacy).toContain("SELECT COUNT(*) AS unresolved_candidates");
+  });
+
   it("round-trips exact extraction links while keeping legacy decision pairs null", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-linked-review-bundle-"));
     const legacy = await reviewDecision("evd_link_legacy", "reject");

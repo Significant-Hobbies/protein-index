@@ -249,6 +249,26 @@ function exactNutritionProjectionWhere(candidate: NutritionCandidate, productIdS
   return `EXISTS (SELECT 1 FROM nutrition_facts selected WHERE selected.product_id = ${productIdSql} AND selected.status = 'verified' AND selected.authority = 100 AND selected.basis = ${sql(basis)} AND ${columns.map(([column, value]) => `selected.${column} IS ${sql(value)}`).join(" AND ")})`;
 }
 
+function exactCurrentLabelProofWhere(input: {
+  product: StagedProduct;
+  sourceRecordId: string;
+  productIdSql: string;
+  fieldFamily: "nutrition" | "ingredients";
+  candidateHash: string;
+  evidenceUrl: string;
+}): string | null {
+  const rawEvidence = record(input.product.rawEvidence);
+  const extractionAttemptId = rawEvidence?.extractionAttemptId;
+  const labelAssetId = rawEvidence?.labelAssetId;
+  const labelContentSha256 = rawEvidence?.labelContentSha256;
+  if (typeof extractionAttemptId !== "string" || !extractionAttemptId
+    || typeof labelAssetId !== "string" || !labelAssetId
+    || typeof labelContentSha256 !== "string" || !/^[a-f0-9]{64}$/.test(labelContentSha256)) {
+    return null;
+  }
+  return `d.extraction_attempt_id = ${sql(extractionAttemptId)} AND d.label_asset_id = ${sql(labelAssetId)} AND d.evidence_url = ${sql(input.evidenceUrl)} AND EXISTS (SELECT 1 FROM extraction_attempts current_attempt JOIN extraction_attempt_labels current_label ON current_label.attempt_id = current_attempt.id AND current_label.label_asset_id = ${sql(labelAssetId)} JOIN label_evidence_assets current_asset ON current_asset.id = current_label.label_asset_id WHERE current_attempt.id = ${sql(extractionAttemptId)} AND current_attempt.subject_source_record_id = ${sql(input.sourceRecordId)} AND current_attempt.subject_source_record_key = ${sql(input.product.sourceRecordId)} AND current_attempt.subject_source_content_hash = ${sql(input.product.contentHash)} AND current_attempt.product_id = ${input.productIdSql} AND current_attempt.field_family = ${sql(input.fieldFamily)} AND current_attempt.status = 'candidate' AND current_attempt.is_current = 1 AND current_label.outcome = 'candidate' AND current_asset.subject_source_record_id = ${sql(input.sourceRecordId)} AND current_asset.subject_source_content_hash = ${sql(input.product.contentHash)} AND current_asset.product_id = ${input.productIdSql} AND current_asset.field_family = ${sql(input.fieldFamily)} AND current_asset.content_sha256 = ${sql(labelContentSha256)} AND current_asset.effective_url = ${sql(input.evidenceUrl)} AND EXISTS (SELECT 1 FROM json_each(current_label.candidate_hashes_json) candidate_hash WHERE candidate_hash.value = ${sql(input.candidateHash)}))`;
+}
+
 async function ingredientDecisionCandidate(product: StagedProduct): Promise<IngredientDecisionCandidate | null> {
   const issue = product.validationIssues.find(({ code }) => code === "robotoff_ingredient_candidate");
   const details = record(issue?.details);
@@ -286,6 +306,7 @@ export async function emitImportSql(input: {
   manifestPath: string;
   outputPath: string;
   includeTransaction?: boolean;
+  includePragma?: boolean;
   applyEvidenceDecisions?: boolean;
   extraction?: ExtractionImportInput;
 }): Promise<{ products: number; outputPath: string; runId: string }> {
@@ -338,7 +359,7 @@ export async function emitImportSql(input: {
   }
   const applyEvidenceDecisions = input.applyEvidenceDecisions !== false;
   const output = createWriteStream(input.outputPath, { encoding: "utf8" });
-  await write(output, "PRAGMA foreign_keys = ON;");
+  if (input.includePragma !== false) await write(output, "PRAGMA foreign_keys = ON;");
   if (input.includeTransaction !== false) await write(output, "BEGIN IMMEDIATE;");
   await write(
     output,
@@ -362,8 +383,8 @@ export async function emitImportSql(input: {
     const identityHash = identityEvidenceHash(product);
     const nutritionCandidate = await nutritionDecisionCandidate(product);
     const ingredientCandidate = await ingredientDecisionCandidate(product);
-    const decisionProductSql = `(SELECT d.target_product_id FROM identity_decisions d WHERE d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.identity_hash = ${sql(identityHash)} AND d.active = 1 ORDER BY d.decided_at DESC LIMIT 1)`;
-    const decisionKindSql = `(SELECT d.decision FROM identity_decisions d WHERE d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.identity_hash = ${sql(identityHash)} AND d.active = 1 ORDER BY d.decided_at DESC LIMIT 1)`;
+    const decisionProductSql = `(SELECT identity_decision.target_product_id FROM identity_decisions identity_decision WHERE identity_decision.source_id = ${sql(product.source)} AND identity_decision.source_record_key = ${sql(product.sourceRecordId)} AND identity_decision.identity_hash = ${sql(identityHash)} AND identity_decision.active = 1 ORDER BY identity_decision.decided_at DESC LIMIT 1)`;
+    const decisionKindSql = `(SELECT identity_decision.decision FROM identity_decisions identity_decision WHERE identity_decision.source_id = ${sql(product.source)} AND identity_decision.source_record_key = ${sql(product.sourceRecordId)} AND identity_decision.identity_hash = ${sql(identityHash)} AND identity_decision.active = 1 ORDER BY identity_decision.decided_at DESC LIMIT 1)`;
     const productIdSql = `COALESCE(${decisionProductSql}, ${sql(productId)})`;
     const sourceProductIdSql = `CASE WHEN ${decisionKindSql} = 'no_match' THEN NULL ELSE ${productIdSql} END`;
     const automaticRule = product.gtin ? "exact_gtin" : compositeIdentityKey(product) ? "deterministic_composite" : "source_identity";
@@ -376,6 +397,26 @@ export async function emitImportSql(input: {
             AND current_attempt.is_current = 1)`
       : "";
     const now = manifest.completedAt;
+    const nutritionExactLabelProof = nutritionCandidate
+      ? exactCurrentLabelProofWhere({
+        product,
+        sourceRecordId,
+        productIdSql,
+        fieldFamily: "nutrition",
+        candidateHash: nutritionCandidate.candidateHash,
+        evidenceUrl: nutritionCandidate.candidate.imageUrl,
+      })
+      : null;
+    const ingredientExactLabelProof = ingredientCandidate
+      ? exactCurrentLabelProofWhere({
+        product,
+        sourceRecordId,
+        productIdSql,
+        fieldFamily: "ingredients",
+        candidateHash: ingredientCandidate.candidateHash,
+        evidenceUrl: ingredientCandidate.candidate.imageUrl,
+      })
+      : null;
     await write(
       output,
       `INSERT INTO products (id, product_kind, gtin, brand, brand_normalized, name, name_normalized, flavour, flavour_normalized, category, category_raw, net_quantity_grams, serving_size_grams, image_url, nutrition_image_url, ingredient_image_url, marketed_protein, marketed_reasons_json, nutritionally_protein_dense, nutrition_reasons_json, classifier_version, completeness, completeness_missing_json, identity_authority, created_at, updated_at) VALUES (${productIdSql}, ${sql(product.productKind)}, ${sql(product.gtin)}, ${sql(product.brand)}, ${sql(normalizeText(product.brand))}, ${sql(product.name)}, ${sql(normalizeText(product.name))}, ${sql(product.flavour)}, ${sql(normalizeText(product.flavour) || null)}, ${sql(product.category)}, ${sql(product.categoryRaw)}, ${sql(product.netQuantityGrams)}, ${sql(product.servingSizeGrams)}, ${sql(product.imageUrl)}, ${sql(product.nutritionImageUrl)}, ${sql(product.ingredientImageUrl)}, ${sql(product.classification.marketed)}, ${json(product.classification.marketedReasons)}, ${sql(product.classification.nutritionallyDense)}, ${json(product.classification.nutritionReasons)}, ${sql(product.classification.version)}, ${product.completeness}, ${json(product.completenessMissing)}, ${product.sourceAuthority.identity}, ${sql(now)}, ${sql(now)}) ON CONFLICT(id) DO UPDATE SET brand = excluded.brand, brand_normalized = excluded.brand_normalized, name = excluded.name, name_normalized = excluded.name_normalized, flavour = COALESCE(excluded.flavour, products.flavour), flavour_normalized = COALESCE(excluded.flavour_normalized, products.flavour_normalized), category = excluded.category, category_raw = COALESCE(excluded.category_raw, products.category_raw), net_quantity_grams = COALESCE(excluded.net_quantity_grams, products.net_quantity_grams), serving_size_grams = COALESCE(excluded.serving_size_grams, products.serving_size_grams), image_url = COALESCE(excluded.image_url, products.image_url), nutrition_image_url = COALESCE(excluded.nutrition_image_url, products.nutrition_image_url), ingredient_image_url = COALESCE(excluded.ingredient_image_url, products.ingredient_image_url), marketed_protein = excluded.marketed_protein, marketed_reasons_json = excluded.marketed_reasons_json, nutritionally_protein_dense = CASE WHEN EXISTS (SELECT 1 FROM nutrition_facts selected WHERE selected.product_id = products.id AND selected.status = 'verified') THEN products.nutritionally_protein_dense ELSE excluded.nutritionally_protein_dense END, nutrition_reasons_json = CASE WHEN EXISTS (SELECT 1 FROM nutrition_facts selected WHERE selected.product_id = products.id AND selected.status = 'verified') THEN products.nutrition_reasons_json ELSE excluded.nutrition_reasons_json END, classifier_version = excluded.classifier_version, completeness_missing_json = CASE WHEN excluded.completeness >= products.completeness THEN excluded.completeness_missing_json ELSE products.completeness_missing_json END, completeness = MAX(products.completeness, excluded.completeness), identity_authority = MAX(products.identity_authority, excluded.identity_authority), updated_at = excluded.updated_at WHERE excluded.identity_authority >= products.identity_authority;`,
@@ -450,14 +491,14 @@ export async function emitImportSql(input: {
       );
     }
     const nutritionDecisionWhere = nutritionCandidate && exactNutritionProjection
-      ? `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.source_record_id = ${sql(sourceRecordId)} AND d.source_content_hash = ${sql(product.contentHash)} AND d.product_id = ${productIdSql} AND d.candidate_hash = ${sql(nutritionCandidate.candidateHash)} AND d.field_family = 'nutrition' AND d.active = 1 AND (d.decision <> 'redundant' OR ${exactNutritionProjection})`
+      ? `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.source_record_id = ${sql(sourceRecordId)} AND d.source_content_hash = ${sql(product.contentHash)} AND d.product_id = ${productIdSql} AND d.candidate_hash = ${sql(nutritionCandidate.candidateHash)} AND d.field_family = 'nutrition' AND d.active = 1${nutritionExactLabelProof ? ` AND ${nutritionExactLabelProof}` : ""} AND (d.decision <> 'redundant' OR ${exactNutritionProjection})`
       : null;
     if (product.source === "open_food_facts_robotoff") {
       const exactDecisionAbsent = nutritionDecisionWhere
         ? `NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${nutritionDecisionWhere})`
         : "1 = 1";
       const driftWhere = `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.product_id = ${productIdSql} AND d.field_family = 'nutrition' AND d.active = 1 AND ${nutritionCandidate
-        ? `(d.source_content_hash <> ${sql(product.contentHash)} OR d.source_record_id <> ${sql(sourceRecordId)} OR d.candidate_hash <> ${sql(nutritionCandidate.candidateHash)})`
+        ? `(d.source_content_hash <> ${sql(product.contentHash)} OR d.source_record_id <> ${sql(sourceRecordId)} OR d.candidate_hash <> ${sql(nutritionCandidate.candidateHash)}${nutritionExactLabelProof ? ` OR NOT COALESCE((${nutritionExactLabelProof}), 0)` : ""})`
         : "1 = 1"}`;
       await write(
         output,
@@ -538,23 +579,38 @@ export async function emitImportSql(input: {
     }
 
     const ingredientDecisionWhere = ingredientCandidate
-      ? `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.source_record_id = ${sql(sourceRecordId)} AND d.source_content_hash = ${sql(product.contentHash)} AND d.product_id = ${productIdSql} AND d.candidate_hash = ${sql(ingredientCandidate.candidateHash)} AND d.field_family = 'ingredients' AND d.active = 1`
+      ? `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.source_record_id = ${sql(sourceRecordId)} AND d.source_content_hash = ${sql(product.contentHash)} AND d.product_id = ${productIdSql} AND d.candidate_hash = ${sql(ingredientCandidate.candidateHash)} AND d.field_family = 'ingredients' AND d.active = 1${ingredientExactLabelProof ? ` AND ${ingredientExactLabelProof}` : ""}`
       : null;
+    if (product.source === "open_food_facts_robotoff_ingredients") {
+      const exactDecisionAbsent = ingredientDecisionWhere
+        ? `NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${ingredientDecisionWhere})`
+        : "1 = 1";
+      const driftWhere = `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.product_id = ${productIdSql} AND d.field_family = 'ingredients' AND d.active = 1 AND ${ingredientCandidate
+        ? `(d.source_content_hash <> ${sql(product.contentHash)} OR d.candidate_hash <> ${sql(ingredientCandidate.candidateHash)}${ingredientExactLabelProof ? ` OR NOT COALESCE((${ingredientExactLabelProof}), 0)` : ""})`
+        : "1 = 1"}`;
+      await write(
+        output,
+        `UPDATE ingredient_statements SET status = 'conflict', confidence = 'low', authority = MIN(authority, 20), updated_at = ${sql(now)} WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND ${exactDecisionAbsent};`,
+      );
+      await write(
+        output,
+        `DELETE FROM product_ingredients WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND ${exactDecisionAbsent};`,
+      );
+      await write(
+        output,
+        `UPDATE field_observations SET selected = 0 WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND field_path = 'ingredients.raw' AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND ${exactDecisionAbsent};`,
+      );
+      await write(
+        output,
+        `DELETE FROM evidence_outcomes WHERE product_id = ${productIdSql} AND field_family = 'ingredients' AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND ${exactDecisionAbsent};`,
+      );
+      await write(
+        output,
+        `UPDATE evidence_decisions AS d SET active = 0 WHERE ${driftWhere} AND ${exactDecisionAbsent};`,
+      );
+    }
     if (ingredientCandidate && ingredientDecisionWhere) {
       const verifyWhere = `${ingredientDecisionWhere} AND d.decision = 'verify'`;
-      const driftWhere = `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.product_id = ${productIdSql} AND d.field_family = 'ingredients' AND d.active = 1 AND (d.source_content_hash <> ${sql(product.contentHash)} OR d.candidate_hash <> ${sql(ingredientCandidate.candidateHash)})`;
-      await write(
-        output,
-        `UPDATE ingredient_statements SET status = 'conflict', confidence = 'low', authority = MIN(authority, 20), updated_at = ${sql(now)} WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${ingredientDecisionWhere});`,
-      );
-      await write(
-        output,
-        `UPDATE field_observations SET selected = 0 WHERE product_id = ${productIdSql} AND source_record_id = ${sql(sourceRecordId)} AND field_path = 'ingredients.raw' AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${ingredientDecisionWhere});`,
-      );
-      await write(
-        output,
-        `DELETE FROM evidence_outcomes WHERE product_id = ${productIdSql} AND field_family = 'ingredients' AND source_record_id = ${sql(sourceRecordId)} AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${driftWhere}) AND NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${ingredientDecisionWhere});`,
-      );
       if (applyEvidenceDecisions) {
         await write(
           output,

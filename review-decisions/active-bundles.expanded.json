@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "families": {
+    "ingredients": [
+      "review-2e577fd180832df5bc94"
+    ],
+    "nutrition": [
+      "review-0e178dc60b1a55a12791",
+      "review-174cdb19d84d9fd99525",
+      "review-22fa92e7ed8d92627afa",
+      "review-230fca7ea00663c6c05e",
+      "review-24d15bfc4330572bed80",
+      "review-2960e3aee8761e63892c",
+      "review-35df940b2a5dff4da6b0",
+      "review-5bc43cc6a4badbbd2718",
+      "review-6890ec21567c9cf15f00",
+      "review-68fb6b0243dc187d0f16",
+      "review-75a54506b4d31f98265d",
+      "review-7ee07d3d849f0d175571",
+      "review-85eb6ae94d0b52de26e2",
+      "review-8b280c8db601d8c6e65b",
+      "review-b05156f6793aadb55c99",
+      "review-e1c5dcaa7a70bbf66c0b",
+      "review-e22b9494cc7630dddaed",
+      "review-e380c0d96d4e55bc7963",
+      "review-e9a215051b2fe4662517"
+    ]
+  }
+}
