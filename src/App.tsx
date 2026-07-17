@@ -307,7 +307,7 @@ function ClassificationBadges({ product }: { product: CatalogProduct }) {
   );
 }
 
-function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
+export function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
   data: CatalogResponse;
   onOpen: (id: string) => void;
   onExplore: () => void;
@@ -334,6 +334,7 @@ function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
             <th scope="col">Protein / 100 kcal</th>
             <th scope="col">Evidence</th>
             <th scope="col">Protein</th>
+            <th scope="col">Energy</th>
             <th scope="col">Protein calories</th>
             <th scope="col">Cost / 25 g</th>
             <th scope="col">Current offer</th>
@@ -349,6 +350,7 @@ function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
               <td className="metric-primary"><strong>{metric(product.metrics.proteinPer100Calories, " g")}</strong><small>{metricEvidenceLabel(product.nutritionStatus)}</small></td>
               <td><StatusBadge status={product.nutritionStatus} /><small>ingredients: {product.ingredientStatus}</small></td>
               <td><strong>{formatNumber(product.nutrition.proteinGrams)} g</strong><small>{nutritionBasisLabel(product.nutrition.basis)}</small></td>
+              <td><strong>{product.nutrition.calories === null ? "—" : `${formatNumber(product.nutrition.calories)} kcal`}</strong><small>{nutritionBasisLabel(product.nutrition.basis)}</small></td>
               <td>{metric(product.metrics.proteinCaloriePercentage, "%")}</td>
               <td>{product.metrics.costPer25gProtein.value === null ? "—" : `₹${formatNumber(product.metrics.costPer25gProtein.value, 2)}`}</td>
               <td>{product.currentOffer ? <><strong>₹{formatNumber(product.currentOffer.sellingPrice, 0)}</strong><small>{product.currentOffer.retailer} · {product.currentOffer.pincode ?? "all India"}</small></> : "—"}</td>
@@ -367,7 +369,7 @@ function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
               <span className="card-arrow" aria-hidden="true">↗</span>
             </button>
             <div className="product-card-metric"><strong>{metric(product.metrics.proteinPer100Calories, " g")}</strong><span>protein / 100 kcal</span><small>{metricEvidenceLabel(product.nutritionStatus)}</small></div>
-            <div className="product-card-meta"><StatusBadge status={product.nutritionStatus} /><span>{product.nutrition.proteinGrams === null ? "Protein missing" : `${formatNumber(product.nutrition.proteinGrams)} g protein · ${nutritionBasisLabel(product.nutrition.basis)}`}</span><span>{product.completeness}% fields present</span></div>
+            <div className="product-card-meta"><StatusBadge status={product.nutritionStatus} /><span>{product.nutrition.proteinGrams === null ? "Protein missing" : `${formatNumber(product.nutrition.proteinGrams)} g protein`} · {product.nutrition.calories === null ? "Energy missing" : `${formatNumber(product.nutrition.calories)} kcal`} · {nutritionBasisLabel(product.nutrition.basis)}</span><span>{product.completeness}% fields present</span></div>
             <ClassificationBadges product={product} />
           </article>
         ))}
