@@ -1,3 +1,12 @@
 User-agent: *
 Allow: /
 
+# Agent / LLM indexing surfaces are public
+Allow: /llms.txt
+Allow: /index.md
+Allow: /api/ai
+Allow: /api/health
+Allow: /api/coverage
+Allow: /api/products
+
+Sitemap: https://protein.significanthobbies.com/sitemap.xml

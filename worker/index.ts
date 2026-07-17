@@ -1,5 +1,12 @@
 import { Hono } from "hono";
 import type { ReviewDecision, ReviewStatus, ReviewType } from "../shared/api";
+import {
+  INDEX_MD,
+  LLMS_TXT,
+  SITEMAP_XML,
+  buildApiAiCatalog,
+  productToMarkdown,
+} from "./agent-index";
 import { getProductDetail, searchProducts, validateSearch } from "./catalog";
 import {
   getCompletionLabels,
@@ -15,6 +22,36 @@ export const app = new Hono<{ Bindings: Env }>();
 function errorBody(code: string, message: string, details?: Record<string, unknown>) {
   return { error: { code, message, ...(details ? { details } : {}) } };
 }
+
+function text(body: string, type: string, status = 200) {
+  return new Response(body, {
+    status,
+    headers: {
+      "Content-Type": type,
+      "Cache-Control": "public, max-age=300",
+    },
+  });
+}
+
+// --- Agent / LLM indexing (must win over SPA asset fallback) ---
+app.get("/llms.txt", (c) => text(LLMS_TXT, "text/plain; charset=utf-8"));
+app.get("/index.md", (c) => text(INDEX_MD, "text/markdown; charset=utf-8"));
+app.get("/sitemap.xml", (c) => text(SITEMAP_XML, "application/xml; charset=utf-8"));
+app.get("/api/ai", (c) => {
+  const origin = new URL(c.req.url).origin;
+  return c.json(buildApiAiCatalog(origin));
+});
+app.get("/api/products/:id.md", async (c) => {
+  const id = c.req.param("id") ?? "";
+  const product = await getProductDetail(c.env.DB, id);
+  if (!product) {
+    return text("# Not found\n\nProduct not found.\n", "text/markdown; charset=utf-8", 404);
+  }
+  return text(
+    productToMarkdown(product as unknown as Record<string, unknown>),
+    "text/markdown; charset=utf-8"
+  );
+});
 
 app.get("/api/health", async (c) => {
   const [productResult, runResult] = await c.env.DB.batch([
@@ -160,6 +197,12 @@ app.post("/api/reviews/:id/resolve", async (c) => {
   if (input.decision !== "verify_ingredients" && reviewedText !== null) {
     return c.json(errorBody("validation_error", "Reviewed ingredient text is only valid for ingredient verification"), 400);
   }
+  const reviewedProjection = input.reviewedProjection === undefined || input.reviewedProjection === null
+    ? null
+    : input.reviewedProjection;
+  if (input.decision !== "verify_nutrition" && reviewedProjection !== null) {
+    return c.json(errorBody("validation_error", "Reviewed nutrition is only valid for nutrition verification"), 400);
+  }
   const result = await resolveReview(
     c.env.DB,
     c.req.param("id"),
@@ -168,6 +211,7 @@ app.post("/api/reviews/:id/resolve", async (c) => {
     evidenceUrl,
     candidateProductId,
     reviewedText,
+    reviewedProjection,
   );
   if (result === "not_found") return c.json(errorBody("not_found", "Review item not found"), 404);
   if (result === "conflict") return c.json(errorBody("conflict", "Review item was already resolved"), 409);

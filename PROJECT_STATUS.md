@@ -203,6 +203,7 @@ must pass desktop/mobile verification.
 - Local fixture seed with idempotent reconciliation and authority precedence
 - Durable identity decisions keyed to normalized identity evidence, with automatic invalidation when that evidence changes
 - Bounded Worker catalog/detail/coverage/review API with structured errors
+- Agent indexing (GEO): Worker-first `/llms.txt`, `/index.md`, `/api/ai`, `/sitemap.xml`, and `/api/products/:id.md` so SPA fallback never fakes agent paths
 - Dense responsive catalog, evidence detail, coverage ledger, and separate nutrition/identity review controls
 - Independent nutrition and ingredient evidence filters, including a tested fully verified intersection
 - Deterministic, filterable review-queue pagination so every matching item is reachable

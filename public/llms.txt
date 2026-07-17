@@ -1,9 +1,27 @@
 # Protein Index
 
-Protein Index is a source-aware catalog of Indian food products. It separates
-verified label evidence from broader discovery data and does not claim complete
-coverage of the Indian market.
+> Source-aware catalog of Indian food products. Separates verified label
+> evidence from broader discovery data. Does not claim complete coverage of
+> the Indian market.
 
-- [Browse the catalog](/)
-- [Read the coverage API](/api/coverage)
-- [Check catalog health](/api/health)
+The human UI is a React SPA. Agents should use the API and markdown surfaces
+below — do not scrape the empty client shell.
+
+## Product
+
+- [Catalog UI](https://protein.significanthobbies.com/): Human browse / compare experience (SPA)
+- [This index](https://protein.significanthobbies.com/llms.txt): Agent entrypoint
+- [Agent catalog](https://protein.significanthobbies.com/api/ai): Machine-readable surface list
+- [Homepage markdown](https://protein.significanthobbies.com/index.md): Product brief without JS
+
+## API (JSON)
+
+- [Health](https://protein.significanthobbies.com/api/health): Product count and publication status
+- [Coverage](https://protein.significanthobbies.com/api/coverage): Completion / evidence coverage
+- [Search products](https://protein.significanthobbies.com/api/products): Query catalog
+- [Product detail](https://protein.significanthobbies.com/api/products/:id): One canonical product
+- [Product markdown](https://protein.significanthobbies.com/api/products/:id.md): Same product as markdown
+
+## Optional
+
+- [Foundry](https://sassmaker.com): Parent fleet showcase
