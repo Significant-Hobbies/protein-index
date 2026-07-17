@@ -164,13 +164,16 @@ export async function listReviews(
   type: ReviewType | "all",
   page: number,
   pageSize: number,
+  reviewId: string | null = null,
 ): Promise<ReviewResponse> {
   const typeFilter = type === "all" ? "" : " AND r.type = ?";
+  const idFilter = reviewId === null ? "" : " AND r.id = ?";
   const offset = (page - 1) * pageSize;
-  const itemBindings = type === "all"
-    ? [status, pageSize, offset]
-    : [status, type, pageSize, offset];
-  const totalBindings = type === "all" ? [status] : [status, type];
+  const filteredBindings: Array<string | number> = [status];
+  if (type !== "all") filteredBindings.push(type);
+  if (reviewId !== null) filteredBindings.push(reviewId);
+  const itemBindings = [...filteredBindings, pageSize, offset];
+  const totalBindings = filteredBindings;
   const countBindings = type === "all" ? [] : [type];
   const batch = await db.batch([
     db.prepare(`SELECT r.id, r.type, r.priority, r.status, r.product_id, p.name AS product_name, p.brand,
@@ -195,9 +198,9 @@ export async function listReviews(
       LEFT JOIN products p ON p.id = r.product_id
       LEFT JOIN source_records s ON s.id = r.source_record_id
       LEFT JOIN nutrition_facts nf ON nf.product_id = r.product_id
-      WHERE r.status = ?${typeFilter}
+      WHERE r.status = ?${typeFilter}${idFilter}
       ORDER BY r.priority DESC, r.created_at, r.id LIMIT ? OFFSET ?`).bind(...itemBindings),
-    db.prepare(`SELECT COUNT(*) AS total FROM review_items r WHERE r.status = ?${typeFilter}`).bind(...totalBindings),
+    db.prepare(`SELECT COUNT(*) AS total FROM review_items r WHERE r.status = ?${typeFilter}${idFilter}`).bind(...totalBindings),
     db.prepare(`SELECT status, COUNT(*) AS count FROM review_items${type === "all" ? "" : " WHERE type = ?"} GROUP BY status`)
       .bind(...countBindings),
   ]);

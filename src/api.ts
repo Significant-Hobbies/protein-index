@@ -1,5 +1,6 @@
 import type {
   CatalogResponse,
+  CompletionLedgerResponse,
   CoverageResponse,
   HealthResponse,
   ProductDetailResponse,
@@ -31,6 +32,8 @@ export const api = {
   reviews: (params = new URLSearchParams({ status: "open", type: "all", page: "1", pageSize: "50" }), signal?: AbortSignal) =>
     request<ReviewResponse>(`/api/reviews?${params}`, { signal }),
   coverage: () => request<CoverageResponse>("/api/coverage"),
+  completionLedger: (params: URLSearchParams, signal?: AbortSignal) =>
+    request<CompletionLedgerResponse>(`/api/completion-ledger?${params}`, { signal }),
   resolveReview: (id: string, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) =>
     request<{ status: string }>(`/api/reviews/${encodeURIComponent(id)}/resolve`, {
       method: "POST",

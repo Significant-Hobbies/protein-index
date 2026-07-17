@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { ReviewDecision, ReviewStatus, ReviewType } from "../shared/api";
 import { getProductDetail, searchProducts, validateSearch } from "./catalog";
+import { getCompletionLedger, validateCompletionLedger } from "./completion";
 import { getCoverage } from "./coverage";
 import { listReviews, resolveReview } from "./reviews";
 
@@ -42,9 +43,16 @@ app.get("/api/products/:id", async (c) => {
 
 app.get("/api/coverage", async (c) => c.json(await getCoverage(c.env.DB)));
 
+app.get("/api/completion-ledger", async (c) => {
+  const parsed = validateCompletionLedger(new URL(c.req.url).searchParams);
+  if (!parsed.value) return c.json(errorBody("validation_error", parsed.error ?? "Invalid completion filters"), 400);
+  return c.json(await getCompletionLedger(c.env.DB, parsed.value));
+});
+
 app.get("/api/reviews", async (c) => {
   const status = c.req.query("status") ?? "open";
   const type = c.req.query("type") ?? "all";
+  const reviewId = c.req.query("id") ?? null;
   const page = Number(c.req.query("page") ?? 1);
   const pageSize = Number(c.req.query("pageSize") ?? 50);
   const statuses: ReviewStatus[] = ["open", "resolved", "dismissed"];
@@ -65,6 +73,7 @@ app.get("/api/reviews", async (c) => {
     || !Number.isInteger(pageSize)
     || pageSize < 1
     || pageSize > 100
+    || (reviewId !== null && (reviewId.length < 1 || reviewId.length > 200))
   ) {
     return c.json(errorBody("validation_error", "Invalid review filters"), 400);
   }
@@ -74,6 +83,7 @@ app.get("/api/reviews", async (c) => {
     type as ReviewType | "all",
     page,
     pageSize,
+    reviewId,
   ));
 });
 

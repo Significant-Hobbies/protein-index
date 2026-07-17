@@ -328,6 +328,7 @@ export default defineConfig({
     }),
   ],
   test: {
+    fileParallelism: false,
     include: ["test/**/*.worker.test.ts"],
     setupFiles: ["./test/setup-worker.ts"],
   },

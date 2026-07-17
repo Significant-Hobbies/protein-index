@@ -1,4 +1,5 @@
 import type { CoverageResponse } from "../shared/api";
+import { getCompletionSummaries } from "./completion";
 
 interface CatalogCountRow {
   products: number;
@@ -13,11 +14,6 @@ interface CatalogCountRow {
   verified_ingredients: number;
   marketed_protein: number;
   nutritionally_protein_dense: number;
-  terminal_unavailable_nutrition: number;
-  terminal_unavailable_ingredients: number;
-  outstanding_identity: number;
-  outstanding_nutrition: number;
-  outstanding_ingredients: number;
 }
 
 interface ExtractionCandidateCountRow {
@@ -49,7 +45,7 @@ function disconnected(manifestJson: string | null): string[] {
 }
 
 export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
-  const batch = await db.batch([
+  const [batch, completionAccounting] = await Promise.all([db.batch([
     db.prepare(`SELECT
       COUNT(*) AS products,
       SUM(CASE WHEN p.gtin IS NOT NULL THEN 1 ELSE 0 END) AS valid_gtin,
@@ -63,17 +59,9 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
       SUM(CASE WHEN i.status = 'verified' THEN 1 ELSE 0 END) AS verified_ingredients,
       SUM(CASE WHEN p.marketed_protein = 1 THEN 1 ELSE 0 END) AS marketed_protein,
       SUM(CASE WHEN p.nutritionally_protein_dense = 1 THEN 1 ELSE 0 END) AS nutritionally_protein_dense
-      ,SUM(CASE WHEN nutrition_outcome.outcome IN ('not_applicable', 'not_declared') THEN 1 ELSE 0 END) AS terminal_unavailable_nutrition
-      ,SUM(CASE WHEN ingredient_outcome.outcome IN ('not_applicable', 'not_declared') THEN 1 ELSE 0 END) AS terminal_unavailable_ingredients
-      ,SUM(CASE WHEN identity_outcome.product_id IS NULL THEN 1 ELSE 0 END) AS outstanding_identity
-      ,SUM(CASE WHEN COALESCE(n.status, 'missing') <> 'verified' AND nutrition_outcome.product_id IS NULL THEN 1 ELSE 0 END) AS outstanding_nutrition
-      ,SUM(CASE WHEN COALESCE(i.status, 'missing') <> 'verified' AND ingredient_outcome.product_id IS NULL THEN 1 ELSE 0 END) AS outstanding_ingredients
       FROM products p
       LEFT JOIN nutrition_facts n ON n.product_id = p.id
       LEFT JOIN ingredient_statements i ON i.product_id = p.id
-      LEFT JOIN evidence_outcomes identity_outcome ON identity_outcome.product_id = p.id AND identity_outcome.field_family = 'identity'
-      LEFT JOIN evidence_outcomes nutrition_outcome ON nutrition_outcome.product_id = p.id AND nutrition_outcome.field_family = 'nutrition'
-      LEFT JOIN evidence_outcomes ingredient_outcome ON ingredient_outcome.product_id = p.id AND ingredient_outcome.field_family = 'ingredients'
       WHERE p.is_active = 1`),
     db.prepare(`SELECT s.id, s.name, s.kind, r.status, r.completed_at, r.records_read,
       r.india_records, r.source_complete, r.manifest_json
@@ -85,15 +73,19 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
       FROM review_items r JOIN source_records s ON s.id = r.source_record_id
       WHERE r.type = 'nutrition_validation' AND r.product_id IS NOT NULL
         AND s.source_id = 'open_food_facts_robotoff'`),
-  ]);
+  ]), getCompletionSummaries(db)]);
   const counts = batch[0]?.results[0] as CatalogCountRow | undefined;
   const sourceRows = (batch[1]?.results ?? []) as SourceCoverageRow[];
   const extractionCounts = batch[2]?.results[0] as ExtractionCandidateCountRow | undefined;
   const disconnectedSources = [...new Set(sourceRows.flatMap((row) => disconnected(row.manifest_json)))];
   const sourceCoverageComplete = sourceRows.length > 0 && sourceRows.every((row) => row.status === "completed" && row.source_complete === 1);
-  const outstandingIdentity = counts?.outstanding_identity ?? 0;
-  const outstandingNutrition = counts?.outstanding_nutrition ?? 0;
-  const outstandingIngredients = counts?.outstanding_ingredients ?? 0;
+  const outstandingIdentity = completionAccounting.families.identity.outstanding;
+  const outstandingNutrition = completionAccounting.families.nutrition.outstanding;
+  const outstandingIngredients = completionAccounting.families.ingredients.outstanding;
+  const contradictions = Object.values(completionAccounting.families)
+    .reduce((total, family) => total + family.contradictions, 0);
+  const invariantHolds = Object.values(completionAccounting.families)
+    .every((family) => family.invariantHolds);
   return {
     catalog: {
       products: counts?.products ?? 0,
@@ -109,15 +101,20 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
       verifiedIngredients: counts?.verified_ingredients ?? 0,
       marketedProtein: counts?.marketed_protein ?? 0,
       nutritionallyProteinDense: counts?.nutritionally_protein_dense ?? 0,
-      terminalUnavailableNutrition: counts?.terminal_unavailable_nutrition ?? 0,
-      terminalUnavailableIngredients: counts?.terminal_unavailable_ingredients ?? 0,
+      terminalUnavailableNutrition: completionAccounting.families.nutrition.terminalUnavailable,
+      terminalUnavailableIngredients: completionAccounting.families.ingredients.terminalUnavailable,
     },
     completion: {
-      status: sourceCoverageComplete && outstandingIdentity === 0 && outstandingNutrition === 0 && outstandingIngredients === 0 ? "complete" : "incomplete",
+      status: sourceCoverageComplete && invariantHolds && contradictions === 0
+        && outstandingIdentity === 0 && outstandingNutrition === 0 && outstandingIngredients === 0
+        ? "complete" : "incomplete",
       sourceCoverageComplete,
       outstandingIdentity,
       outstandingNutrition,
       outstandingIngredients,
+      contradictions,
+      snapshotAt: completionAccounting.snapshotAt,
+      families: completionAccounting.families,
     },
     sources: sourceRows.map((row) => ({
       id: row.id,

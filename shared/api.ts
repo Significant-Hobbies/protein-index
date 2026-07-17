@@ -166,6 +166,9 @@ export interface CoverageResponse {
     outstandingIdentity: number;
     outstandingNutrition: number;
     outstandingIngredients: number;
+    contradictions: number;
+    snapshotAt: string | null;
+    families: Record<CompletionFamily, CompletionSummary>;
   };
   sources: Array<{
     id: string;
@@ -180,6 +183,72 @@ export interface CoverageResponse {
   }>;
   disconnectedSources: string[];
   claim: "configured_sources_only";
+}
+
+export type CompletionFamily = "identity" | "nutrition" | "ingredients";
+export type CompletionState = "verified" | "terminal_unavailable" | "outstanding";
+export type CompletionStateFilter = CompletionState | "all";
+export type CompletionLane =
+  | "evidence_inconsistent"
+  | "conflict_resolution"
+  | "review_ready"
+  | "structured_evidence_review"
+  | "label_evidence_review"
+  | "source_evidence_needed";
+export type CompletionLaneFilter = CompletionLane | "all";
+export type TerminalUnavailableOutcome = "not_applicable" | "not_declared";
+
+export interface CompletionSummary {
+  family: CompletionFamily;
+  activeProducts: number;
+  verified: number;
+  terminalUnavailable: number;
+  outstanding: number;
+  contradictions: number;
+  accounted: number;
+  invariantHolds: boolean;
+  lanes: Record<CompletionLane, number>;
+}
+
+export interface CompletionLedgerItem {
+  product: {
+    id: string;
+    gtin: string | null;
+    brand: string;
+    name: string;
+    category: ProductCategory;
+    imageUrl: string | null;
+  };
+  family: CompletionFamily;
+  state: CompletionState;
+  lane: CompletionLane | null;
+  fieldStatus: EvidenceStatus | null;
+  terminalOutcome: TerminalUnavailableOutcome | null;
+  labelUrl: string | null;
+  sourceUrl: string | null;
+  sourceId: string | null;
+  sourceRecordId: string | null;
+  evidenceObservedAt: string | null;
+  openCandidateCount: number;
+  openReviewCount: number;
+  primaryReviewId: string | null;
+}
+
+export interface CompletionLedgerFilters {
+  family: CompletionFamily;
+  state: CompletionStateFilter;
+  lane: CompletionLaneFilter;
+  q: string;
+  page: number;
+  pageSize: number;
+}
+
+export interface CompletionLedgerResponse {
+  items: CompletionLedgerItem[];
+  summary: CompletionSummary;
+  pagination: { page: number; pageSize: number; total: number; pages: number };
+  filters: CompletionLedgerFilters;
+  snapshotAt: string | null;
 }
 
 export interface HealthResponse {

@@ -178,6 +178,7 @@ must pass desktop/mobile verification.
 - 2026-07-17 — the validated adapter-v7 decision plan rebuilds all 12 affected lineages and adds one whole-wheat-bread supplemental: `review-0793ac6010da3d71f11d` → `review-e380c0d96d4e55bc7963`, `review-9c7ac1f9e044ed7bce6e` → `review-e1c5dcaa7a70bbf66c0b`, `review-6b5e8b66259669560d75` → `review-e22b9494cc7630dddaed`, `review-faa4134c08f801a2e6b1` → `review-85eb6ae94d0b52de26e2`, `review-ca0eeaed8172acd296f7` → `review-22fa92e7ed8d92627afa`, `review-8883bc8d43df33874d89` → `review-b05156f6793aadb55c99`, `review-da7916603d7a22ce5438` → `review-6890ec21567c9cf15f00`, `review-27b91f477250983ad924` → `review-2960e3aee8761e63892c`, `review-6fff7ea5a1fd804e4dae` → `review-8b280c8db601d8c6e65b`, `review-0be1624d0d7aff83b24d` → `review-68fb6b0243dc187d0f16`, `review-ab8f46a1be339c4367c4` → `review-0e178dc60b1a55a12791`, and `review-2a0863c88dd1d8bd4b99` → `review-24d15bfc4330572bed80`; supplemental `review-5bc43cc6a4badbbd2718` rejects the bread candidate. The 13 new bundles contain 243 decisions, including 23 v7 decisions (22 rejections and one verification), with two obsolete decisions omitted. They have no internal overlap or global overlap with the five surviving bundles `review-230fca7ea00663c6c05e`, `review-35df940b2a5dff4da6b0`, `review-e9a215051b2fe4662517`, `review-174cdb19d84d9fd99525`, and `review-75a54506b4d31f98265d`. Read-only production preflight found only two intentional changed-hash same-source supersessions in the replacement for `review-0793ac6010da3d71f11d`, with no exact duplicates or decision conflicts; production remains unchanged.
 - 2026-07-17 — the next dashboard candidate completed rendered desktop, tablet, and phone verification with independent nutrition/ingredient evidence filters, deterministic review-queue traversal, public label/source links, fuller product metadata, honest retailer/allergen empty states, 44 px controls, and corrected responsive card behavior. Local desktop and mobile Lighthouse runs score 100 for performance, accessibility, best practices, and SEO; keyboard navigation, live regions, zero console errors, and zero horizontal overflow were verified. The updated build is not yet deployed, so live post-deploy verification remains pending explicit release approval.
 - 2026-07-17 — truthful redundant nutrition evidence is implemented locally for exact duplicate labels: authority-100 all-field/basis matching, atomic review-only decisions, zero fact/observation/nutrient/outcome writes, drift deactivation and re-review, immutable bundle guards, and distinct operator/history UI. Local end-to-end replay proved one review moved from open to resolved while verified nutrition stayed at one; desktop and mobile Lighthouse accessibility, best-practices, SEO, and agentic-browsing scores remain 100. Migration `0008_redundant_evidence_decisions.sql` is local-only and production remains unchanged pending explicit release approval.
+- 2026-07-17 — a strict exhaustive completion ledger is implemented locally: every active product partitions exactly once per identity, nutrition, or ingredients into verified, terminal unavailable, or outstanding, with contradictions failing closed and deterministic evidence-action lanes. The 1,334-product local snapshot reconciles identity as 0 / 0 / 1,334, nutrition as 1 / 0 / 1,333, and ingredients as 0 / 0 / 1,334 (verified / terminal unavailable / outstanding), with zero contradictions and the accounting invariant holding for all three families. Responsive desktop/mobile worklists, exact review and product drill-downs, no horizontal overflow, zero console errors or warnings, and Lighthouse scores of 100 for accessibility, best practices, SEO, and agentic browsing were verified. Existing indexes support the set-based queries, so no new migration was added. Production remains unchanged at 17,628 active products, 55 verified nutrition facts, and 65 verified ingredient statements pending explicit release approval and live invariant checks.
 
 ## Products
 
@@ -217,6 +218,10 @@ must pass desktop/mobile verification.
   and anomaly validation
 - Explicit completion gate separating source exhaustion, structured data,
   label-image coverage, extraction candidates, and verified product coverage
+- Strict per-product completion ledger and bounded API with mutually exclusive
+  family states, fail-closed contradictions, deterministic evidence lanes,
+  search and pagination, exact review links, and responsive desktop/mobile
+  operator worklists
 - Checksummed richer-source backfill with exact barcode accounting, zero-failure
   publication guard, and resumable per-batch response evidence
 - Scheduled, identified, rate-limited Robotoff extraction across the complete
@@ -282,9 +287,11 @@ must pass desktop/mobile verification.
     validation; every publication must verify the live coverage delta and retain
     workflow diagnostics.
 15. Pending explicit release approval: apply the compatible production
-    migrations, deploy the browser-verified dashboard and redundant-evidence
-    code, then repeat live API, desktop/mobile visual, and accessibility
-    verification before calling the release shipped.
+    migrations, publish the exact adapter-v7 artifact and reviewed bundles in
+    the guarded order, deploy the browser-verified dashboard,
+    redundant-evidence, and completion-ledger code, then prove the live family
+    accounting invariants and repeat API, desktop/mobile visual, and
+    accessibility verification before calling the release shipped.
 16. Blocked data refresh: protected Cloudflare credentials are now configured,
     but pending migrations `0007_review_queue_indexes.sql` and
     `0008_redundant_evidence_decisions.sql` require an explicit production
@@ -358,3 +365,13 @@ must pass desktop/mobile verification.
     change. Source-check supplemental rejection bundle
     `review-5bc43cc6a4badbbd2718` against the explicit whole-wheat-bread per-100-g
     row before claiming any queue reduction.
+23. Persist exact product/source-bound extraction outcomes (candidate, no
+    prediction, rejected, and failed) plus current label-content hashes before
+    exposing attempt-status lanes; the current label-evidence lane intentionally
+    does not claim an extraction outcome.
+24. Replace mutable projected unavailable outcomes with immutable,
+    source/hash-bound not-declared and not-applicable decisions, then prove
+    contradiction handling and idempotent replay.
+25. Extend identity-resolution publication to write explicit terminal identity
+    outcomes. GTIN or catalog presence alone must not mark identity verified, so
+    the global completion gate is intentionally unreachable until this exists.

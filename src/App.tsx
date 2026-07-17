@@ -2,6 +2,14 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CatalogProduct,
   CatalogResponse,
+  CompletionFamily,
+  CompletionLane,
+  CompletionLaneFilter,
+  CompletionLedgerItem,
+  CompletionLedgerResponse,
+  CompletionState,
+  CompletionStateFilter,
+  CompletionSummary,
   CoverageResponse,
   HealthResponse,
   ProductDetailResponse,
@@ -25,6 +33,37 @@ export const initialFilters = {
   scope: "all",
   sort: "protein_density",
 };
+
+const COMPLETION_FAMILIES: Array<{ value: CompletionFamily; label: string }> = [
+  { value: "nutrition", label: "Nutrition" },
+  { value: "ingredients", label: "Ingredients" },
+  { value: "identity", label: "Identity" },
+];
+
+const COMPLETION_STATES: Array<{ value: CompletionState; label: string; help: string }> = [
+  { value: "verified", label: "Verified", help: "Current authority-100 evidence" },
+  { value: "terminal_unavailable", label: "Evidence-backed unavailable", help: "Not declared or not applicable" },
+  { value: "outstanding", label: "Outstanding", help: "Still needs a terminal evidence state" },
+];
+
+const COMPLETION_LANES: Array<{ value: CompletionLane; label: string }> = [
+  { value: "evidence_inconsistent", label: "Evidence inconsistent" },
+  { value: "conflict_resolution", label: "Resolve conflicts" },
+  { value: "review_ready", label: "Ready for review" },
+  { value: "structured_evidence_review", label: "Review structured evidence" },
+  { value: "label_evidence_review", label: "Inspect label evidence" },
+  { value: "source_evidence_needed", label: "Find source evidence" },
+];
+
+const initialCompletionFilters = {
+  family: "nutrition" as CompletionFamily,
+  state: "outstanding" as CompletionStateFilter,
+  lane: "all" as CompletionLaneFilter,
+  q: "",
+  page: 1,
+  pageSize: 50,
+};
+type CompletionUiFilters = typeof initialCompletionFilters;
 
 export function metricEvidenceLabel(status: EvidenceStatus): string {
   return status === "verified" ? "verified nutrition" : status === "unverified" ? "unverified nutrition" : `${status} nutrition`;
@@ -746,26 +785,195 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, s
   );
 }
 
-function Coverage({ data, loading, error }: { data: CoverageResponse | null; loading: boolean; error: string | null }) {
+function completionFamilyLabel(family: CompletionFamily): string {
+  return COMPLETION_FAMILIES.find(({ value }) => value === family)?.label ?? family;
+}
+
+function completionStateLabel(state: CompletionState): string {
+  return COMPLETION_STATES.find(({ value }) => value === state)?.label ?? state.replaceAll("_", " ");
+}
+
+function completionLaneLabel(lane: CompletionLane | null): string {
+  if (!lane) return "Terminal evidence recorded";
+  return COMPLETION_LANES.find(({ value }) => value === lane)?.label ?? lane.replaceAll("_", " ");
+}
+
+function completionEvidenceLabel(item: CompletionLedgerItem): string {
+  if (item.terminalOutcome) return item.terminalOutcome.replaceAll("_", " ");
+  if (item.fieldStatus) return `${item.fieldStatus} ${item.family}`;
+  return "No selected field evidence";
+}
+
+function completionEvidenceSourceLabel(item: CompletionLedgerItem): string {
+  const observed = item.evidenceObservedAt
+    ? ` · ${new Date(item.evidenceObservedAt).toLocaleDateString("en-IN")}`
+    : "";
+  if (item.sourceId) return `${item.sourceId.replaceAll("_", " ")}${observed}`;
+  if (item.sourceUrl) return `Evidence link${observed}`;
+  return "No selected source";
+}
+
+function CompletionEvidenceLinks({ item }: { item: CompletionLedgerItem }) {
+  const labelUrl = publicEvidenceUrl(item.labelUrl);
+  const sourceUrl = publicEvidenceUrl(item.sourceUrl);
+  const distinctSourceUrl = sourceUrl && sourceUrl !== labelUrl ? sourceUrl : null;
+  if (!labelUrl && !distinctSourceUrl) return <span>No public evidence link</span>;
+  return (
+    <>
+      {labelUrl && <a href={labelUrl} target="_blank" rel="noreferrer" aria-label={`Open ${item.family} label evidence for ${item.product.name}`}>Label ↗</a>}
+      {distinctSourceUrl && <a href={distinctSourceUrl} target="_blank" rel="noreferrer" aria-label={`Open source evidence for ${item.product.name}`}>Source ↗</a>}
+    </>
+  );
+}
+
+function CompletionDesktopRows({ items, onOpenProduct, onOpenReview }: {
+  items: CompletionLedgerItem[];
+  onOpenProduct: (id: string) => void;
+  onOpenReview: (item: CompletionLedgerItem) => void;
+}) {
+  return (
+    <div className="completion-desktop">
+      <table>
+        <thead><tr><th scope="col">Product</th><th scope="col">Completion state</th><th scope="col">Evidence state</th><th scope="col">Open work</th><th scope="col">Evidence</th><th scope="col">Action</th></tr></thead>
+        <tbody>{items.map((item) => <tr key={item.product.id}>
+          <td className="completion-product"><button onClick={() => onOpenProduct(item.product.id)}><ProductVisual product={item.product} /><span><strong>{item.product.name}</strong><span>{item.product.brand}</span><small>GTIN {item.product.gtin ?? "not recorded"} · {item.product.category.replaceAll("_", " ")}</small></span></button></td>
+          <td className="completion-status"><span className={`completion-state completion-state-${item.state}`}>{completionStateLabel(item.state)}</span><strong className="completion-lane">{completionLaneLabel(item.lane)}</strong></td>
+          <td className="completion-status"><strong>{completionEvidenceLabel(item)}</strong><small>{completionEvidenceSourceLabel(item)}</small></td>
+          <td><div className="completion-counts"><span>{item.openCandidateCount.toLocaleString("en-IN")} candidate{item.openCandidateCount === 1 ? "" : "s"}</span><span>{item.openReviewCount.toLocaleString("en-IN")} review{item.openReviewCount === 1 ? "" : "s"}</span></div></td>
+          <td className="completion-evidence"><CompletionEvidenceLinks item={item} /></td>
+          <td><div className="completion-actions">{item.primaryReviewId && <button onClick={() => onOpenReview(item)} aria-label={`Open evidence queue for ${item.product.name}`}>Open queue</button>}<button onClick={() => onOpenProduct(item.product.id)}>Inspect product</button></div></td>
+        </tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function CompletionMobileRows({ items, onOpenProduct, onOpenReview }: {
+  items: CompletionLedgerItem[];
+  onOpenProduct: (id: string) => void;
+  onOpenReview: (item: CompletionLedgerItem) => void;
+}) {
+  return (
+    <div className="completion-mobile" role="list" aria-label="Completion worklist products">
+      {items.map((item) => <article className="completion-card" role="listitem" key={item.product.id}>
+        <div className="completion-card-head"><button className="completion-card-product" onClick={() => onOpenProduct(item.product.id)}><strong>{item.product.name}</strong><span>{item.product.brand}</span><small>GTIN {item.product.gtin ?? "not recorded"} · {item.product.category.replaceAll("_", " ")}</small></button><span className={`completion-state completion-state-${item.state}`}>{completionStateLabel(item.state)}</span></div>
+        <div className="completion-card-body"><div className="completion-status"><strong className="completion-lane">{completionLaneLabel(item.lane)}</strong><small>{completionEvidenceLabel(item)}</small></div><div className="completion-counts"><span>{item.openCandidateCount} candidate{item.openCandidateCount === 1 ? "" : "s"}</span><span>{item.openReviewCount} review{item.openReviewCount === 1 ? "" : "s"}</span></div><div className="completion-evidence"><CompletionEvidenceLinks item={item} /></div><div className="completion-actions">{item.primaryReviewId && <button onClick={() => onOpenReview(item)}>Open queue</button>}<button onClick={() => onOpenProduct(item.product.id)}>Inspect product</button></div></div>
+      </article>)}
+    </div>
+  );
+}
+
+function CompletionWorklist({ data, fallbackSummary, fallbackSnapshotAt, loading, error, filters, focusRequest, onFamily, onState, onLane, onQuery, onPage, onRetry, onOpenProduct, onOpenReview }: {
+  data: CompletionLedgerResponse | null;
+  fallbackSummary: CompletionSummary;
+  fallbackSnapshotAt: string | null;
+  loading: boolean;
+  error: string | null;
+  filters: CompletionUiFilters;
+  focusRequest: number;
+  onFamily: (family: CompletionFamily) => void;
+  onState: (state: CompletionState) => void;
+  onLane: (lane: CompletionLaneFilter) => void;
+  onQuery: (query: string) => void;
+  onPage: (page: number) => void;
+  onRetry: () => void;
+  onOpenProduct: (id: string) => void;
+  onOpenReview: (item: CompletionLedgerItem) => void;
+}) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (focusRequest > 0) headingRef.current?.focus();
+  }, [focusRequest]);
+  const summary = data?.summary ?? fallbackSummary;
+  const familyLabel = completionFamilyLabel(filters.family);
+  const snapshotAt = data?.snapshotAt ?? fallbackSnapshotAt;
+  const snapshotLabel = snapshotAt && Number.isFinite(Date.parse(snapshotAt))
+    ? new Date(snapshotAt).toLocaleString("en-IN")
+    : "No completed source run recorded";
+  return (
+    <section className="completion-worklist" aria-labelledby="completion-worklist-heading" aria-busy={loading}>
+      <div className="completion-head">
+        <div><p className="eyebrow">Product-by-product completion</p><h2 id="completion-worklist-heading" ref={headingRef} tabIndex={-1}>{familyLabel} evidence worklist</h2><p>Every active product appears in exactly one completion state. Outstanding rows are routed by the strongest current next action without inferring facts from missing data.</p></div>
+        <div className="completion-snapshot"><span>Latest completed source run</span><strong>{snapshotLabel}</strong></div>
+      </div>
+
+      <div className="completion-controls">
+        <fieldset className="completion-control-group"><legend>Evidence family</legend><div className="completion-segments" role="group" aria-label="Evidence family">
+          {COMPLETION_FAMILIES.map(({ value, label }) => <button key={value} aria-pressed={filters.family === value} onClick={() => onFamily(value)}>{label}</button>)}
+        </div></fieldset>
+      </div>
+
+      <>
+        <div className="completion-equation" aria-label={`${familyLabel} completion accounting`}>
+          {COMPLETION_STATES.map(({ value, label, help }) => {
+            const count = value === "verified" ? summary.verified : value === "terminal_unavailable" ? summary.terminalUnavailable : summary.outstanding;
+            return <button key={value} aria-pressed={filters.state === value} onClick={() => onState(value)}><span>{label}</span><strong>{count.toLocaleString("en-IN")}</strong><small>{help}</small></button>;
+          })}
+          <div className="completion-equation-total"><span>Active products</span><strong>{summary.activeProducts.toLocaleString("en-IN")}</strong><small>One {familyLabel.toLowerCase()} state each</small></div>
+        </div>
+        <p className={`completion-invariant${summary.invariantHolds && summary.contradictions === 0 ? "" : " completion-invariant-invalid"}`}><strong>{summary.verified.toLocaleString("en-IN")} verified + {summary.terminalUnavailable.toLocaleString("en-IN")} unavailable + {summary.outstanding.toLocaleString("en-IN")} outstanding = {summary.accounted.toLocaleString("en-IN")} accounted</strong><span>{summary.invariantHolds && summary.contradictions === 0 ? "Exact active-catalog partition" : `${summary.contradictions.toLocaleString("en-IN")} evidence contradiction${summary.contradictions === 1 ? "" : "s"}; completion remains failed closed`}</span></p>
+      </>
+
+      {filters.state === "outstanding" && <fieldset className="completion-control-group"><legend>Next-action lane</legend><div className="completion-segments" role="group" aria-label="Next-action lane">
+        <button aria-pressed={filters.lane === "all"} onClick={() => onLane("all")}>All lanes · {summary.outstanding.toLocaleString("en-IN")}</button>
+        {COMPLETION_LANES.map(({ value, label }) => <button key={value} aria-pressed={filters.lane === value} disabled={summary.lanes[value] === 0 && filters.lane !== value} onClick={() => onLane(value)}>{label} · {summary.lanes[value].toLocaleString("en-IN")}</button>)}
+      </div></fieldset>}
+
+      <div className="completion-toolbar">
+        <label htmlFor="completion-search">Search this evidence family<input id="completion-search" name="completionSearch" type="search" value={filters.q} onChange={(event) => onQuery(event.target.value)} placeholder="Brand, product, or GTIN" /></label>
+        <div className="completion-toolbar-meta" aria-live="polite">{data ? <><strong>{data.pagination.total.toLocaleString("en-IN")}</strong> matching product{data.pagination.total === 1 ? "" : "s"}</> : "Waiting for ledger totals"}</div>
+      </div>
+
+      {error && <div className="error-state" role="alert"><strong>Completion ledger unavailable</strong><span>{error}</span><button onClick={onRetry}>Try again</button></div>}
+      {!data && loading && <div className="loading completion-loading" role="status"><span className="loader" />Building the exact {familyLabel.toLowerCase()} worklist…</div>}
+      {data && <div className="completion-results">
+        {data.items.length === 0 && !error ? <div className="empty completion-empty"><span className="empty-mark" aria-hidden="true">0</span><strong>No products match this ledger view.</strong><span>Choose another state, action lane, or search term. A zero count does not erase products from the family equation.</span></div> : <><CompletionDesktopRows items={data.items} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} /><CompletionMobileRows items={data.items} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} /></>}
+        {data.pagination.pages > 1 && <nav className="pagination" aria-label="Completion worklist pages"><button disabled={data.pagination.page <= 1 || loading} onClick={() => onPage(data.pagination.page - 1)}>← Previous</button><span>Page <strong>{data.pagination.page}</strong> of {data.pagination.pages.toLocaleString("en-IN")}</span><button disabled={data.pagination.page >= data.pagination.pages || loading} onClick={() => onPage(data.pagination.page + 1)}>Next →</button></nav>}
+      </div>}
+    </section>
+  );
+}
+
+function Coverage({ data, loading, error, completion, completionLoading, completionError, completionFilters, completionFocusRequest, onCompletionFamily, onCompletionState, onCompletionLane, onCompletionQuery, onCompletionPage, onCompletionRetry, onCompletionDrillDown, onOpenProduct, onOpenReview }: {
+  data: CoverageResponse | null;
+  loading: boolean;
+  error: string | null;
+  completion: CompletionLedgerResponse | null;
+  completionLoading: boolean;
+  completionError: string | null;
+  completionFilters: CompletionUiFilters;
+  completionFocusRequest: number;
+  onCompletionFamily: (family: CompletionFamily) => void;
+  onCompletionState: (state: CompletionState) => void;
+  onCompletionLane: (lane: CompletionLaneFilter) => void;
+  onCompletionQuery: (query: string) => void;
+  onCompletionPage: (page: number) => void;
+  onCompletionRetry: () => void;
+  onCompletionDrillDown: (family: CompletionFamily, state: CompletionState, lane?: CompletionLaneFilter) => void;
+  onOpenProduct: (id: string) => void;
+  onOpenReview: (item: CompletionLedgerItem) => void;
+}) {
   if (loading) return <div className="loading" role="status">Reconciling coverage…</div>;
   if (error) return <div className="error-state" role="alert">{error}</div>;
   if (!data) return null;
   const cards = [
-    ["Catalog products", data.catalog.products],
-    ["Valid GTIN", data.catalog.validGtin],
-    ["Structured nutrition", data.catalog.structuredNutrition],
-    ["Nutrition label images", data.catalog.nutritionLabelImages],
-    ["Extraction candidates", data.catalog.extractionCandidates],
-    ["Verified nutrition", data.catalog.verifiedNutrition],
-    ["Verified ingredients", data.catalog.verifiedIngredients],
-    ["Outstanding nutrition", data.completion.outstandingNutrition],
-    ["Outstanding ingredients", data.completion.outstandingIngredients],
+    { label: "Catalog products", value: data.catalog.products },
+    { label: "Valid GTIN", value: data.catalog.validGtin },
+    { label: "Structured nutrition", value: data.catalog.structuredNutrition },
+    { label: "Nutrition label images", value: data.catalog.nutritionLabelImages },
+    { label: "Review-ready nutrition", value: data.completion.families.nutrition.lanes.review_ready, action: () => onCompletionDrillDown("nutrition", "outstanding", "review_ready") },
+    { label: "Verified nutrition", value: data.completion.families.nutrition.verified, action: () => onCompletionDrillDown("nutrition", "verified") },
+    { label: "Verified ingredients", value: data.completion.families.ingredients.verified, action: () => onCompletionDrillDown("ingredients", "verified") },
+    { label: "Outstanding identity", value: data.completion.outstandingIdentity, action: () => onCompletionDrillDown("identity", "outstanding") },
+    { label: "Outstanding nutrition", value: data.completion.outstandingNutrition, action: () => onCompletionDrillDown("nutrition", "outstanding") },
+    { label: "Outstanding ingredients", value: data.completion.outstandingIngredients, action: () => onCompletionDrillDown("ingredients", "outstanding") },
   ];
   return (
     <div className="coverage-page">
       <div className={`coverage-gate coverage-gate-${data.completion.status}`}><div><span>Data completion gate</span><strong>{data.completion.status}</strong></div><p>{data.completion.status === "complete" ? "Every active product has terminal verified evidence." : `${data.completion.outstandingNutrition.toLocaleString("en-IN")} nutrition, ${data.completion.outstandingIngredients.toLocaleString("en-IN")} ingredient, and ${data.completion.outstandingIdentity.toLocaleString("en-IN")} identity records still need terminal evidence.`}</p></div>
       <div className="coverage-warning"><strong>Coverage claim: configured sources only.</strong><span>Source exhaustion and verified product completeness are separate gates.</span></div>
-      <div className="coverage-grid">{cards.map(([label, value]) => <div key={String(label)}><span>{label}</span><strong>{Number(value).toLocaleString("en-IN")}</strong></div>)}</div>
+      <div className="coverage-grid">{cards.map(({ label, value, action }) => action ? <button key={label} onClick={action}><span>{label}</span><strong>{value.toLocaleString("en-IN")}</strong><small>View product worklist →</small></button> : <div key={label}><span>{label}</span><strong>{value.toLocaleString("en-IN")}</strong></div>)}</div>
+      <CompletionWorklist data={completion} fallbackSummary={data.completion.families[completionFilters.family]} fallbackSnapshotAt={data.completion.snapshotAt} loading={completionLoading} error={completionError} filters={completionFilters} focusRequest={completionFocusRequest} onFamily={onCompletionFamily} onState={onCompletionState} onLane={onCompletionLane} onQuery={onCompletionQuery} onPage={onCompletionPage} onRetry={onCompletionRetry} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} />
       <section className="panel"><h2>Source ledger</h2>{data.sources.map((source) => <div className="source-row" key={source.id}><div><strong>{source.name}</strong><span>{source.kind}</span></div><span className="tag">{source.sourceComplete ? "source complete" : "source incomplete"}</span><div><strong>{source.indiaRecords?.toLocaleString("en-IN") ?? "—"}</strong><span>India records</span></div><div><strong>{source.latestRunStatus ?? "never"}</strong><span>{source.latestRunAt ? new Date(source.latestRunAt).toLocaleString("en-IN") : "no completed run"}</span></div></div>)}</section>
       <section className="panel"><h2>Disconnected discovery sources</h2><div className="badge-row">{data.disconnectedSources.map((source) => <span className="tag" key={source}>{source.replaceAll("_", " ")}</span>)}</div></section>
     </div>
@@ -788,8 +996,14 @@ export function App() {
   const [reviewType, setReviewType] = useState<ReviewTypeFilter>("all");
   const [reviewStatus, setReviewStatus] = useState<ReviewStatus>("open");
   const [reviewPage, setReviewPage] = useState(1);
+  const [reviewId, setReviewId] = useState<string | null>(null);
   const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
   const [coverageState, setCoverageState] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
+  const [completion, setCompletion] = useState<CompletionLedgerResponse | null>(null);
+  const [completionFilters, setCompletionFilters] = useState<CompletionUiFilters>(initialCompletionFilters);
+  const [completionState, setCompletionState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
+  const [completionFocusRequest, setCompletionFocusRequest] = useState(0);
+  const deferredCompletionQuery = useDeferredValue(completionFilters.q);
   const isPublic = typeof window !== "undefined" && !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
 
   const params = useMemo(() => {
@@ -797,12 +1011,25 @@ export function App() {
     return value;
   }, [filters, deferredQuery, page]);
 
-  const reviewParams = useMemo(() => new URLSearchParams({
-    status: reviewStatus,
-    type: reviewType,
-    page: String(reviewPage),
-    pageSize: "50",
-  }), [reviewStatus, reviewType, reviewPage]);
+  const reviewParams = useMemo(() => {
+    const value = new URLSearchParams({
+      status: reviewStatus,
+      type: reviewType,
+      page: String(reviewPage),
+      pageSize: "50",
+    });
+    if (reviewId) value.set("id", reviewId);
+    return value;
+  }, [reviewStatus, reviewType, reviewPage, reviewId]);
+
+  const completionParams = useMemo(() => new URLSearchParams({
+    family: completionFilters.family,
+    state: completionFilters.state,
+    lane: completionFilters.state === "outstanding" ? completionFilters.lane : "all",
+    q: deferredCompletionQuery,
+    page: String(completionFilters.page),
+    pageSize: String(completionFilters.pageSize),
+  }), [completionFilters.family, completionFilters.state, completionFilters.lane, completionFilters.page, completionFilters.pageSize, deferredCompletionQuery]);
 
   const updateFilters = (next: Partial<typeof initialFilters>) => {
     setPage(1);
@@ -835,6 +1062,21 @@ export function App() {
     loadCoverage();
     api.health().then(setHealth).catch(() => setHealth(null));
   }, []);
+
+  const loadCompletion = () => {
+    const controller = new AbortController();
+    setCompletionState({ loading: true, error: null });
+    api.completionLedger(completionParams, controller.signal)
+      .then((result) => { setCompletion(result); setCompletionState({ loading: false, error: null }); })
+      .catch((error: unknown) => { if (error instanceof DOMException && error.name === "AbortError") return; setCompletion(null); setCompletionState({ loading: false, error: error instanceof Error ? error.message : String(error) }); });
+    return controller;
+  };
+
+  useEffect(() => {
+    if (tab !== "coverage") return;
+    const controller = loadCompletion();
+    return () => controller.abort();
+  }, [tab, completionParams]);
 
   useEffect(() => {
     if (!selectedId) { setDetail(null); return; }
@@ -870,13 +1112,46 @@ export function App() {
     if (selectedId === item.productId && selectedId) api.product(selectedId).then(setDetail);
   };
 
+  const changeCompletionFamily = (family: CompletionFamily) => {
+    setCompletion(null);
+    setCompletionFilters((current) => ({ ...current, family, lane: "all", page: 1 }));
+  };
+  const changeCompletionState = (state: CompletionState) => {
+    setCompletion(null);
+    setCompletionFilters((current) => ({ ...current, state, lane: "all", page: 1 }));
+  };
+  const changeCompletionLane = (lane: CompletionLaneFilter) => {
+    setCompletion(null);
+    setCompletionFilters((current) => ({ ...current, state: "outstanding", lane, page: 1 }));
+  };
+  const changeCompletionQuery = (q: string) => {
+    setCompletionFilters((current) => ({ ...current, q, page: 1 }));
+  };
+  const changeCompletionPage = (completionPage: number) => {
+    setCompletion(null);
+    setCompletionFilters((current) => ({ ...current, page: completionPage }));
+    setCompletionFocusRequest((current) => current + 1);
+  };
+  const drillIntoCompletion = (family: CompletionFamily, state: CompletionState, lane: CompletionLaneFilter = "all") => {
+    setCompletion(null);
+    setCompletionFilters((current) => ({ ...current, family, state, lane: state === "outstanding" ? lane : "all", q: "", page: 1 }));
+    setCompletionFocusRequest((current) => current + 1);
+  };
+  const openCompletionReview = (item: CompletionLedgerItem) => {
+    setReviewStatus("open");
+    setReviewType("all");
+    setReviewPage(1);
+    setReviewId(item.primaryReviewId);
+    setTab("reviews");
+  };
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to catalog content</a>
       <header className="topbar">
         <button className="brand-home" onClick={() => setTab("catalog")}><span className="brand-mark">PI</span><span><small>Indian food evidence</small><strong>Protein Index</strong></span></button>
         <nav aria-label="Primary navigation">
-          {(["catalog", "coverage", "reviews"] as const).map((item) => <button key={item} aria-pressed={tab === item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item === "catalog" ? "Catalog" : item === "coverage" ? "Coverage" : "Evidence queue"}{item === "reviews" && reviews?.counts.open ? <b>{reviews.counts.open}</b> : null}</button>)}
+          {(["catalog", "coverage", "reviews"] as const).map((item) => <button key={item} aria-pressed={tab === item} className={tab === item ? "active" : ""} onClick={() => { if (item === "reviews") setReviewId(null); setTab(item); }}>{item === "catalog" ? "Catalog" : item === "coverage" ? "Coverage" : "Evidence queue"}{item === "reviews" && reviews?.counts.open ? <b>{reviews.counts.open}</b> : null}</button>)}
         </nav>
         <div className="source-pill"><i />{health?.latestPublishedAt ? `Evidence updated ${new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(new Date(health.latestPublishedAt))}` : "Evidence catalog"}</div>
       </header>
@@ -913,8 +1188,8 @@ export function App() {
             {catalog && !catalogState.loading && !catalogState.error && <CatalogTable data={catalog} onOpen={setSelectedId} onExplore={showDiscovery} page={page} onPage={setPage} />}
           </>
         )}
-        {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h1>Evidence review queue</h1><p>{isPublic ? "Inspect unresolved evidence and decision history. Production decisions remain read-only until operator authentication is in place." : "Resolve conflicts without discarding the original source record."}</p></section><Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} typeFilter={reviewType} statusFilter={reviewStatus} page={reviewPage} onType={(type) => { setReviewPage(1); setReviewType(type); }} onStatus={(status) => { setReviewPage(1); setReviewStatus(status); }} onPage={setReviewPage} readOnly={isPublic} /></>}
-        {tab === "coverage" && <><section className="page-head"><p className="eyebrow">No fake completeness claims</p><h1>Coverage ledger</h1><p>Exhaustion is proved per configured source, with disconnected sources left visible.</p></section><Coverage data={coverage} loading={coverageState.loading} error={coverageState.error} /></>}
+        {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h1>Evidence review queue</h1><p>{isPublic ? "Inspect unresolved evidence and decision history. Production decisions remain read-only until operator authentication is in place." : "Resolve conflicts without discarding the original source record."}</p></section>{reviewId && <div className="read-only-notice"><strong>Focused review</strong><span>Showing the exact ledger-linked evidence item.</span><button className="ghost" onClick={() => setReviewId(null)}>Return to full queue</button></div>}<Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} typeFilter={reviewType} statusFilter={reviewStatus} page={reviewPage} onType={(type) => { setReviewId(null); setReviewPage(1); setReviewType(type); }} onStatus={(status) => { setReviewId(null); setReviewPage(1); setReviewStatus(status); }} onPage={setReviewPage} readOnly={isPublic} /></>}
+        {tab === "coverage" && <><section className="page-head"><p className="eyebrow">No fake completeness claims</p><h1>Coverage ledger</h1><p>Exhaustion is proved per configured source, with every active product reachable through an exact evidence worklist.</p></section><Coverage data={coverage} loading={coverageState.loading} error={coverageState.error} completion={completion} completionLoading={completionState.loading} completionError={completionState.error} completionFilters={completionFilters} completionFocusRequest={completionFocusRequest} onCompletionFamily={changeCompletionFamily} onCompletionState={changeCompletionState} onCompletionLane={changeCompletionLane} onCompletionQuery={changeCompletionQuery} onCompletionPage={changeCompletionPage} onCompletionRetry={loadCompletion} onCompletionDrillDown={drillIntoCompletion} onOpenProduct={setSelectedId} onOpenReview={openCompletionReview} /></>}
       </main>
       <footer><span>Protein Index</span><p>Evidence before rankings. Configured-source coverage, never a claim of the whole Indian market.</p><button onClick={() => setTab("coverage")}>Read the coverage ledger</button></footer>
       {selectedId && <ProductDrawer detail={detail} loading={detailState.loading} error={detailState.error} onClose={() => setSelectedId(null)} />}
