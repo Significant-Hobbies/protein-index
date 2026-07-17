@@ -173,6 +173,7 @@ must pass desktop/mobile verification.
 - 2026-07-17 — replay-backed serving-size audit proved adapter v6 unsafe to publish: a `714 g` OCR serving was trusted over a 144 g ghee pack and produced 17.65 kcal per 100 g instead of 900, while a cashew serving candidate produced a physically impossible 1,321.43 kcal per 100 g. Thirty-one retained serving entities also disagreed between structured value and visible text. Adapter v6 and artifacts `8396363821` and `8395774354` are superseded and must not be published.
 - 2026-07-17 — local adapter-v7 hardening now reconciles serving value and text against valid catalog context, ignores implausible label servings above a known pack or more than ten times the catalog serving, includes serving confidence in candidate confidence, and rejects energy above the physical 900 kcal-per-100-g ceiling. Exact offline replay restored all 5,944 responses with zero requests and reconciled them to 1,586 candidate, 806 no-prediction, 3,552 rejected, and zero failed outcomes. Against v5, 232 prediction records across 207 GTINs change (98 new candidates, 29 removed candidates, 96 changed candidates, and nine content-only changes); the ghee candidate returns exactly to the v5 900-kcal hash, the impossible cashew candidate is rejected, and 24 source records referenced by active v5 decisions require drift review after an official v7 artifact. No production data or verified coverage changed.
 - 2026-07-17 — local review of those 24 unique drifted source records found 18 semantically unchanged rejection decisions that can be rebound to v7, two obsolete decisions to omit because no candidate remains, three changed candidates requiring fresh rejection, and one corrected Mr Makhana candidate requiring fresh verification; no image blocker remains. A separate whole-wheat-bread label explicitly declares 253 kcal, 10 g protein, 49 g carbohydrate, 11 g sugar, 2 g fat, 0.3 g saturated fat, 10 g fibre, and 425 mg sodium per 100 g, so its mis-scaled 766.67-kcal serving candidate requires fresh rejection. Exact decision bundles still wait for the official v7 artifact hashes, and production remains unchanged.
+- 2026-07-17 — official adapter-v7 nutrition run `29554006451` on commit `b191958c3b76773fdfbf315fa20fc8e35050825b` restored the exact adapter-v6 response cohort and reconciled all 5,944 barcodes to 1,586 candidate, 806 no-prediction, 3,552 rejected, and zero failed outcomes. Artifact `8396783388` has immutable digest `7193f3845e2006bd3095fcfa093054033223c10555020649d32a5a4eababa2ff`, size 79,034,802 bytes, and all 5,950 checksums. Automatic publication run `29554063920` validated every checksum, then failed closed on pending remote D1 migration `0007_review_queue_indexes.sql` before import or live verification; production and verified coverage remain unchanged.
 
 ## Products
 
@@ -281,13 +282,12 @@ must pass desktop/mobile verification.
     failed closed before import or write; earlier runs `29449999090`,
     `29474290721`, and `29495130626` remain durable evidence of the prior empty
     credential state.
-17. Generate and checksum an official adapter-v7 nutrition artifact from the
-    same exact source snapshot and restored response cohort; do not publish the
-    superseded adapter-v5 artifact `8395774354` or adapter-v6 artifact
-    `8396363821`. Drift-audit every retained decision against the official v7
-    source content; rebind 18 rejections, omit two non-candidates, freshly reject
-    three changed candidates, and freshly verify Mr Makhana against the official
-    hashes before any publication. Freshly reject the separate whole-wheat-bread
+17. Use official adapter-v7 artifact `8396783388` from run `29554006451` to
+    build and checksum exact decision bundles; do not publish the superseded
+    adapter-v5 artifact `8395774354` or adapter-v6 artifact `8396363821`. Rebind
+    18 rejections, omit two non-candidates, freshly reject three changed
+    candidates, and freshly verify Mr Makhana against the official v7 hashes
+    before any publication. Freshly reject the separate whole-wheat-bread
     serving candidate against its explicit per-100-g label row.
     After pending production migration `0007_review_queue_indexes.sql` is
     explicitly approved, source-check and publish the surviving liquid bundles,
