@@ -2,6 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import type { CatalogResponse, CoverageResponse, HealthResponse, ProductDetailResponse, ReviewResponse } from "../shared/api";
 import { canonicalJson, nutritionCandidateFromEvidence, nutritionCandidateHash } from "../shared/evidence-decisions";
+import { ingredientCandidateFromEvidence, ingredientCandidateHash } from "../shared/ingredient-evidence";
 
 const worker = exports.default;
 
@@ -130,6 +131,148 @@ function robotoffEvidence(barcode: string, nutritionPer100g: Record<string, numb
       },
     },
   };
+}
+
+async function attachExactExtraction(
+  review: { reviewId: string; productId: string; sourceRecordId: string },
+  evidence: unknown,
+  fieldFamily: "nutrition" | "ingredients",
+): Promise<{ extractionAttemptId: string; labelAssetId: string }> {
+  const context = await env.DB.prepare(`SELECT p.gtin, s.source_id,
+    s.content_hash AS candidate_content_hash, s.first_seen_run_id, run.input_hash
+    FROM source_records s
+    JOIN products p ON p.id = s.product_id
+    JOIN ingestion_runs run ON run.id = s.first_seen_run_id
+    WHERE s.id = ? AND s.product_id = ?`)
+    .bind(review.sourceRecordId, review.productId)
+    .first<{
+      gtin: string;
+      source_id: string;
+      candidate_content_hash: string;
+      first_seen_run_id: string;
+      input_hash: string;
+    }>();
+  const subject = await env.DB.prepare(`SELECT id, source_record_id, content_hash
+    FROM source_records
+    WHERE product_id = ? AND id <> ? AND length(content_hash) = 64
+    ORDER BY id LIMIT 1`)
+    .bind(review.productId, review.sourceRecordId)
+    .first<{ id: string; source_record_id: string; content_hash: string }>();
+  if (!context?.input_hash || !subject) throw new Error("Expected exact extraction source context");
+  let candidateHash: string;
+  let candidateMeta: { modelName: string; modelVersion: string; imageId: string; imageUrl: string };
+  if (fieldFamily === "nutrition") {
+    const candidate = nutritionCandidateFromEvidence(evidence, context.gtin);
+    if (!candidate) throw new Error("Expected exact nutrition extraction candidate");
+    candidateHash = await nutritionCandidateHash(candidate);
+    candidateMeta = candidate;
+  } else {
+    const candidate = ingredientCandidateFromEvidence(evidence, context.gtin);
+    if (!candidate) throw new Error("Expected exact ingredient extraction candidate");
+    candidateHash = await ingredientCandidateHash(candidate);
+    candidateMeta = candidate;
+  }
+  const extractionAttemptId = `xat_${candidateHash.slice(0, 24)}`;
+  const labelAssetId = `lbl_${candidateHash.slice(24, 48)}`;
+  const extractionRunId = `xrun_${candidateHash.slice(0, 24)}`;
+  const extractionIngestionRunId = `${extractionRunId}_ingestion`;
+  const adapterVersion = fieldFamily === "nutrition" ? "robotoff-api-v8" : "robotoff-ingredients-api-v3";
+  const labelContentSha256 = "6".repeat(64);
+  const observedAt = "2026-07-17T00:00:00.000Z";
+  const details = (structuredClone(evidence) as { details: Record<string, unknown> }).details;
+  details.candidateHash = candidateHash;
+  details.extractionAttemptId = extractionAttemptId;
+  details.labelAssetId = labelAssetId;
+  details.labelContentSha256 = labelContentSha256;
+
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO ingestion_runs
+      (id, source_id, adapter_version, mode, input_identifier, input_hash,
+       records_read, india_records, staged_records, invalid_records, duplicate_records,
+       terminal_evidence, source_complete, market_complete, status, started_at, completed_at,
+       manifest_json)
+      VALUES (?, ?, ?, 'sample', ?, ?, 1, 1, 1, 0, 0,
+        'end_of_file', 1, 0, 'completed', ?, ?, '{}')`)
+      .bind(
+        extractionIngestionRunId,
+        context.source_id,
+        adapterVersion,
+        `exact-extraction:${candidateHash}`,
+        candidateHash,
+        observedAt,
+        observedAt,
+      ),
+    env.DB.prepare(`INSERT INTO extraction_runs
+      (id, ingestion_run_id, field_family, request_schema_hash, artifact_digest,
+       adapter_version, model_name, model_version, parent_source_run_id,
+       parent_source_input_hash, repository, workflow, branch, head_sha,
+       source_complete, status, started_at, completed_at, accepted_at, manifest_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, 'owner/protein-index', 'extract-robotoff',
+        'main', ?, 1, 'accepted', ?, ?, ?, '{}')`)
+      .bind(
+        extractionRunId,
+        extractionIngestionRunId,
+        fieldFamily,
+        "3".repeat(64),
+        candidateHash,
+        adapterVersion,
+        candidateMeta.modelName,
+        candidateMeta.modelVersion,
+        context.first_seen_run_id,
+        context.input_hash,
+        "5".repeat(40),
+        observedAt,
+        observedAt,
+        observedAt,
+      ),
+    env.DB.prepare(`INSERT INTO label_evidence_assets
+      (id, subject_source_record_id, subject_source_content_hash, product_id,
+       field_family, source_image_id, source_image_revision, requested_url,
+       effective_url, content_sha256, byte_length, media_type, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 4096, 'image/jpeg', ?)`)
+      .bind(
+        labelAssetId,
+        subject.id,
+        subject.content_hash,
+        review.productId,
+        fieldFamily,
+        candidateMeta.imageId,
+        candidateMeta.imageUrl,
+        candidateMeta.imageUrl,
+        labelContentSha256,
+        observedAt,
+      ),
+    env.DB.prepare(`INSERT INTO extraction_attempts
+      (id, extraction_run_id, subject_source_record_id, subject_source_record_key,
+       subject_source_content_hash, product_id, field_family, response_evidence_hash,
+       status, prediction_count, candidate_count, rejection_count, failure_count,
+       conflict_count, reasons_json, attempted_at, is_current)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'candidate', 1, 1, 0, 0, 0, '[]', ?, 1)`)
+      .bind(
+        extractionAttemptId,
+        extractionRunId,
+        subject.id,
+        subject.source_record_id,
+        subject.content_hash,
+        review.productId,
+        fieldFamily,
+        "7".repeat(64),
+        observedAt,
+      ),
+    env.DB.prepare(`INSERT INTO extraction_attempt_labels
+      (id, attempt_id, label_asset_id, role, outcome, prediction_count, candidate_count,
+       rejection_count, failure_count, conflict_count, candidate_hashes_json, reasons_json)
+      VALUES (?, ?, ?, 'prediction', 'candidate', 1, 1, 0, 0, 0, ?, '[]')`)
+      .bind(`xal_${candidateHash.slice(0, 24)}`, extractionAttemptId, labelAssetId, JSON.stringify([candidateHash])),
+  ]);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE source_records SET raw_evidence_json = ? WHERE id = ?")
+      .bind(JSON.stringify({ candidateHash, extractionAttemptId, labelAssetId, labelContentSha256 }), review.sourceRecordId),
+    env.DB.prepare("UPDATE review_items SET evidence_json = ? WHERE id = ?")
+      .bind(JSON.stringify({ ...(structuredClone(evidence) as Record<string, unknown>), details }), review.reviewId),
+  ]);
+  return { extractionAttemptId, labelAssetId };
 }
 
 function robotoffVolumeEvidence(barcode: string, nutritionPer100ml: Record<string, number | null>): unknown {
@@ -1566,5 +1709,74 @@ describe("Worker catalog API", () => {
     const stillLinked = await env.DB.prepare("SELECT COUNT(*) AS count FROM source_records WHERE product_id = ?")
       .bind(review.productId).first<{ count: number }>();
     expect(stillLinked?.count).toBe(0);
+  });
+
+  it("persists exact extraction links online while legacy review decisions remain unlinked", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected an active product for extraction-linked review");
+    const nutrition = {
+      calories: 390,
+      proteinGrams: 30,
+      carbohydrateGrams: 45,
+      sugarGrams: 5,
+      fatGrams: 10,
+      saturatedFatGrams: 3,
+      fibreGrams: 5,
+      sodiumMg: 200,
+    };
+
+    const legacy = await insertRobotoffReview({
+      suffix: "link-legacy",
+      evidence: robotoffEvidence(product.gtin, nutrition),
+    });
+    const legacyResponse = await worker.fetch(`http://localhost/api/reviews/${legacy.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "reject_nutrition", rationale: "Legacy response-only candidate" }),
+    });
+    expect(legacyResponse.status).toBe(200);
+    expect(await env.DB.prepare(`SELECT extraction_attempt_id, label_asset_id
+      FROM evidence_decisions WHERE id = ?`).bind(`evd_${legacy.reviewId}`).first())
+      .toEqual({ extraction_attempt_id: null, label_asset_id: null });
+
+    const linkedEvidence = robotoffEvidence(product.gtin, { ...nutrition, calories: 391 });
+    const linked = await insertRobotoffReview({ suffix: "link-current", evidence: linkedEvidence });
+    const exact = await attachExactExtraction(linked, linkedEvidence, "nutrition");
+    const linkedResponse = await worker.fetch(`http://localhost/api/reviews/${linked.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "reject_nutrition", rationale: "Exact byte-bound candidate rejection" }),
+    });
+    expect(linkedResponse.status).toBe(200);
+    expect(await env.DB.prepare(`SELECT extraction_attempt_id, label_asset_id
+      FROM evidence_decisions WHERE id = ?`).bind(`evd_${linked.reviewId}`).first())
+      .toEqual({ extraction_attempt_id: exact.extractionAttemptId, label_asset_id: exact.labelAssetId });
+
+    const ingredientFixture = robotoffIngredientEvidence(product.gtin, "link-current");
+    const linkedIngredient = await insertIngredientReview({
+      suffix: "link-current",
+      evidence: ingredientFixture.evidence,
+    });
+    const exactIngredient = await attachExactExtraction(
+      linkedIngredient,
+      ingredientFixture.evidence,
+      "ingredients",
+    );
+    const linkedIngredientResponse = await worker.fetch(
+      `http://localhost/api/reviews/${linkedIngredient.reviewId}/resolve`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision: "reject_ingredients", rationale: "Exact byte-bound ingredient rejection" }),
+      },
+    );
+    expect(linkedIngredientResponse.status).toBe(200);
+    expect(await env.DB.prepare(`SELECT extraction_attempt_id, label_asset_id
+      FROM evidence_decisions WHERE id = ?`).bind(`evd_${linkedIngredient.reviewId}`).first())
+      .toEqual({
+        extraction_attempt_id: exactIngredient.extractionAttemptId,
+        label_asset_id: exactIngredient.labelAssetId,
+      });
   });
 });

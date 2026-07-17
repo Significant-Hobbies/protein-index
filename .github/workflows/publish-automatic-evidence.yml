@@ -31,6 +31,7 @@ jobs:
       UPSTREAM_WORKFLOW: ${{ github.event.workflow_run.name }}
       UPSTREAM_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       UPSTREAM_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      UPSTREAM_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
       LIVE_BASE_URL: https://protein-index.sarthakagrawal927.workers.dev
     steps:
       - name: Initialize durable publication evidence
@@ -68,6 +69,7 @@ jobs:
             if (run.head_branch !== context.payload.repository.default_branch) throw new Error('Upstream run is not on the default branch');
             if (run.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`) throw new Error('Upstream run is not from this repository');
             if (!/^[a-f0-9]{40}$/.test(run.head_sha ?? '')) throw new Error('Upstream run does not expose an exact lowercase head SHA');
+            if (new Set([29551181430, 29552807113]).has(run.id)) throw new Error('Upstream extraction workflow run is explicitly superseded and denied');
             const route = routes[run.name];
             if (!route) throw new Error(`Unsupported upstream workflow: ${run.name}`);
             const artifactName = `${route.artifactPrefix}-${run.id}`;
@@ -80,12 +82,17 @@ jobs:
             const matches = response.data.artifacts.filter((artifact) => artifact.name === artifactName && !artifact.expired);
             if (matches.length !== 1) throw new Error(`Expected exactly one unexpired artifact named ${artifactName}`);
             const artifact = matches[0];
+            if (artifact && new Set([8395774354, 8396363821]).has(artifact.id)) {
+              throw new Error('Upstream extraction artifact is explicitly superseded and denied');
+            }
             if (!/^sha256:[a-f0-9]{64}$/.test(artifact.digest ?? '') || artifact.size_in_bytes <= 0) {
               throw new Error('Upstream artifact does not expose a valid immutable digest and size');
             }
             core.setOutput('artifact_name', artifactName);
             core.setOutput('expected_source', route.source);
             core.setOutput('artifact_id', String(artifact.id));
+            core.setOutput('artifact_digest', artifact.digest);
+            core.setOutput('artifact_bytes', String(artifact.size_in_bytes));
             fs.writeFileSync(`${evidenceDir}/trigger.json`, JSON.stringify({
               workflow: run.name,
               runId: run.id,
@@ -157,6 +164,8 @@ jobs:
         shell: bash
         env:
           ARTIFACT_NAME: ${{ steps.route.outputs.artifact_name }}
+          ARTIFACT_DIGEST: ${{ steps.route.outputs.artifact_digest }}
+          ARTIFACT_BYTES: ${{ steps.route.outputs.artifact_bytes }}
           EXPECTED_SOURCE: ${{ steps.route.outputs.expected_source }}
         run: |
           set -euo pipefail
@@ -186,6 +195,8 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ARTIFACT_NAME: ${{ steps.route.outputs.artifact_name }}
+          ARTIFACT_DIGEST: ${{ steps.route.outputs.artifact_digest }}
+          ARTIFACT_BYTES: ${{ steps.route.outputs.artifact_bytes }}
         run: |
           set -euo pipefail
           pnpm data:publish -- \
@@ -198,7 +209,10 @@ jobs:
             --upstream-run-id "$UPSTREAM_RUN_ID" \
             --upstream-head-sha "$UPSTREAM_HEAD_SHA" \
             --upstream-head-branch "$UPSTREAM_HEAD_BRANCH" \
+            --upstream-repository "$UPSTREAM_REPOSITORY" \
             --artifact-name "$ARTIFACT_NAME" \
+            --artifact-digest "$ARTIFACT_DIGEST" \
+            --artifact-bytes "$ARTIFACT_BYTES" \
             2>&1 | tee "$PUBLICATION_EVIDENCE_DIR/publication.log"
 
       - name: Verify live API after publication

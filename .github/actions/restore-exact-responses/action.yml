@@ -8,6 +8,14 @@ inputs:
   output-directory:
     description: Adapter output directory that should receive the responses folder
     required: true
+  expected-adapter-version:
+    description: Optional exact adapter version required for reuse
+    required: false
+    default: ""
+  restore-label-proofs:
+    description: Copy a validated prior label ledger for zero-refetch replay
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -54,6 +62,8 @@ runs:
         OUTPUT_DIRECTORY: ${{ inputs.output-directory }}
         PRIOR_ARTIFACT_ID: ${{ steps.prior.outputs.artifact_id }}
         PRIOR_ARTIFACT_NAME: ${{ steps.prior.outputs.artifact_name }}
+        EXPECTED_ADAPTER_VERSION: ${{ inputs.expected-adapter-version }}
+        RESTORE_LABEL_PROOFS: ${{ inputs.restore-label-proofs }}
       run: |
         set -euo pipefail
         mkdir -p .data/prior-exact
@@ -73,7 +83,10 @@ runs:
         const exact = priorManifest.inputHash === process.env.SOURCE_STAGED_HASH
           && priorReport.inputManifestHash === sourceManifest.inputHash
           && priorManifest.sourceComplete === true
-          && priorReport.outcomes?.failed === 0;
+          && priorReport.outcomes?.failed === 0
+          && (!process.env.EXPECTED_ADAPTER_VERSION || priorManifest.adapterVersion === process.env.EXPECTED_ADAPTER_VERSION)
+          && (process.env.RESTORE_LABEL_PROOFS !== 'true'
+            || (Number.isSafeInteger(priorReport.labelAssets) && priorReport.labelAssets > 0));
         if (!exact) process.exit(10);
         NODE
         exact_status=$?
@@ -81,6 +94,10 @@ runs:
         if [[ "$exact_status" -eq 0 ]]; then
           mkdir -p "$OUTPUT_DIRECTORY"
           cp -a .data/prior-exact/responses "$OUTPUT_DIRECTORY/"
+          if [[ "$RESTORE_LABEL_PROOFS" == "true" ]]; then
+            test -f .data/prior-exact/label-assets.jsonl
+            cp .data/prior-exact/label-assets.jsonl "$OUTPUT_DIRECTORY/prior-label-assets.jsonl"
+          fi
           echo "Restored exact-snapshot responses from $PRIOR_ARTIFACT_NAME ($PRIOR_ARTIFACT_ID)"
         elif [[ "$exact_status" -eq 10 ]]; then
           echo "Prior responses belong to a different source snapshot; fetching current evidence"

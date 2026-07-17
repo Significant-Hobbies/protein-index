@@ -62,6 +62,26 @@ function parsed(value: string): unknown {
   try { return JSON.parse(value); } catch { return null; }
 }
 
+function extractionLinkFromEvidence(value: string, candidateHash: string): {
+  extractionAttemptId?: string;
+  labelAssetId?: string;
+} | null {
+  const root = parsed(value);
+  const record = typeof root === "object" && root !== null && !Array.isArray(root)
+    ? root as Record<string, unknown>
+    : null;
+  const details = typeof record?.details === "object" && record.details !== null && !Array.isArray(record.details)
+    ? record.details as Record<string, unknown>
+    : null;
+  const attempt = details?.extractionAttemptId;
+  const asset = details?.labelAssetId;
+  if ((attempt === undefined || attempt === null) && (asset === undefined || asset === null)) return {};
+  if (typeof attempt !== "string" || !/^xat_[a-f0-9]{24}$/.test(attempt)
+    || typeof asset !== "string" || !/^lbl_[a-f0-9]{24}$/.test(asset)
+    || details?.candidateHash !== candidateHash) return null;
+  return { extractionAttemptId: attempt, labelAssetId: asset };
+}
+
 const EVIDENCE_STATUSES: EvidenceStatus[] = ["missing", "unverified", "verified", "conflict"];
 const REVIEW_DECISIONS: ReviewDecision[] = [
   "verify_nutrition", "reject_nutrition", "redundant_nutrition",
@@ -107,6 +127,9 @@ async function redundantDecision(
     !candidate || row.source_id !== "open_food_facts_robotoff" || !row.source_record_key
     || !row.source_record_id || !row.source_content_hash || !row.product_id
   ) return null;
+  const candidateHash = await nutritionCandidateHash(candidate);
+  const extractionLink = extractionLinkFromEvidence(row.evidence_json, candidateHash);
+  if (extractionLink === null) return null;
   return {
     id: `evd_${row.id}`,
     sourceId: row.source_id,
@@ -114,7 +137,8 @@ async function redundantDecision(
     sourceRecordId: row.source_record_id,
     sourceContentHash: row.source_content_hash,
     productId: row.product_id,
-    candidateHash: await nutritionCandidateHash(candidate),
+    candidateHash,
+    ...extractionLink,
     fieldFamily: "nutrition",
     decision: "redundant",
     payload: candidate,
@@ -339,6 +363,8 @@ export async function resolveReview(
     review.source_content_hash && review.product_id && ["verify_nutrition", "reject_nutrition", "redundant_nutrition"].includes(decision)
   ) {
     const candidateHash = await nutritionCandidateHash(candidate);
+    const extractionLink = extractionLinkFromEvidence(review.evidence_json, candidateHash);
+    if (extractionLink === null) return "invalid_candidate";
     const baseDecisionId = `evd_${id}`;
     const priorBaseDecision = await db.prepare("SELECT active FROM evidence_decisions WHERE id = ?")
       .bind(baseDecisionId).first<{ active: number }>();
@@ -353,6 +379,7 @@ export async function resolveReview(
       sourceContentHash: review.source_content_hash,
       productId: review.product_id,
       candidateHash,
+      ...extractionLink,
       fieldFamily: "nutrition",
       decision: decision === "verify_nutrition" ? "verify" : decision === "reject_nutrition" ? "reject" : "redundant",
       payload: candidate,
@@ -401,6 +428,8 @@ export async function resolveReview(
     && ["verify_ingredients", "reject_ingredients"].includes(decision)
   ) {
     const candidateHash = await ingredientCandidateHash(ingredientCandidate);
+    const extractionLink = extractionLinkFromEvidence(review.evidence_json, candidateHash);
+    if (extractionLink === null) return "invalid_candidate";
     ingredientEvidenceDecision = {
       id: `evd_${id}`,
       sourceId: review.source_id,
@@ -409,6 +438,7 @@ export async function resolveReview(
       sourceContentHash: review.source_content_hash,
       productId: review.product_id,
       candidateHash,
+      ...extractionLink,
       fieldFamily: "ingredients",
       decision: decision === "verify_ingredients" ? "verify" : "reject",
       payload: {
@@ -460,8 +490,8 @@ export async function resolveReview(
       db.prepare(`INSERT INTO evidence_decisions
         (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
           candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
-          decided_by, decided_at, active)
-        SELECT ?, ?, ?, ?, ?, ?, ?, 'nutrition', 'redundant', ?, ?, ?, ?, ?, 1
+          decided_by, decided_at, active, extraction_attempt_id, label_asset_id)
+        SELECT ?, ?, ?, ?, ?, ?, ?, 'nutrition', 'redundant', ?, ?, ?, ?, ?, 1, ?, ?
         WHERE EXISTS (
           SELECT 1 FROM review_items r
           JOIN source_records s ON s.id = r.source_record_id
@@ -479,6 +509,7 @@ export async function resolveReview(
           evidenceDecision.sourceRecordId, evidenceDecision.sourceContentHash, evidenceDecision.productId,
           evidenceDecision.candidateHash, canonicalJson(evidenceDecision.payload), evidenceDecision.evidenceUrl,
           evidenceDecision.rationale, evidenceDecision.decidedBy, evidenceDecision.decidedAt,
+          evidenceDecision.extractionAttemptId ?? null, evidenceDecision.labelAssetId ?? null,
           id, evidenceDecision.productId, review.evidence_json, evidenceDecision.sourceRecordId,
           evidenceDecision.sourceId, evidenceDecision.sourceRecordKey, evidenceDecision.sourceContentHash,
           ...exactProjectionBindings,
@@ -505,22 +536,23 @@ export async function resolveReview(
     statements.push(db.prepare(`INSERT INTO evidence_decisions
       (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
         candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
-        decided_by, decided_at, active)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'nutrition', ?, ?, ?, ?, ?, ?, 1)`)
+        decided_by, decided_at, active, extraction_attempt_id, label_asset_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'nutrition', ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
       .bind(
         evidenceDecision.id, evidenceDecision.sourceId, evidenceDecision.sourceRecordKey,
         evidenceDecision.sourceRecordId, evidenceDecision.sourceContentHash, evidenceDecision.productId,
         evidenceDecision.candidateHash, evidenceDecision.decision, canonicalJson(evidenceDecision.payload),
         evidenceDecision.evidenceUrl, evidenceDecision.rationale, evidenceDecision.decidedBy,
-        evidenceDecision.decidedAt,
+        evidenceDecision.decidedAt, evidenceDecision.extractionAttemptId ?? null,
+        evidenceDecision.labelAssetId ?? null,
       ));
   }
   if (ingredientEvidenceDecision) {
     statements.push(db.prepare(`INSERT INTO evidence_decisions
       (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
         candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
-        decided_by, decided_at, active)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'ingredients', ?, ?, ?, ?, ?, ?, 1)`)
+        decided_by, decided_at, active, extraction_attempt_id, label_asset_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'ingredients', ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
       .bind(
         ingredientEvidenceDecision.id,
         ingredientEvidenceDecision.sourceId,
@@ -535,6 +567,8 @@ export async function resolveReview(
         ingredientEvidenceDecision.rationale,
         ingredientEvidenceDecision.decidedBy,
         ingredientEvidenceDecision.decidedAt,
+        ingredientEvidenceDecision.extractionAttemptId ?? null,
+        ingredientEvidenceDecision.labelAssetId ?? null,
       ));
   }
   if (review.product_id && review.source_record_id && decision === "verify_nutrition" && candidate) {

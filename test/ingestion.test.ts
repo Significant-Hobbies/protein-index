@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { normalizeOpenFoodFactsRecord, stageOpenFoodFacts } from "../scripts/adapters/open-food-facts";
 import { enrichOpenFoodFactsApi } from "../scripts/adapters/open-food-facts-api";
-import { extractRobotoffApi } from "../scripts/adapters/robotoff-api";
+import { extractRobotoffApi, validateRobotoffNutritionArtifact } from "../scripts/adapters/robotoff-api";
 import { extractRobotoffIngredientApi, validateRobotoffIngredientArtifact } from "../scripts/adapters/robotoff-ingredients-api";
 import { parseRobotoffIngredientEvidence } from "../scripts/adapters/robotoff-ingredients";
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "../scripts/adapters/robotoff";
@@ -21,10 +21,12 @@ import {
   publicationStateQuery,
   validateAutomaticPublicationSnapshot,
   type AutomaticPublicationInput,
+  type ExactExtractionSnapshot,
   type PublicationState,
 } from "../scripts/publication";
 import { emitImportSql } from "../scripts/reconcile";
 import {
+  evidenceDecisionFromDatabaseRow,
   emitReviewDecisionSql,
   emitReviewSourceStateQuery,
   readReviewDecisionBundle,
@@ -34,6 +36,7 @@ import {
   validateReviewDecisionSources,
   writeReviewDecisionBundle,
 } from "../scripts/review-bundles";
+
 import {
   canonicalJson,
   nutritionCandidateFromEvidence,
@@ -45,6 +48,11 @@ import {
 import { ingredientCandidateHash, type IngredientEvidenceDecisionInput } from "../shared/ingredient-evidence";
 import { parseIngredients } from "../shared/ingredients";
 import type { SourceManifest } from "../shared/types";
+
+const labelImageFetcher = async () => new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), {
+  status: 200,
+  headers: { "content-type": "image/jpeg", "content-length": "4" },
+});
 
 const indiaProduct = {
   code: "8900000000012",
@@ -75,7 +83,10 @@ const automaticInput = (overrides: Partial<AutomaticPublicationInput> = {}): Aut
   runId: 123,
   headSha: "a".repeat(40),
   headBranch: "main",
+  repository: "Significant-Hobbies/protein-index",
   artifactName: "open-food-facts-snapshot-123",
+  artifactDigest: `sha256:${"b".repeat(64)}`,
+  artifactBytes: 1_024,
   ...overrides,
 });
 
@@ -183,6 +194,11 @@ describe("Robotoff ingredient evidence", () => {
     ingredientImageUrl: "https://images.openfoodfacts.org/images/products/000/124/100/0224/2.jpg",
   };
 
+  it("fails closed for response-only legacy artifacts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-ingredients-legacy-"));
+    await expect(validateRobotoffIngredientArtifact(directory)).rejects.toThrow("label-assets.jsonl is required");
+  });
+
   it("parses the official ingredient-detection entity shape without verifying it", () => {
     const parsed = parseRobotoffIngredientEvidence({ image_predictions: [
       ingredientPrediction,
@@ -249,7 +265,7 @@ describe("Robotoff ingredient evidence", () => {
     const source = await stageOpenFoodFacts({
       input,
       outputDirectory: join(directory, "source"),
-      mode: "sample",
+      mode: "production",
       limit: null,
     });
     const outputDirectory = join(directory, "extracted");
@@ -262,6 +278,7 @@ describe("Robotoff ingredient evidence", () => {
       limit: null,
       minimumIntervalMs: 0,
       retryBaseMs: 0,
+      labelFetcher: labelImageFetcher,
       fetcher: async (request) => {
         requests += 1;
         const url = new URL(request.toString());
@@ -278,7 +295,7 @@ describe("Robotoff ingredient evidence", () => {
       fetchedBarcodes: 1,
       resumedBarcodes: 0,
     });
-    expect(first.manifest.adapterVersion).toBe("robotoff-ingredients-api-v2");
+    expect(first.manifest.adapterVersion).toBe("robotoff-ingredients-api-v3");
     const candidates = (await readFile(first.candidatesPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(candidates).toHaveLength(1);
     expect(candidates[0]).toMatchObject({
@@ -323,6 +340,11 @@ describe("Robotoff ingredient evidence", () => {
         taxonomyRecognition: { belowSixtyPercent: 1, atLeastSixtyPercent: 0 },
       },
     });
+    await writeFile(
+      join(outputDirectory, "prior-label-assets.jsonl"),
+      await readFile(first.labelAssetsPath, "utf8"),
+      "utf8",
+    );
 
     const resumed = await extractRobotoffIngredientApi({
       input: source.stagedPath,
@@ -331,6 +353,7 @@ describe("Robotoff ingredient evidence", () => {
       mode: "sample",
       limit: null,
       minimumIntervalMs: 0,
+      labelFetcher: async () => { throw new Error("restored exact label proof should not be fetched again"); },
       fetcher: async () => { throw new Error("completed GTIN should not be fetched again"); },
     });
     expect(resumed).toMatchObject({ fetchedBarcodes: 0, resumedBarcodes: 1, outcomes: { candidate: 1 } });
@@ -356,6 +379,7 @@ describe("Robotoff ingredient evidence", () => {
       minimumIntervalMs: 0,
       retryBaseMs: 0,
       maximumAttempts: 2,
+      labelFetcher: labelImageFetcher,
       fetcher: async () => {
         attempts += 1;
         return new Response("busy", { status: 503 });
@@ -365,6 +389,45 @@ describe("Robotoff ingredient evidence", () => {
     const outcome = JSON.parse((await readFile(join(outputDirectory, "outcomes.jsonl"), "utf8")).trim());
     expect(outcome).toMatchObject({ requestedCode: "00001241000224", status: "failed" });
     await expect(validateRobotoffIngredientArtifact(outputDirectory)).rejects.toThrow("not source complete");
+  });
+
+  it("keeps exact multi-image and multi-entity ingredient outcomes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-ingredients-mixed-"));
+    const input = join(directory, "source.jsonl");
+    await writeFile(input, `${JSON.stringify({
+      ...indiaProduct,
+      code: "00001241000224",
+      image_ingredients_url: context.ingredientImageUrl,
+    })}\n`, "utf8");
+    const source = await stageOpenFoodFacts({ input, outputDirectory: join(directory, "source"), mode: "sample", limit: null });
+    const second = {
+      ...ingredientPrediction,
+      id: 10477208,
+      image: { ...ingredientPrediction.image, image_id: "3", source_image: "/000/124/100/0224/3.jpg" },
+      data: {
+        entities: [
+          { ...ingredientPrediction.data.entities[0], text: "Casein, Sucrose, Peanut Flour." },
+          { ...ingredientPrediction.data.entities[0], text: "Casein and cocoa." },
+        ],
+      },
+    };
+    const result = await extractRobotoffIngredientApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory: join(directory, "extracted"),
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      labelFetcher: labelImageFetcher,
+      fetcher: async () => new Response(JSON.stringify({ image_predictions: [ingredientPrediction, second] }), { status: 200 }),
+    });
+    const artifact = await validateRobotoffIngredientArtifact(join(directory, "extracted"));
+    expect(result.report).toMatchObject({ labelAssets: 2, extractionAttempts: 1, extractionAttemptLabels: 2 });
+    expect(artifact.extractionAttempts[0]).toMatchObject({ predictionCount: 2, candidateCount: 3, conflictCount: 3 });
+    expect(artifact.extractionAttemptLabels).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "requested", candidateCount: 1 }),
+      expect.objectContaining({ role: "prediction", candidateCount: 2 }),
+    ]));
   });
 
   it("rejects tampered ingredient extraction artifacts", async () => {
@@ -384,6 +447,7 @@ describe("Robotoff ingredient evidence", () => {
       mode: "sample",
       limit: null,
       minimumIntervalMs: 0,
+      labelFetcher: labelImageFetcher,
       fetcher: async () => new Response(JSON.stringify({ image_predictions: [ingredientPrediction] }), { status: 200 }),
     });
     const originalCandidates = await readFile(result.candidatesPath, "utf8");
@@ -506,6 +570,91 @@ async function ingredientReviewDecision(id: string): Promise<IngredientEvidenceD
 }
 
 describe("Reviewed evidence bundles", () => {
+  it("round-trips exact extraction links while keeping legacy decision pairs null", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-linked-review-bundle-"));
+    const legacy = await reviewDecision("evd_link_legacy", "reject");
+    const linkedNutrition: EvidenceDecisionInput = {
+      ...await reviewDecision("evd_link_nutrition", "reject"),
+      extractionAttemptId: `xat_${"a".repeat(24)}`,
+      labelAssetId: `lbl_${"b".repeat(24)}`,
+    };
+    const linkedIngredients: IngredientEvidenceDecisionInput = {
+      ...await ingredientReviewDecision("evd_link_ingredients"),
+      extractionAttemptId: `xat_${"c".repeat(24)}`,
+      labelAssetId: `lbl_${"d".repeat(24)}`,
+    };
+    const written = await writeReviewDecisionBundle({
+      decisions: [linkedNutrition, legacy, linkedIngredients],
+      outputRoot: directory,
+      createdAt: "2026-07-17T02:00:00.000Z",
+    });
+    const parsed = await readReviewDecisionBundle(written.directory);
+    expect(parsed.decisions.find(({ id }) => id === linkedNutrition.id)).toMatchObject({
+      extractionAttemptId: linkedNutrition.extractionAttemptId,
+      labelAssetId: linkedNutrition.labelAssetId,
+    });
+    expect(parsed.decisions.find(({ id }) => id === linkedIngredients.id)).toMatchObject({
+      extractionAttemptId: linkedIngredients.extractionAttemptId,
+      labelAssetId: linkedIngredients.labelAssetId,
+    });
+    expect(parsed.decisions.find(({ id }) => id === legacy.id)).not.toHaveProperty("extractionAttemptId");
+
+    const sqlPath = join(directory, "linked-review.sql");
+    await emitReviewDecisionSql(parsed, sqlPath);
+    const sql = await readFile(sqlPath, "utf8");
+    expect(sql).toContain("extraction_attempt_id, label_asset_id");
+    expect(sql).toContain(`'${linkedNutrition.extractionAttemptId}', '${linkedNutrition.labelAssetId}'`);
+    expect(sql).toContain(`'${linkedIngredients.extractionAttemptId}', '${linkedIngredients.labelAssetId}'`);
+
+    const linkedRow = {
+      id: linkedNutrition.id,
+      source_id: linkedNutrition.sourceId,
+      source_record_key: linkedNutrition.sourceRecordKey,
+      source_record_id: linkedNutrition.sourceRecordId,
+      source_content_hash: linkedNutrition.sourceContentHash,
+      product_id: linkedNutrition.productId,
+      candidate_hash: linkedNutrition.candidateHash,
+      extraction_attempt_id: linkedNutrition.extractionAttemptId,
+      label_asset_id: linkedNutrition.labelAssetId,
+      field_family: linkedNutrition.fieldFamily,
+      decision: linkedNutrition.decision,
+      payload_json: canonicalJson(linkedNutrition.payload),
+      evidence_url: linkedNutrition.evidenceUrl,
+      rationale: linkedNutrition.rationale,
+      decided_by: linkedNutrition.decidedBy,
+      decided_at: linkedNutrition.decidedAt,
+    };
+    expect(evidenceDecisionFromDatabaseRow(linkedRow)).toMatchObject({
+      extractionAttemptId: linkedNutrition.extractionAttemptId,
+      labelAssetId: linkedNutrition.labelAssetId,
+    });
+    expect(evidenceDecisionFromDatabaseRow({
+      ...linkedRow,
+      id: legacy.id,
+      source_record_key: legacy.sourceRecordKey,
+      source_record_id: legacy.sourceRecordId,
+      source_content_hash: legacy.sourceContentHash,
+      candidate_hash: legacy.candidateHash,
+      payload_json: canonicalJson(legacy.payload),
+      evidence_url: legacy.evidenceUrl,
+      rationale: legacy.rationale,
+      extraction_attempt_id: null,
+      label_asset_id: null,
+    })).not.toHaveProperty("extractionAttemptId");
+
+    const linkedOnly = { ...parsed, decisions: [linkedNutrition] };
+    expect(() => validateExistingEvidenceDecisions(linkedOnly, [evidenceDecisionFromDatabaseRow(linkedRow)]))
+      .not.toThrow();
+    expect(() => validateExistingEvidenceDecisions(linkedOnly, [{
+      ...linkedNutrition,
+      labelAssetId: `lbl_${"e".repeat(24)}`,
+    }])).toThrow("conflicts with an existing decision id");
+    await expect(writeReviewDecisionBundle({
+      decisions: [{ ...linkedNutrition, labelAssetId: null }],
+      outputRoot: join(directory, "partial"),
+    })).rejects.toThrow("exact attempt and label asset ID");
+  });
+
   it("round-trips ingredient decisions in the backward-compatible reviewed bundle", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-ingredient-review-bundle-"));
     const nutrition = await reviewDecision("evd_nutrition", "verify");
@@ -1170,9 +1319,17 @@ describe("Open Food Facts bulk staging", () => {
     expect(() => automaticPublicationContract(automaticInput({ headBranch: "feature" }))).toThrow("default-branch");
     expect(() => automaticPublicationContract(automaticInput({ headSha: "abc" }))).toThrow("head SHA");
     expect(() => automaticPublicationContract(automaticInput({ runId: 0 }))).toThrow("run ID");
+    expect(() => automaticPublicationContract(automaticInput({ repository: "fork/protein-index" }))).toThrow("Significant-Hobbies/protein-index");
+    expect(() => automaticPublicationContract(automaticInput({ artifactDigest: "abc" }))).toThrow("artifact digest");
+    expect(() => automaticPublicationContract(automaticInput({ artifactBytes: 0 }))).toThrow("artifact size");
+    expect(() => automaticPublicationContract(automaticInput({
+      workflowName: "Extract label evidence with Robotoff",
+      runId: 29551181430,
+      artifactName: "robotoff-label-candidates-29551181430",
+    }))).toThrow("superseded extraction run");
   });
 
-  it("accepts checksummed unverified community evidence and review-only label candidates", async () => {
+  it("accepts checksummed community evidence and rejects legacy review-only artifacts without label-byte proofs", async () => {
     const communityDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-community-"));
     await writeAutomaticArtifact({ directory: communityDirectory });
     await expect(validateAutomaticPublicationSnapshot(communityDirectory, automaticInput())).resolves.toMatchObject({
@@ -1222,28 +1379,7 @@ describe("Open Food Facts bulk staging", () => {
     await expect(validateAutomaticPublicationSnapshot(reviewDirectory, automaticInput({
       workflowName: "Extract label evidence with Robotoff",
       artifactName: "robotoff-label-candidates-123",
-    }))).resolves.toMatchObject({
-      validatedStagedRecords: 1,
-      contract: { expectedSource: "open_food_facts_robotoff", evidenceKind: "review_only" },
-    });
-
-    const rejectedDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-rejected-review-"));
-    const rejectedReview = structuredClone(reviewProduct);
-    rejectedReview.validationIssues = [{ code: "robotoff_unsupported_volume_basis", severity: "error", field: "nutrition" }];
-    await writeAutomaticArtifact({ directory: rejectedDirectory, source: "open_food_facts_robotoff", product: rejectedReview });
-    await expect(validateAutomaticPublicationSnapshot(rejectedDirectory, automaticInput({
-      workflowName: "Extract label evidence with Robotoff",
-      artifactName: "robotoff-label-candidates-123",
-    }))).resolves.toMatchObject({ validatedStagedRecords: 1 });
-
-    const emptyReviewDirectory = await mkdtemp(join(tmpdir(), "protein-index-auto-empty-review-"));
-    const emptyReview = structuredClone(reviewProduct);
-    emptyReview.validationIssues = [];
-    await writeAutomaticArtifact({ directory: emptyReviewDirectory, source: "open_food_facts_robotoff", product: emptyReview });
-    await expect(validateAutomaticPublicationSnapshot(emptyReviewDirectory, automaticInput({
-      workflowName: "Extract label evidence with Robotoff",
-      artifactName: "robotoff-label-candidates-123",
-    }))).rejects.toThrow("no validation evidence");
+    }))).rejects.toThrow("label-assets.jsonl is required");
   });
 
   it("rejects verified facts, decision payloads, source drift, excessive discovery drops, and checksum drift", async () => {
@@ -1384,11 +1520,21 @@ describe("Open Food Facts bulk staging", () => {
       decisions: 3,
       verifiedNutrition: 4,
       verifiedIngredients: 5,
+      extractionRuns: 0,
+      labelAssets: 0,
+      extractionAttempts: 0,
+      currentExtractionAttempts: 0,
+      extractionAttemptLabels: 0,
       exactRunId: null,
       exactRunStatus: null,
       exactRunInputHash: null,
       exactRunSourceComplete: null,
       exactRunStagedRecords: null,
+      exactExtractionRunId: null,
+      exactExtractionRunStatus: null,
+      exactExtractionArtifactDigest: null,
+      exactExtractionAttempts: 0,
+      exactExtractionAttemptLabels: 0,
     };
     const after: PublicationState = {
       ...before,
@@ -1408,11 +1554,21 @@ describe("Open Food Facts bulk staging", () => {
       decisions: after.decisions,
       verified_nutrition: after.verifiedNutrition,
       verified_ingredients: after.verifiedIngredients,
+      extraction_runs: after.extractionRuns,
+      label_assets: after.labelAssets,
+      extraction_attempts: after.extractionAttempts,
+      current_extraction_attempts: after.currentExtractionAttempts,
+      extraction_attempt_labels: after.extractionAttemptLabels,
       exact_run_id: after.exactRunId,
       exact_run_status: after.exactRunStatus,
       exact_run_input_hash: after.exactRunInputHash,
       exact_run_source_complete: after.exactRunSourceComplete,
       exact_run_staged_records: after.exactRunStagedRecords,
+      exact_extraction_run_id: after.exactExtractionRunId,
+      exact_extraction_run_status: after.exactExtractionRunStatus,
+      exact_extraction_artifact_digest: after.exactExtractionArtifactDigest,
+      exact_extraction_attempts: after.exactExtractionAttempts,
+      exact_extraction_attempt_labels: after.exactExtractionAttemptLabels,
     }] }]);
     expect(parsed).toEqual(after);
     expect(assertAutomaticPublicationPostconditions(before, after, manifest)).toMatchObject({
@@ -1424,6 +1580,52 @@ describe("Open Food Facts bulk staging", () => {
     });
     expect(() => assertAutomaticPublicationPostconditions(before, { ...after, verifiedNutrition: 5 }, manifest)).toThrow("increased verified nutrition");
     expect(() => assertAutomaticPublicationPostconditions(before, { ...after, exactRunInputHash: "wrong" }, manifest)).toThrow("input hash");
+    const exactExtraction: ExactExtractionSnapshot = {
+      fieldFamily: "nutrition",
+      extractionRunId: `xrun_${"c".repeat(24)}`,
+      parentSourceRunId: `run_${"d".repeat(24)}`,
+      parentSourceInputHash: "e".repeat(64),
+      requestSchemaHash: "f".repeat(64),
+      modelName: "nutrition_extractor",
+      modelVersion: '{"nutrition_extractor-2.0":1}',
+      labelAssetsPath: "/tmp/label-assets.jsonl",
+      extractionAttemptsPath: "/tmp/extraction-attempts.jsonl",
+      extractionAttemptLabelsPath: "/tmp/extraction-attempt-labels.jsonl",
+      labelAssets: 2,
+      extractionAttempts: 1,
+      extractionAttemptLabels: 2,
+    };
+    const extractionContract = automaticPublicationContract(automaticInput({
+      workflowName: "Extract label evidence with Robotoff",
+      artifactName: "robotoff-label-candidates-123",
+    }));
+    const afterExtraction: PublicationState = {
+      ...after,
+      extractionRuns: 1,
+      labelAssets: 2,
+      extractionAttempts: 1,
+      currentExtractionAttempts: 1,
+      extractionAttemptLabels: 2,
+      exactExtractionRunId: exactExtraction.extractionRunId,
+      exactExtractionRunStatus: "accepted",
+      exactExtractionArtifactDigest: "b".repeat(64),
+      exactExtractionAttempts: 1,
+      exactExtractionAttemptLabels: 2,
+    };
+    expect(() => assertAutomaticPublicationPostconditions(
+      before,
+      afterExtraction,
+      manifest,
+      exactExtraction,
+      extractionContract,
+    )).not.toThrow();
+    expect(() => assertAutomaticPublicationPostconditions(
+      before,
+      { ...afterExtraction, exactExtractionArtifactDigest: "0".repeat(64) },
+      manifest,
+      exactExtraction,
+      extractionContract,
+    )).toThrow("artifact digest");
     expect(() => assertIdempotentPublicationReplay(after, { ...after })).not.toThrow();
     expect(() => assertIdempotentPublicationReplay(after, { ...after, sourceRecords: 22 })).toThrow("sourceRecords");
   });
@@ -1459,12 +1661,43 @@ describe("Open Food Facts bulk staging", () => {
     expect(workflow).toContain("environment: production");
     expect(workflow).toContain("--automatic");
     expect(workflow).toContain("--skip-migrations");
+    expect(workflow).toContain("--upstream-repository");
+    expect(workflow).toContain("--artifact-digest");
+    expect(workflow).toContain("--artifact-bytes");
     expect(workflow).not.toContain("migrations apply");
     expect(workflow).not.toContain("wrangler deploy");
     expect(workflow).toContain("retention-days: 90");
     expect(workflow).toContain("if: always()");
     expect(workflow).toContain("/api/health");
     expect(workflow).toContain("/api/products?scope=all");
+
+    const reviewed = await readFile(".github/workflows/publish-robotoff-candidates.yml", "utf8");
+    expect(reviewed).toContain("expected_head_sha:");
+    expect(reviewed).toContain("expected_artifact_digest:");
+    expect(reviewed).toContain("getWorkflowRun");
+    expect(reviewed).toContain("new Set([29551181430, 29552807113])");
+    expect(reviewed).toContain("new Set([8395774354, 8396363821]).has(artifact.id)");
+    expect(workflow).toContain("new Set([29551181430, 29552807113]).has(run.id)");
+    expect(workflow).toContain("new Set([8395774354, 8396363821]).has(artifact.id)");
+    expect(reviewed).toContain("robotoff-api-v8");
+    expect(reviewed).toContain("robotoff-ingredients-api-v3");
+    expect(reviewed).toContain("--automatic");
+    expect(reviewed).toContain("--skip-migrations");
+
+    const restore = await readFile(".github/actions/restore-exact-responses/action.yml", "utf8");
+    expect(restore).toContain("expected-adapter-version:");
+    expect(restore).toContain("restore-label-proofs:");
+    expect(restore).toContain("prior-label-assets.jsonl");
+    for (const extractionWorkflow of [
+      ".github/workflows/extract-robotoff.yml",
+      ".github/workflows/extract-robotoff-ingredients.yml",
+    ]) {
+      const extraction = await readFile(extractionWorkflow, "utf8");
+      expect(extraction).toContain("label-assets.jsonl");
+      expect(extraction).toContain("extraction-attempts.jsonl");
+      expect(extraction).toContain("extraction-attempt-labels.jsonl");
+      expect(extraction).toContain('restore-label-proofs: "true"');
+    }
   });
 
   it("accepts only source-complete, reconciled production snapshots for publication", () => {
@@ -2119,6 +2352,11 @@ describe("Robotoff label evidence", () => {
     return stageOpenFoodFacts({ input, outputDirectory: join(directory, "source"), mode: "sample", limit: null });
   }
 
+  it("fails closed for nutrition artifacts without exact label-byte proof", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-legacy-"));
+    await expect(validateRobotoffNutritionArtifact(directory)).rejects.toThrow("label-assets.jsonl is required");
+  });
+
   it("retains a plausible per-100-g prediction as review evidence only", () => {
     const response = { image_predictions: [prediction(1, "7", {
       "energy-kcal_100g": nutrient(365, "kcal"),
@@ -2409,13 +2647,14 @@ describe("Robotoff label evidence", () => {
       mode: "sample",
       limit: null,
       minimumIntervalMs: 0,
+      labelFetcher: labelImageFetcher,
       fetcher: async () => new Response(JSON.stringify({ image_predictions: [prediction(22, "20", {
         "energy-kcal_100g": nutrient(155, "kcal"),
         proteins_100g: nutrient(4.5, "g"),
       })] }), { status: 200 }),
     });
     expect(result.outcomes).toEqual({ candidate: 1, no_prediction: 0, rejected: 0, failed: 0 });
-    expect(result.manifest.adapterVersion).toBe("robotoff-api-v7");
+    expect(result.manifest.adapterVersion).toBe("robotoff-api-v8");
     const staged = JSON.parse((await readFile(result.stagedPath, "utf8")).trim()) as {
       validationIssues: Array<{ code: string }>;
       rawEvidence: { candidate: Record<string, unknown> };
@@ -2639,9 +2878,10 @@ describe("Robotoff label evidence", () => {
       input: source.stagedPath,
       inputManifest: source.manifestPath,
       outputDirectory,
-      mode: "sample",
+      mode: "production",
       limit: null,
       minimumIntervalMs: 0,
+      labelFetcher: labelImageFetcher,
       fetcher,
     });
     expect(requests).toBe(1);
@@ -2660,15 +2900,112 @@ describe("Robotoff label evidence", () => {
     expect(staged.nutrition.status).toBe("missing");
     expect(staged.validationIssues).toContainEqual(expect.objectContaining({ code: "robotoff_nutrition_candidate" }));
     const report = JSON.parse(await readFile(result.reportPath, "utf8")) as Record<string, unknown>;
-    expect(report).toMatchObject({ requestedBarcodes: 1, accountedBarcodes: 1, fetchedBarcodes: 1, resumedBarcodes: 0 });
+    expect(report).toMatchObject({
+      requestedBarcodes: 1,
+      accountedBarcodes: 1,
+      fetchedBarcodes: 1,
+      resumedBarcodes: 0,
+      labelAssets: 2,
+      extractionAttempts: 1,
+      extractionAttemptLabels: 2,
+      extractionRunId: expect.stringMatching(/^xrun_[a-f0-9]{24}$/),
+      parentSourceRunId: expect.stringMatching(/^run_[a-f0-9]{24}$/),
+    });
+    await expect(validateRobotoffNutritionArtifact(outputDirectory)).resolves.toMatchObject({
+      extractionAttempts: [{ status: "candidate", candidateCount: 1 }],
+      extractionAttemptLabels: expect.arrayContaining([
+        expect.objectContaining({ role: "requested", outcome: "no_prediction" }),
+        expect.objectContaining({ role: "prediction", outcome: "candidate" }),
+      ]),
+    });
+    const automaticSnapshot = await validateAutomaticPublicationSnapshot(outputDirectory, automaticInput({
+      workflowName: "Extract label evidence with Robotoff",
+      artifactName: "robotoff-label-candidates-123",
+    }));
+    expect(automaticSnapshot).toMatchObject({
+      validatedStagedRecords: 1,
+      extractionImport: {
+        run: {
+          fieldFamily: "nutrition",
+          status: "accepted",
+          artifactDigest: "b".repeat(64),
+        },
+      },
+    });
+    if (!automaticSnapshot.extractionImport) throw new Error("Expected an exact extraction import plan");
+    const database = new DatabaseSync(":memory:");
+    for (const migration of (await readdir("migrations")).filter((name) => name.endsWith(".sql")).sort()) {
+      database.exec(await readFile(join("migrations", migration), "utf8"));
+    }
+    const sourceSqlPath = join(directory, "source-import.sql");
+    await emitImportSql({
+      stagedPath: source.stagedPath,
+      manifestPath: source.manifestPath,
+      outputPath: sourceSqlPath,
+    });
+    database.exec(await readFile(sourceSqlPath, "utf8"));
+    const extractionSqlPath = join(directory, "extraction-import.sql");
+    await emitImportSql({
+      stagedPath: result.stagedPath,
+      manifestPath: result.manifestPath,
+      outputPath: extractionSqlPath,
+      applyEvidenceDecisions: false,
+      extraction: automaticSnapshot.extractionImport,
+    });
+    const extractionSql = await readFile(extractionSqlPath, "utf8");
+    database.exec(extractionSql);
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM extraction_runs WHERE status = 'accepted') AS runs,
+      (SELECT COUNT(*) FROM label_evidence_assets) AS assets,
+      (SELECT COUNT(*) FROM extraction_attempts WHERE is_current = 1) AS current_attempts,
+      (SELECT COUNT(*) FROM extraction_attempt_labels) AS labels,
+      (SELECT COUNT(*) FROM review_items WHERE status = 'open'
+        AND json_extract(evidence_json, '$.details.extractionAttemptId') IS NOT NULL) AS exact_reviews`).get())
+      .toEqual({ runs: 1, assets: 2, current_attempts: 1, labels: 2, exact_reviews: 1 });
+    const beforeReplay = database.prepare(`SELECT
+      (SELECT COUNT(*) FROM extraction_runs) AS runs,
+      (SELECT COUNT(*) FROM label_evidence_assets) AS assets,
+      (SELECT COUNT(*) FROM extraction_attempts) AS attempts,
+      (SELECT COUNT(*) FROM extraction_attempt_labels) AS labels,
+      (SELECT COUNT(*) FROM review_items) AS reviews`).get();
+    database.exec(extractionSql);
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM extraction_runs) AS runs,
+      (SELECT COUNT(*) FROM label_evidence_assets) AS assets,
+      (SELECT COUNT(*) FROM extraction_attempts) AS attempts,
+      (SELECT COUNT(*) FROM extraction_attempt_labels) AS labels,
+      (SELECT COUNT(*) FROM review_items) AS reviews`).get()).toEqual(beforeReplay);
+    const tamperedAssetsPath = join(directory, "tampered-label-assets.jsonl");
+    const tamperedAssets = (await readFile(result.labelAssetsPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    tamperedAssets[0].effectiveUrl = "https://images.openfoodfacts.org/tampered-label.jpg";
+    await writeFile(tamperedAssetsPath, `${tamperedAssets.map((asset) => JSON.stringify(asset)).join("\n")}\n`, "utf8");
+    const collisionSqlPath = join(directory, "collision-import.sql");
+    await emitImportSql({
+      stagedPath: result.stagedPath,
+      manifestPath: result.manifestPath,
+      outputPath: collisionSqlPath,
+      applyEvidenceDecisions: false,
+      extraction: { ...automaticSnapshot.extractionImport, labelAssetsPath: tamperedAssetsPath },
+    });
+    const collisionSql = await readFile(collisionSqlPath, "utf8");
+    expect(() => database.exec(collisionSql)).toThrow();
+    database.exec("ROLLBACK");
+    expect(database.prepare("SELECT COUNT(*) AS assets FROM label_evidence_assets").get()).toEqual({ assets: 2 });
+    database.close();
+    await writeFile(
+      join(outputDirectory, "prior-label-assets.jsonl"),
+      await readFile(result.labelAssetsPath, "utf8"),
+      "utf8",
+    );
 
     const resumed = await extractRobotoffApi({
       input: source.stagedPath,
       inputManifest: source.manifestPath,
       outputDirectory,
-      mode: "sample",
+      mode: "production",
       limit: null,
       minimumIntervalMs: 0,
+      labelFetcher: async () => { throw new Error("restored exact label proof should not be fetched again"); },
       fetcher: async () => { throw new Error("resume should not fetch"); },
     });
     const resumedReport = JSON.parse(await readFile(resumed.reportPath, "utf8")) as Record<string, unknown>;
@@ -2685,6 +3022,7 @@ describe("Robotoff label evidence", () => {
       mode: "sample",
       limit: null,
       minimumIntervalMs: 0,
+      labelFetcher: labelImageFetcher,
       fetcher: async () => new Response(JSON.stringify({ image_predictions: [] }), { status: 200 }),
     });
     expect(result.outcomes).toEqual({ candidate: 0, no_prediction: 1, rejected: 0, failed: 0 });

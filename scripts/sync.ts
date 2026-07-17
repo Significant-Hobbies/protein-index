@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { assertDataKartConfigured, DATAKART_ADAPTER_STATUS } from "./adapters/datakart";
 import { stageOpenFoodFacts } from "./adapters/open-food-facts";
 import { enrichOpenFoodFactsApi } from "./adapters/open-food-facts-api";
-import { extractRobotoffApi } from "./adapters/robotoff-api";
+import { extractRobotoffApi, validateRobotoffNutritionArtifact } from "./adapters/robotoff-api";
 import { extractRobotoffIngredientApi, validateRobotoffIngredientArtifact } from "./adapters/robotoff-ingredients-api";
 import { buildFixtureStage } from "./fixtures";
 import { emitImportSql } from "./reconcile";
@@ -17,6 +17,8 @@ import {
   publicationStateQuery,
   validateAutomaticPublicationSnapshot,
   validatePublicationSnapshot,
+  type AutomaticPublicationSnapshot,
+  type AutomaticPublicationContract,
   type PublicationState,
 } from "./publication";
 import {
@@ -209,8 +211,11 @@ async function extractCommand(): Promise<void> {
       confidenceThreshold,
     });
   if (source === "robotoff-ingredients") await validateRobotoffIngredientArtifact(outputDirectory);
-  const importSqlPath = join(outputDirectory, "import.sql");
-  await emitImportSql({ stagedPath: result.stagedPath, manifestPath: result.manifestPath, outputPath: importSqlPath });
+  else await validateRobotoffNutritionArtifact(outputDirectory);
+  const importSqlPath = mode === "production" ? null : join(outputDirectory, "import.sql");
+  if (importSqlPath) {
+    await emitImportSql({ stagedPath: result.stagedPath, manifestPath: result.manifestPath, outputPath: importSqlPath });
+  }
   process.stdout.write(`${JSON.stringify({ ...result, importSqlPath }, null, 2)}\n`);
 }
 
@@ -244,10 +249,14 @@ async function publishCommand(): Promise<void> {
       runId: Number(option("upstream-run-id")),
       headSha: option("upstream-head-sha") ?? "",
       headBranch: option("upstream-head-branch") ?? "",
+      repository: option("upstream-repository") ?? "",
       artifactName: option("artifact-name") ?? "",
+      artifactDigest: option("artifact-digest") ?? "",
+      artifactBytes: Number(option("artifact-bytes")),
     })
     : await validatePublicationSnapshot(directory);
-  const automaticContract = "contract" in snapshot ? snapshot.contract : null;
+  const automaticSnapshot = automatic ? snapshot as AutomaticPublicationSnapshot : null;
+  const automaticContract: AutomaticPublicationContract | null = automaticSnapshot?.contract ?? null;
   const importSqlPath = join(directory, "import.sql");
   const generated = await emitImportSql({
     stagedPath: snapshot.stagedPath,
@@ -255,6 +264,7 @@ async function publishCommand(): Promise<void> {
     outputPath: importSqlPath,
     includeTransaction: !remote,
     applyEvidenceDecisions: !automatic,
+    extraction: automaticSnapshot?.extractionImport ?? undefined,
   });
   const target = remote ? "--remote" : "--local";
   let before: PublicationState | null = null;
@@ -262,7 +272,7 @@ async function publishCommand(): Promise<void> {
     const migrationState = await runCapture("pnpm", ["exec", "wrangler", "d1", "migrations", "list", "protein-index", "--remote"]);
     assertNoPendingD1Migrations(migrationState);
     before = parsePublicationState(await runCapture("pnpm", [
-      "exec", "wrangler", "d1", "execute", "protein-index", "--remote", "--json", "--command", publicationStateQuery(snapshot.manifest),
+      "exec", "wrangler", "d1", "execute", "protein-index", "--remote", "--json", "--command", publicationStateQuery(snapshot.manifest, snapshot.exactExtraction),
     ]));
   } else {
     await run("pnpm", ["exec", "wrangler", "d1", "migrations", "apply", "protein-index", target]);
@@ -279,9 +289,15 @@ async function publishCommand(): Promise<void> {
   let completedRuns: number | null = null;
   if (automatic && before) {
     const after = parsePublicationState(await runCapture("pnpm", [
-      "exec", "wrangler", "d1", "execute", "protein-index", "--remote", "--json", "--command", publicationStateQuery(snapshot.manifest),
+      "exec", "wrangler", "d1", "execute", "protein-index", "--remote", "--json", "--command", publicationStateQuery(snapshot.manifest, snapshot.exactExtraction),
     ]));
-    const postconditions = assertAutomaticPublicationPostconditions(before, after, snapshot.manifest);
+    const postconditions = assertAutomaticPublicationPostconditions(
+      before,
+      after,
+      snapshot.manifest,
+      snapshot.exactExtraction,
+      automaticContract,
+    );
     products = after.products;
     sourceRecords = after.sourceRecords;
     if (!automaticContract) throw new Error("Automatic publication contract was not retained after validation");
@@ -315,7 +331,8 @@ async function reviewExportCommand(): Promise<void> {
   const raw = await runCapture("pnpm", [
     "exec", "wrangler", "d1", "execute", "protein-index", "--local", "--json", "--command",
     `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
-      candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at
+      candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at,
+      extraction_attempt_id, label_asset_id
       FROM evidence_decisions WHERE active = 1 ORDER BY id;`,
   ]);
   const response = JSON.parse(raw) as Array<{ success?: boolean; results?: Array<Record<string, unknown>> }>;

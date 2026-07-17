@@ -192,11 +192,37 @@ export type CompletionLane =
   | "evidence_inconsistent"
   | "conflict_resolution"
   | "review_ready"
+  | "retry_extraction"
+  | "run_extraction"
+  | "manual_label_review"
   | "structured_evidence_review"
-  | "label_evidence_review"
   | "source_evidence_needed";
 export type CompletionLaneFilter = CompletionLane | "all";
 export type TerminalUnavailableOutcome = "not_applicable" | "not_declared";
+export type ExtractionLabelOutcome = "candidate" | "no_prediction" | "rejected" | "failed";
+
+export interface CompletionExtractionSummary {
+  labels: number;
+  candidate: number;
+  noPrediction: number;
+  rejected: number;
+  failed: number;
+  unattempted: number;
+  stale: number;
+  conflicts: number;
+}
+
+export interface CompletionLabelEvidence {
+  attemptId: string;
+  labelAssetId: string;
+  sourceImageId: string;
+  role: "requested" | "prediction";
+  outcome: ExtractionLabelOutcome;
+  labelUrl: string;
+  contentSha256: string;
+  fetchedAt: string;
+  attemptedAt: string;
+}
 
 export interface CompletionSummary {
   family: CompletionFamily;
@@ -232,6 +258,10 @@ export interface CompletionLedgerItem {
   openCandidateCount: number;
   openReviewCount: number;
   primaryReviewId: string | null;
+  primaryActionId: string;
+  extraction: CompletionExtractionSummary;
+  labels: CompletionLabelEvidence[];
+  labelsTruncated: boolean;
 }
 
 export interface CompletionLedgerFilters {
@@ -249,6 +279,13 @@ export interface CompletionLedgerResponse {
   pagination: { page: number; pageSize: number; total: number; pages: number };
   filters: CompletionLedgerFilters;
   snapshotAt: string | null;
+}
+
+export interface CompletionLabelEvidenceResponse {
+  productId: string;
+  family: Exclude<CompletionFamily, "identity">;
+  items: CompletionLabelEvidence[];
+  pagination: { page: number; pageSize: number; total: number; pages: number };
 }
 
 export interface HealthResponse {

@@ -96,6 +96,8 @@ jobs:
         with:
           artifact-prefix: robotoff-label-candidates-
           output-directory: .data/robotoff
+          expected-adapter-version: robotoff-api-v8
+          restore-label-proofs: "true"
 
       - name: Extract every eligible nutrition label image
         shell: bash
@@ -143,20 +145,12 @@ jobs:
           if (failures.length) throw new Error(failures.join('; '));
           NODE
 
-      - name: Record extraction checksums
+      - name: Verify portable extraction checksums
         shell: bash
         run: |
           set -euo pipefail
           cd .data/robotoff
-          sha256sum \
-            manifest.json \
-            report.json \
-            source-index.jsonl \
-            exclusions.jsonl \
-            outcomes.jsonl \
-            staged-products.jsonl \
-            > checksums.sha256
-          find responses -type f -name '*.json' ! -name '*.error.json' -print0 | sort -z | xargs -0 sha256sum >> checksums.sha256
+          sha256sum --check checksums.sha256
 
       - name: Upload review-gated label candidates
         uses: actions/upload-artifact@v7
@@ -168,6 +162,10 @@ jobs:
           path: |
             .data/robotoff/manifest.json
             .data/robotoff/report.json
+            .data/robotoff/cohort.jsonl
+            .data/robotoff/label-assets.jsonl
+            .data/robotoff/extraction-attempts.jsonl
+            .data/robotoff/extraction-attempt-labels.jsonl
             .data/robotoff/source-index.jsonl
             .data/robotoff/exclusions.jsonl
             .data/robotoff/outcomes.jsonl

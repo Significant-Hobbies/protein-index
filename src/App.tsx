@@ -50,8 +50,10 @@ const COMPLETION_LANES: Array<{ value: CompletionLane; label: string }> = [
   { value: "evidence_inconsistent", label: "Evidence inconsistent" },
   { value: "conflict_resolution", label: "Resolve conflicts" },
   { value: "review_ready", label: "Ready for review" },
+  { value: "retry_extraction", label: "Retry extraction" },
+  { value: "run_extraction", label: "Run extraction" },
+  { value: "manual_label_review", label: "Transcribe label" },
   { value: "structured_evidence_review", label: "Review structured evidence" },
-  { value: "label_evidence_review", label: "Inspect label evidence" },
   { value: "source_evidence_needed", label: "Find source evidence" },
 ];
 
@@ -826,6 +828,69 @@ function CompletionEvidenceLinks({ item }: { item: CompletionLedgerItem }) {
   );
 }
 
+function completionOutcomeLabel(outcome: CompletionLedgerItem["labels"][number]["outcome"]): string {
+  if (outcome === "candidate") return "Candidate ready";
+  if (outcome === "no_prediction") return "No prediction";
+  if (outcome === "rejected") return "Automated result rejected";
+  return "Extraction failed";
+}
+
+export function CompletionOutcomeEvidence({ item }: { item: CompletionLedgerItem }) {
+  const summary = item.extraction;
+  if (summary.labels === 0 && summary.unattempted === 0 && summary.stale === 0) {
+    return <div className="completion-outcomes"><span>No exact label extraction recorded</span></div>;
+  }
+  const summaryItems = [
+    ["candidate", "candidate", summary.candidate],
+    ["no prediction", "no-prediction", summary.noPrediction],
+    ["rejected", "rejected", summary.rejected],
+    ["failed", "failed", summary.failed],
+    ["unattempted", "unattempted", summary.unattempted],
+    ["stale", "stale", summary.stale],
+  ] as const;
+  return (
+    <section className="completion-outcomes" aria-label={`Exact ${item.family} extraction outcomes for ${item.product.name}`}>
+      <dl className="completion-outcome-counts">
+        {summaryItems.map(([label, className, count]) => <div key={label} className={`completion-outcome-${className}`}><dt>{label}</dt><dd>{count.toLocaleString("en-IN")}</dd></div>)}
+      </dl>
+      {item.labels.length > 0 && <ol className="completion-label-list">
+        {item.labels.map((label, index) => {
+          const url = publicEvidenceUrl(label.labelUrl);
+          const observed = Number.isFinite(Date.parse(label.attemptedAt))
+            ? new Date(label.attemptedAt).toLocaleDateString("en-IN")
+            : "time unavailable";
+          return <li key={`${label.attemptId}:${label.labelAssetId}:${label.role}`}><span><strong>{index + 1}. {completionOutcomeLabel(label.outcome)}</strong><small>{label.role} image · {observed} · SHA-256 {label.contentSha256.slice(0, 10)}…</small></span>{url && <a href={url} target="_blank" rel="noreferrer" aria-label={`Open ${item.family} label ${index + 1}, ${label.sourceImageId}, for ${item.product.name}`}>Label {index + 1} ↗</a>}</li>;
+        })}
+      </ol>}
+      {item.labelsTruncated && <a className="completion-label-more" href={`/api/completion-ledger/${encodeURIComponent(item.product.id)}/labels?family=${item.family}&page=1&pageSize=25`} target="_blank" rel="noreferrer" aria-label={`View all ${summary.labels} exact ${item.family} label outcomes for ${item.product.name}`}>View all {summary.labels.toLocaleString("en-IN")} exact label outcomes</a>}
+    </section>
+  );
+}
+
+function completionActionLabel(item: CompletionLedgerItem): string {
+  if (item.lane === "evidence_inconsistent") return "Repair evidence binding";
+  if (item.lane === "conflict_resolution") return "Resolve evidence conflict";
+  if (item.lane === "review_ready") return "Review exact candidate";
+  if (item.lane === "retry_extraction") return "Retry automated extraction";
+  if (item.lane === "run_extraction") return "Run automated extraction";
+  if (item.lane === "manual_label_review") return "Transcribe label manually";
+  if (item.lane === "structured_evidence_review") return "Review structured evidence";
+  if (item.lane === "source_evidence_needed") return "Find authoritative source";
+  return "Inspect terminal evidence";
+}
+
+export function CompletionPrimaryAction({ item, onOpenProduct, onOpenReview }: {
+  item: CompletionLedgerItem;
+  onOpenProduct: (id: string) => void;
+  onOpenReview: (item: CompletionLedgerItem) => void;
+}) {
+  const label = completionActionLabel(item);
+  if (item.lane === "review_ready" && item.primaryReviewId) {
+    return <button onClick={() => onOpenReview(item)} aria-label={`${label} for ${item.product.name}`}>{label}</button>;
+  }
+  return <button onClick={() => onOpenProduct(item.product.id)} aria-label={`${label} for ${item.product.name}`}>{label}</button>;
+}
+
 function CompletionDesktopRows({ items, onOpenProduct, onOpenReview }: {
   items: CompletionLedgerItem[];
   onOpenProduct: (id: string) => void;
@@ -834,14 +899,14 @@ function CompletionDesktopRows({ items, onOpenProduct, onOpenReview }: {
   return (
     <div className="completion-desktop">
       <table>
-        <thead><tr><th scope="col">Product</th><th scope="col">Completion state</th><th scope="col">Evidence state</th><th scope="col">Open work</th><th scope="col">Evidence</th><th scope="col">Action</th></tr></thead>
+        <thead><tr><th scope="col">Product</th><th scope="col">Completion state</th><th scope="col">Evidence state</th><th scope="col">Exact label outcomes</th><th scope="col">Provenance</th><th scope="col">Action</th></tr></thead>
         <tbody>{items.map((item) => <tr key={item.product.id}>
           <td className="completion-product"><button onClick={() => onOpenProduct(item.product.id)}><ProductVisual product={item.product} /><span><strong>{item.product.name}</strong><span>{item.product.brand}</span><small>GTIN {item.product.gtin ?? "not recorded"} · {item.product.category.replaceAll("_", " ")}</small></span></button></td>
           <td className="completion-status"><span className={`completion-state completion-state-${item.state}`}>{completionStateLabel(item.state)}</span><strong className="completion-lane">{completionLaneLabel(item.lane)}</strong></td>
-          <td className="completion-status"><strong>{completionEvidenceLabel(item)}</strong><small>{completionEvidenceSourceLabel(item)}</small></td>
-          <td><div className="completion-counts"><span>{item.openCandidateCount.toLocaleString("en-IN")} candidate{item.openCandidateCount === 1 ? "" : "s"}</span><span>{item.openReviewCount.toLocaleString("en-IN")} review{item.openReviewCount === 1 ? "" : "s"}</span></div></td>
+          <td className="completion-status"><strong>{completionEvidenceLabel(item)}</strong><small>{completionEvidenceSourceLabel(item)}</small><small>{item.openReviewCount.toLocaleString("en-IN")} open review{item.openReviewCount === 1 ? "" : "s"}</small></td>
+          <td><CompletionOutcomeEvidence item={item} /></td>
           <td className="completion-evidence"><CompletionEvidenceLinks item={item} /></td>
-          <td><div className="completion-actions">{item.primaryReviewId && <button onClick={() => onOpenReview(item)} aria-label={`Open evidence queue for ${item.product.name}`}>Open queue</button>}<button onClick={() => onOpenProduct(item.product.id)}>Inspect product</button></div></td>
+          <td><div className="completion-actions"><CompletionPrimaryAction item={item} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} /><button className="ghost" onClick={() => onOpenProduct(item.product.id)} aria-label={`Inspect product details for ${item.product.name}`}>Inspect product</button></div></td>
         </tr>)}</tbody>
       </table>
     </div>
@@ -857,7 +922,7 @@ function CompletionMobileRows({ items, onOpenProduct, onOpenReview }: {
     <div className="completion-mobile" role="list" aria-label="Completion worklist products">
       {items.map((item) => <article className="completion-card" role="listitem" key={item.product.id}>
         <div className="completion-card-head"><button className="completion-card-product" onClick={() => onOpenProduct(item.product.id)}><strong>{item.product.name}</strong><span>{item.product.brand}</span><small>GTIN {item.product.gtin ?? "not recorded"} · {item.product.category.replaceAll("_", " ")}</small></button><span className={`completion-state completion-state-${item.state}`}>{completionStateLabel(item.state)}</span></div>
-        <div className="completion-card-body"><div className="completion-status"><strong className="completion-lane">{completionLaneLabel(item.lane)}</strong><small>{completionEvidenceLabel(item)}</small></div><div className="completion-counts"><span>{item.openCandidateCount} candidate{item.openCandidateCount === 1 ? "" : "s"}</span><span>{item.openReviewCount} review{item.openReviewCount === 1 ? "" : "s"}</span></div><div className="completion-evidence"><CompletionEvidenceLinks item={item} /></div><div className="completion-actions">{item.primaryReviewId && <button onClick={() => onOpenReview(item)}>Open queue</button>}<button onClick={() => onOpenProduct(item.product.id)}>Inspect product</button></div></div>
+        <div className="completion-card-body"><div className="completion-status"><strong className="completion-lane">{completionLaneLabel(item.lane)}</strong><small>{completionEvidenceLabel(item)}</small><small>{item.openReviewCount} open review{item.openReviewCount === 1 ? "" : "s"}</small></div><CompletionOutcomeEvidence item={item} /><div className="completion-evidence"><CompletionEvidenceLinks item={item} /></div><div className="completion-actions"><CompletionPrimaryAction item={item} onOpenProduct={onOpenProduct} onOpenReview={onOpenReview} /><button className="ghost" onClick={() => onOpenProduct(item.product.id)} aria-label={`Inspect product details for ${item.product.name}`}>Inspect product</button></div></div>
       </article>)}
     </div>
   );

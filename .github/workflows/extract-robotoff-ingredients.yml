@@ -96,6 +96,8 @@ jobs:
         with:
           artifact-prefix: robotoff-ingredient-candidates-
           output-directory: .data/robotoff-ingredients
+          expected-adapter-version: robotoff-ingredients-api-v3
+          restore-label-proofs: "true"
 
       - name: Extract every eligible ingredient label image
         shell: bash
@@ -158,6 +160,9 @@ jobs:
             .data/robotoff-ingredients/manifest.json
             .data/robotoff-ingredients/report.json
             .data/robotoff-ingredients/cohort.jsonl
+            .data/robotoff-ingredients/label-assets.jsonl
+            .data/robotoff-ingredients/extraction-attempts.jsonl
+            .data/robotoff-ingredients/extraction-attempt-labels.jsonl
             .data/robotoff-ingredients/candidates.jsonl
             .data/robotoff-ingredients/source-index.jsonl
             .data/robotoff-ingredients/exclusions.jsonl

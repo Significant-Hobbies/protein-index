@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import type { ReviewDecision, ReviewStatus, ReviewType } from "../shared/api";
 import { getProductDetail, searchProducts, validateSearch } from "./catalog";
-import { getCompletionLedger, validateCompletionLedger } from "./completion";
+import {
+  getCompletionLabels,
+  getCompletionLedger,
+  validateCompletionLabels,
+  validateCompletionLedger,
+} from "./completion";
 import { getCoverage } from "./coverage";
 import { listReviews, resolveReview } from "./reviews";
 
@@ -47,6 +52,13 @@ app.get("/api/completion-ledger", async (c) => {
   const parsed = validateCompletionLedger(new URL(c.req.url).searchParams);
   if (!parsed.value) return c.json(errorBody("validation_error", parsed.error ?? "Invalid completion filters"), 400);
   return c.json(await getCompletionLedger(c.env.DB, parsed.value));
+});
+
+app.get("/api/completion-ledger/:productId/labels", async (c) => {
+  const parsed = validateCompletionLabels(new URL(c.req.url).searchParams);
+  if (!parsed.value) return c.json(errorBody("validation_error", parsed.error ?? "Invalid label filters"), 400);
+  const result = await getCompletionLabels(c.env.DB, c.req.param("productId"), parsed.value);
+  return result ? c.json(result) : c.json(errorBody("not_found", "Product not found"), 404);
 });
 
 app.get("/api/reviews", async (c) => {

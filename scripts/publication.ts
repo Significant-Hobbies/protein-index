@@ -3,8 +3,17 @@ import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { createInterface } from "node:readline";
+import {
+  ROBOTOFF_API_REQUEST_SCHEMA,
+  validateRobotoffNutritionArtifact,
+} from "./adapters/robotoff-api";
+import {
+  ROBOTOFF_INGREDIENT_REQUEST_SCHEMA,
+  validateRobotoffIngredientArtifact,
+} from "./adapters/robotoff-ingredients-api";
+import type { ExtractionRun } from "../shared/extraction-outcomes";
 import type { SourceManifest } from "../shared/types";
-import { ingestionRunIdForManifest } from "./reconcile";
+import { ingestionRunIdForManifest, type ExtractionImportInput } from "./reconcile";
 
 interface PublicationReport {
   sourceComplete?: boolean;
@@ -38,6 +47,8 @@ const MULTI_PREDICTION_SOURCES = new Set([
 ]);
 
 export const AUTOMATIC_DISCOVERY_DROP_CEILING = 0.2;
+export const AUTOMATIC_PUBLICATION_REPOSITORY = "Significant-Hobbies/protein-index";
+export const DENIED_EXTRACTION_RUN_IDS = new Set([29551181430, 29552807113]);
 
 export const AUTOMATIC_PUBLICATION_FAMILIES = {
   "Source sync": {
@@ -69,7 +80,10 @@ export interface AutomaticPublicationInput {
   runId: number;
   headSha: string;
   headBranch: string;
+  repository: string;
   artifactName: string;
+  artifactDigest: string;
+  artifactBytes: number;
 }
 
 export interface AutomaticPublicationContract extends AutomaticPublicationInput {
@@ -92,8 +106,20 @@ export function automaticPublicationContract(input: AutomaticPublicationInput): 
   if (input.headBranch !== "main") {
     throw new Error("Automatic publication accepts only default-branch runs");
   }
+  if (input.repository !== AUTOMATIC_PUBLICATION_REPOSITORY) {
+    throw new Error(`Automatic publication accepts only ${AUTOMATIC_PUBLICATION_REPOSITORY}`);
+  }
+  if (!/^sha256:[a-f0-9]{64}$/.test(input.artifactDigest)) {
+    throw new Error("Automatic publication requires the immutable upstream artifact digest");
+  }
+  if (!Number.isSafeInteger(input.artifactBytes) || input.artifactBytes <= 0) {
+    throw new Error("Automatic publication requires the positive upstream artifact size");
+  }
   const workflowName = input.workflowName as AutomaticWorkflowName;
   const family = AUTOMATIC_PUBLICATION_FAMILIES[workflowName];
+  if (family.evidenceKind === "review_only" && DENIED_EXTRACTION_RUN_IDS.has(input.runId)) {
+    throw new Error("Automatic publication rejected an explicitly superseded extraction run");
+  }
   const expectedArtifact = `${family.artifactPrefix}-${input.runId}`;
   if (input.artifactName !== expectedArtifact) {
     throw new Error(`Automatic publication expected artifact ${expectedArtifact}`);
@@ -115,11 +141,29 @@ export interface PublicationSnapshot {
   checksumsPath: string;
   manifest: SourceManifest;
   report: PublicationReport;
+  exactExtraction: ExactExtractionSnapshot | null;
 }
 
 export interface AutomaticPublicationSnapshot extends PublicationSnapshot {
   contract: AutomaticPublicationContract;
   validatedStagedRecords: number;
+  extractionImport: ExtractionImportInput | null;
+}
+
+export interface ExactExtractionSnapshot {
+  fieldFamily: "nutrition" | "ingredients";
+  extractionRunId: string;
+  parentSourceRunId: string;
+  parentSourceInputHash: string;
+  requestSchemaHash: string;
+  modelName: string;
+  modelVersion: string;
+  labelAssetsPath: string;
+  extractionAttemptsPath: string;
+  extractionAttemptLabelsPath: string;
+  labelAssets: number;
+  extractionAttempts: number;
+  extractionAttemptLabels: number;
 }
 
 export function assertPublicationEvidence(manifest: SourceManifest, report: PublicationReport): void {
@@ -160,6 +204,58 @@ async function sha256(path: string): Promise<string> {
   return hash.digest("hex");
 }
 
+function reportString(report: Record<string, unknown>, field: string): string {
+  const value = report[field];
+  if (typeof value !== "string" || !value.trim()) throw new Error(`Extraction report ${field} is missing`);
+  return value;
+}
+
+function reportCount(report: Record<string, unknown>, field: string): number {
+  const value = report[field];
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`Extraction report ${field} is invalid`);
+  return value as number;
+}
+
+function modelVersionLedger(value: unknown): string {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return "{}";
+  const entries = Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
+  if (entries.some(([, count]) => !Number.isSafeInteger(count) || (count as number) < 0)) {
+    throw new Error("Extraction report modelVersions is invalid");
+  }
+  return JSON.stringify(Object.fromEntries(entries));
+}
+
+async function validateExactExtractionSnapshot(
+  directory: string,
+  manifest: SourceManifest,
+): Promise<ExactExtractionSnapshot | null> {
+  if (manifest.source !== "open_food_facts_robotoff" && manifest.source !== "open_food_facts_robotoff_ingredients") return null;
+  const artifact = manifest.source === "open_food_facts_robotoff"
+    ? await validateRobotoffNutritionArtifact(directory)
+    : await validateRobotoffIngredientArtifact(directory);
+  const report = artifact.report as unknown as Record<string, unknown>;
+  const nutrition = manifest.source === "open_food_facts_robotoff";
+  const requestSchemaHash = reportString(report, "requestSchema");
+  if (requestSchemaHash !== (nutrition ? ROBOTOFF_API_REQUEST_SCHEMA : ROBOTOFF_INGREDIENT_REQUEST_SCHEMA)) {
+    throw new Error("Extraction report request schema differs from the current adapter");
+  }
+  return {
+    fieldFamily: nutrition ? "nutrition" : "ingredients",
+    extractionRunId: reportString(report, "extractionRunId"),
+    parentSourceRunId: reportString(report, "parentSourceRunId"),
+    parentSourceInputHash: reportString(report, "inputManifestHash"),
+    requestSchemaHash,
+    modelName: nutrition ? "nutrition_extractor" : "ingredient_detection",
+    modelVersion: modelVersionLedger(report.modelVersions),
+    labelAssetsPath: join(directory, "label-assets.jsonl"),
+    extractionAttemptsPath: join(directory, "extraction-attempts.jsonl"),
+    extractionAttemptLabelsPath: join(directory, "extraction-attempt-labels.jsonl"),
+    labelAssets: reportCount(report, "labelAssets"),
+    extractionAttempts: reportCount(report, "extractionAttempts"),
+    extractionAttemptLabels: reportCount(report, "extractionAttemptLabels"),
+  };
+}
+
 export async function validatePublicationSnapshot(directory: string): Promise<PublicationSnapshot> {
   const manifestPath = join(directory, "manifest.json");
   const reportPath = join(directory, "report.json");
@@ -194,7 +290,8 @@ export async function validatePublicationSnapshot(directory: string): Promise<Pu
     const actual = await sha256(join(directory, file));
     if (actual !== expected) throw new Error(`Publication checksum mismatch for ${file}`);
   }
-  return { directory, manifestPath, reportPath, stagedPath, checksumsPath, manifest, report };
+  const exactExtraction = await validateExactExtractionSnapshot(directory, manifest);
+  return { directory, manifestPath, reportPath, stagedPath, checksumsPath, manifest, report, exactExtraction };
 }
 
 function recordValue(value: unknown): value is Record<string, unknown> {
@@ -232,6 +329,50 @@ function assertAutomaticStagedProduct(product: Record<string, unknown>, contract
     }
     if (validationIssues.length === 0 || !validationIssues.every(recordValue)) reject("review-only artifact has no validation evidence");
   }
+}
+
+function extractionImportForAutomaticSnapshot(
+  snapshot: PublicationSnapshot,
+  contract: AutomaticPublicationContract,
+): ExtractionImportInput | null {
+  const evidence = snapshot.exactExtraction;
+  if (!evidence) return null;
+  const completedAt = snapshot.manifest.completedAt;
+  const run: ExtractionRun = {
+    id: evidence.extractionRunId,
+    ingestionRunId: ingestionRunIdForManifest(snapshot.manifest),
+    fieldFamily: evidence.fieldFamily,
+    requestSchemaHash: evidence.requestSchemaHash,
+    artifactDigest: contract.artifactDigest.slice("sha256:".length),
+    adapterVersion: snapshot.manifest.adapterVersion,
+    modelName: evidence.modelName,
+    modelVersion: evidence.modelVersion,
+    parentSourceRunId: evidence.parentSourceRunId,
+    parentSourceInputHash: evidence.parentSourceInputHash,
+    repository: contract.repository,
+    workflow: contract.workflowName,
+    branch: contract.headBranch,
+    headSha: contract.headSha,
+    sourceComplete: true,
+    status: "accepted",
+    startedAt: snapshot.manifest.startedAt,
+    completedAt,
+    acceptedAt: completedAt,
+    manifest: {
+      source: snapshot.manifest.source,
+      inputHash: snapshot.manifest.inputHash,
+      artifactName: contract.artifactName,
+      artifactDigest: contract.artifactDigest,
+      artifactBytes: contract.artifactBytes,
+      upstreamRunId: contract.runId,
+    },
+  };
+  return {
+    run,
+    labelAssetsPath: evidence.labelAssetsPath,
+    extractionAttemptsPath: evidence.extractionAttemptsPath,
+    extractionAttemptLabelsPath: evidence.extractionAttemptLabelsPath,
+  };
 }
 
 export async function validateAutomaticPublicationSnapshot(
@@ -272,7 +413,12 @@ export async function validateAutomaticPublicationSnapshot(
   if (validatedStagedRecords !== snapshot.manifest.stagedRecords) {
     throw new Error("Automatic publication staged JSONL count differs from the manifest");
   }
-  return { ...snapshot, contract, validatedStagedRecords };
+  return {
+    ...snapshot,
+    contract,
+    validatedStagedRecords,
+    extractionImport: extractionImportForAutomaticSnapshot(snapshot, contract),
+  };
 }
 
 export function assertNoPendingD1Migrations(output: string): void {
@@ -288,19 +434,30 @@ export interface PublicationState {
   decisions: number;
   verifiedNutrition: number;
   verifiedIngredients: number;
+  extractionRuns: number;
+  labelAssets: number;
+  extractionAttempts: number;
+  currentExtractionAttempts: number;
+  extractionAttemptLabels: number;
   exactRunId: string | null;
   exactRunStatus: string | null;
   exactRunInputHash: string | null;
   exactRunSourceComplete: number | null;
   exactRunStagedRecords: number | null;
+  exactExtractionRunId: string | null;
+  exactExtractionRunStatus: string | null;
+  exactExtractionArtifactDigest: string | null;
+  exactExtractionAttempts: number | null;
+  exactExtractionAttemptLabels: number | null;
 }
 
 function sqlText(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-export function publicationStateQuery(manifest: SourceManifest): string {
+export function publicationStateQuery(manifest: SourceManifest, exactExtraction: ExactExtractionSnapshot | null = null): string {
   const runId = ingestionRunIdForManifest(manifest);
+  const extractionId = exactExtraction ? sqlText(exactExtraction.extractionRunId) : "NULL";
   return `SELECT
     (SELECT COUNT(*) FROM products WHERE is_active = 1) AS products,
     (SELECT COUNT(*) FROM source_records) AS source_records,
@@ -308,13 +465,25 @@ export function publicationStateQuery(manifest: SourceManifest): string {
     (SELECT COUNT(*) FROM evidence_decisions) AS decisions,
     (SELECT COUNT(*) FROM nutrition_facts WHERE status = 'verified') AS verified_nutrition,
     (SELECT COUNT(*) FROM ingredient_statements WHERE status = 'verified') AS verified_ingredients,
+    (SELECT COUNT(*) FROM extraction_runs) AS extraction_runs,
+    (SELECT COUNT(*) FROM label_evidence_assets) AS label_assets,
+    (SELECT COUNT(*) FROM extraction_attempts) AS extraction_attempts,
+    (SELECT COUNT(*) FROM extraction_attempts WHERE is_current = 1) AS current_extraction_attempts,
+    (SELECT COUNT(*) FROM extraction_attempt_labels) AS extraction_attempt_labels,
     run.id AS exact_run_id,
     run.status AS exact_run_status,
     run.input_hash AS exact_run_input_hash,
     run.source_complete AS exact_run_source_complete,
-    run.staged_records AS exact_run_staged_records
+    run.staged_records AS exact_run_staged_records,
+    exact_extraction.id AS exact_extraction_run_id,
+    exact_extraction.status AS exact_extraction_run_status,
+    exact_extraction.artifact_digest AS exact_extraction_artifact_digest,
+    (SELECT COUNT(*) FROM extraction_attempts WHERE extraction_run_id = exact_extraction.id) AS exact_extraction_attempts,
+    (SELECT COUNT(*) FROM extraction_attempt_labels labels JOIN extraction_attempts attempts
+      ON attempts.id = labels.attempt_id WHERE attempts.extraction_run_id = exact_extraction.id) AS exact_extraction_attempt_labels
   FROM (SELECT 1) singleton
-  LEFT JOIN ingestion_runs run ON run.id = ${sqlText(runId)} AND run.source_id = ${sqlText(manifest.source)} AND run.input_hash = ${sqlText(manifest.inputHash ?? "")};`;
+  LEFT JOIN ingestion_runs run ON run.id = ${sqlText(runId)} AND run.source_id = ${sqlText(manifest.source)} AND run.input_hash = ${sqlText(manifest.inputHash ?? "")}
+  LEFT JOIN extraction_runs exact_extraction ON exact_extraction.id = ${extractionId};`;
 }
 
 function nonnegativeInteger(row: Record<string, unknown>, field: string): number {
@@ -351,11 +520,21 @@ export function parsePublicationState(input: string | unknown): PublicationState
     decisions: nonnegativeInteger(row, "decisions"),
     verifiedNutrition: nonnegativeInteger(row, "verified_nutrition"),
     verifiedIngredients: nonnegativeInteger(row, "verified_ingredients"),
+    extractionRuns: nonnegativeInteger(row, "extraction_runs"),
+    labelAssets: nonnegativeInteger(row, "label_assets"),
+    extractionAttempts: nonnegativeInteger(row, "extraction_attempts"),
+    currentExtractionAttempts: nonnegativeInteger(row, "current_extraction_attempts"),
+    extractionAttemptLabels: nonnegativeInteger(row, "extraction_attempt_labels"),
     exactRunId: nullableString(row, "exact_run_id"),
     exactRunStatus: nullableString(row, "exact_run_status"),
     exactRunInputHash: nullableString(row, "exact_run_input_hash"),
     exactRunSourceComplete: nullableInteger(row, "exact_run_source_complete"),
     exactRunStagedRecords: nullableInteger(row, "exact_run_staged_records"),
+    exactExtractionRunId: nullableString(row, "exact_extraction_run_id"),
+    exactExtractionRunStatus: nullableString(row, "exact_extraction_run_status"),
+    exactExtractionArtifactDigest: nullableString(row, "exact_extraction_artifact_digest"),
+    exactExtractionAttempts: nullableInteger(row, "exact_extraction_attempts"),
+    exactExtractionAttemptLabels: nullableInteger(row, "exact_extraction_attempt_labels"),
   };
 }
 
@@ -365,12 +544,18 @@ export interface PublicationPostconditions {
   openReviewDelta: number;
   verifiedNutritionDelta: number;
   verifiedIngredientDelta: number;
+  extractionRunDelta: number;
+  labelAssetDelta: number;
+  extractionAttemptDelta: number;
+  extractionAttemptLabelDelta: number;
 }
 
 export function assertAutomaticPublicationPostconditions(
   before: PublicationState,
   after: PublicationState,
   manifest: SourceManifest,
+  exactExtraction: ExactExtractionSnapshot | null = null,
+  contract: AutomaticPublicationContract | null = null,
 ): PublicationPostconditions {
   const failures: string[] = [];
   const expectedRunId = ingestionRunIdForManifest(manifest);
@@ -380,10 +565,27 @@ export function assertAutomaticPublicationPostconditions(
   if (after.decisions !== before.decisions) failures.push("automatic publication changed evidence decisions");
   if (after.verifiedNutrition > before.verifiedNutrition) failures.push("automatic publication increased verified nutrition");
   if (after.verifiedIngredients > before.verifiedIngredients) failures.push("automatic publication increased verified ingredients");
+  if (after.extractionRuns < before.extractionRuns || after.labelAssets < before.labelAssets
+    || after.extractionAttempts < before.extractionAttempts
+    || after.extractionAttemptLabels < before.extractionAttemptLabels) {
+    failures.push("exact extraction ledger counts regressed");
+  }
   if (after.exactRunId !== expectedRunId || after.exactRunStatus !== "completed") failures.push("exact ingestion run is not completed");
   if (after.exactRunInputHash !== manifest.inputHash) failures.push("exact ingestion run input hash does not match");
   if (after.exactRunSourceComplete !== 1) failures.push("exact ingestion run is not source complete");
   if (after.exactRunStagedRecords !== manifest.stagedRecords) failures.push("exact ingestion run staged count does not match");
+  if (exactExtraction) {
+    if (after.exactExtractionRunId !== exactExtraction.extractionRunId || after.exactExtractionRunStatus !== "accepted") {
+      failures.push("exact extraction run is not accepted");
+    }
+    if (after.exactExtractionAttempts !== exactExtraction.extractionAttempts
+      || after.exactExtractionAttemptLabels !== exactExtraction.extractionAttemptLabels) {
+      failures.push("exact extraction ledger counts do not match the artifact");
+    }
+    if (!contract || after.exactExtractionArtifactDigest !== contract.artifactDigest.slice("sha256:".length)) {
+      failures.push("exact extraction artifact digest does not match");
+    }
+  }
   if (failures.length > 0) throw new Error(`Automatic publication postconditions failed: ${failures.join("; ")}`);
   return {
     productDelta: after.products - before.products,
@@ -391,14 +593,27 @@ export function assertAutomaticPublicationPostconditions(
     openReviewDelta: after.openReviews - before.openReviews,
     verifiedNutritionDelta: after.verifiedNutrition - before.verifiedNutrition,
     verifiedIngredientDelta: after.verifiedIngredients - before.verifiedIngredients,
+    extractionRunDelta: after.extractionRuns - before.extractionRuns,
+    labelAssetDelta: after.labelAssets - before.labelAssets,
+    extractionAttemptDelta: after.extractionAttempts - before.extractionAttempts,
+    extractionAttemptLabelDelta: after.extractionAttemptLabels - before.extractionAttemptLabels,
   };
 }
 
 export function assertIdempotentPublicationReplay(first: PublicationState, replay: PublicationState): void {
-  const countFields = ["products", "sourceRecords", "openReviews", "decisions", "verifiedNutrition", "verifiedIngredients"] as const;
+  const countFields = [
+    "products", "sourceRecords", "openReviews", "decisions", "verifiedNutrition", "verifiedIngredients",
+    "extractionRuns", "labelAssets", "extractionAttempts", "currentExtractionAttempts", "extractionAttemptLabels",
+  ] as const;
   const changed = countFields.filter((field) => first[field] !== replay[field]);
   if (changed.length > 0) throw new Error(`Publication replay changed durable counts: ${changed.join(", ")}`);
   if (first.exactRunId !== replay.exactRunId || replay.exactRunStatus !== "completed" || first.exactRunInputHash !== replay.exactRunInputHash) {
     throw new Error("Publication replay changed the exact ingestion-run identity");
+  }
+  if (first.exactExtractionRunId !== replay.exactExtractionRunId
+    || first.exactExtractionArtifactDigest !== replay.exactExtractionArtifactDigest
+    || first.exactExtractionAttempts !== replay.exactExtractionAttempts
+    || first.exactExtractionAttemptLabels !== replay.exactExtractionAttemptLabels) {
+    throw new Error("Publication replay changed the exact extraction-run identity");
   }
 }

@@ -179,6 +179,7 @@ must pass desktop/mobile verification.
 - 2026-07-17 — the next dashboard candidate completed rendered desktop, tablet, and phone verification with independent nutrition/ingredient evidence filters, deterministic review-queue traversal, public label/source links, fuller product metadata, honest retailer/allergen empty states, 44 px controls, and corrected responsive card behavior. Local desktop and mobile Lighthouse runs score 100 for performance, accessibility, best practices, and SEO; keyboard navigation, live regions, zero console errors, and zero horizontal overflow were verified. The updated build is not yet deployed, so live post-deploy verification remains pending explicit release approval.
 - 2026-07-17 — truthful redundant nutrition evidence is implemented locally for exact duplicate labels: authority-100 all-field/basis matching, atomic review-only decisions, zero fact/observation/nutrient/outcome writes, drift deactivation and re-review, immutable bundle guards, and distinct operator/history UI. Local end-to-end replay proved one review moved from open to resolved while verified nutrition stayed at one; desktop and mobile Lighthouse accessibility, best-practices, SEO, and agentic-browsing scores remain 100. Migration `0008_redundant_evidence_decisions.sql` is local-only and production remains unchanged pending explicit release approval.
 - 2026-07-17 — a strict exhaustive completion ledger is implemented locally: every active product partitions exactly once per identity, nutrition, or ingredients into verified, terminal unavailable, or outstanding, with contradictions failing closed and deterministic evidence-action lanes. The 1,334-product local snapshot reconciles identity as 0 / 0 / 1,334, nutrition as 1 / 0 / 1,333, and ingredients as 0 / 0 / 1,334 (verified / terminal unavailable / outstanding), with zero contradictions and the accounting invariant holding for all three families. Responsive desktop/mobile worklists, exact review and product drill-downs, no horizontal overflow, zero console errors or warnings, and Lighthouse scores of 100 for accessibility, best practices, SEO, and agentic browsing were verified. Existing indexes support the set-based queries, so no new migration was added. Production remains unchanged at 17,628 active products, 55 verified nutrition facts, and 65 verified ingredient statements pending explicit release approval and live invariant checks.
+- 2026-07-17 — exact label-byte extraction evidence is implemented locally: bounded HTTPS image hashing, immutable extraction runs/assets/attempts/per-label outcomes, deterministic replay-collision guards, current-attempt supersession, exact candidate and human-decision linkage, and fail-closed completion lanes now preserve candidate, no-prediction, rejected, failed, unattempted, and stale states without promoting automated output. Nutrition adapter v8 and ingredient adapter v3 artifacts require portable byte-hash ledgers; legacy artifacts cannot be backfilled truthfully because they did not retain the fetched label bytes, and the known unsafe v5/v6 workflow runs plus artifacts are explicitly denied. Local migration `0009_extraction_outcome_ledger.sql`, the complete test/build/release dry-run, and rendered desktop/mobile coverage checks pass. Production remains unchanged at 17,628 active products, 55 verified nutrition facts, and 65 verified ingredient statements; migrations `0007`, `0008`, and `0009`, a fresh v8/v3 extraction, publication, and deployment still require explicit production approval.
 
 ## Products
 
@@ -254,6 +255,12 @@ must pass desktop/mobile verification.
   and durable pre/post/live evidence is retained for manual recovery
 - Dimension-safe liquid-label evidence with explicit per-100-mL extraction,
   review, provenance, idempotent publication, and basis-aware metrics
+- Exact byte-bound label evidence with immutable extraction runs, source/hash-
+  bound attempts, per-label outcomes, replay-collision guards, monotonic current
+  selection, and review decisions bound to the exact label SHA-256
+- Honest extraction completion lanes for review-ready, retry, run, manual
+  transcription, structured review, source discovery, and stale evidence, with
+  bounded multi-label detail and product-specific accessible action names
 
 ## Todo / Planned / Deferred / Blocked
 
@@ -287,14 +294,16 @@ must pass desktop/mobile verification.
     validation; every publication must verify the live coverage delta and retain
     workflow diagnostics.
 15. Pending explicit release approval: apply the compatible production
-    migrations, publish the exact adapter-v7 artifact and reviewed bundles in
+    migrations, generate and publish fresh byte-hash-complete adapter-v8 and
+    adapter-v3 artifacts, publish the compatible reviewed bundles in
     the guarded order, deploy the browser-verified dashboard,
     redundant-evidence, and completion-ledger code, then prove the live family
     accounting invariants and repeat API, desktop/mobile visual, and
     accessibility verification before calling the release shipped.
 16. Blocked data refresh: protected Cloudflare credentials are now configured,
-    but pending migrations `0007_review_queue_indexes.sql` and
-    `0008_redundant_evidence_decisions.sql` require an explicit production
+    but pending migrations `0007_review_queue_indexes.sql`,
+    `0008_redundant_evidence_decisions.sql`, and
+    `0009_extraction_outcome_ledger.sql` require an explicit production
     migration before automatic publication can proceed. Automatic
     run `29511127992` proved the current credential and artifact route, then
     failed closed before import or write; earlier runs `29449999090`,
@@ -365,10 +374,12 @@ must pass desktop/mobile verification.
     change. Source-check supplemental rejection bundle
     `review-5bc43cc6a4badbbd2718` against the explicit whole-wheat-bread per-100-g
     row before claiming any queue reduction.
-23. Persist exact product/source-bound extraction outcomes (candidate, no
-    prediction, rejected, and failed) plus current label-content hashes before
-    exposing attempt-status lanes; the current label-evidence lane intentionally
-    does not claim an extraction outcome.
+23. Completed locally: exact product/source-bound extraction outcomes
+    (candidate, no prediction, rejected, and failed), current label-byte hashes,
+    immutable replay guards, and honest attempt-status lanes are implemented.
+    Historical v7 and earlier artifacts cannot establish exact label-content
+    hashes, so production backfill requires fresh adapter-v8/v3 extraction after
+    migration `0009`; do not infer or synthesize hashes for legacy evidence.
 24. Replace mutable projected unavailable outcomes with immutable,
     source/hash-bound not-declared and not-applicable decisions, then prove
     contradiction handling and idempotent replay.

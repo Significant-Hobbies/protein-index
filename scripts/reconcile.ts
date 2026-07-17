@@ -4,6 +4,16 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
 import {
+  validateExtractionAttempt,
+  validateExtractionAttemptLabel,
+  validateExtractionRun,
+  validateLabelEvidenceAsset,
+  type ExtractionAttempt,
+  type ExtractionAttemptLabel,
+  type ExtractionRun,
+  type LabelEvidenceAsset,
+} from "../shared/extraction-outcomes";
+import {
   nutritionCandidateFromEvidence,
   nutritionCandidateHash,
   nutritionCandidateNormalizedBasis,
@@ -105,6 +115,107 @@ function record(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+export interface ExtractionImportInput {
+  run: ExtractionRun;
+  labelAssetsPath: string;
+  extractionAttemptsPath: string;
+  extractionAttemptLabelsPath: string;
+}
+
+async function validatedJsonLines<T>(
+  path: string,
+  name: string,
+  validate: (value: unknown) => string[],
+): Promise<T[]> {
+  const values: T[] = [];
+  const lines = createInterface({ input: createReadStream(path), crlfDelay: Infinity });
+  let lineNumber = 0;
+  for await (const line of lines) {
+    lineNumber += 1;
+    if (!line.trim()) continue;
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      throw new Error(`${name} line ${lineNumber} is invalid JSON`);
+    }
+    const errors = validate(value);
+    if (errors.length > 0) throw new Error(`${name} line ${lineNumber} is invalid: ${errors.join("; ")}`);
+    values.push(value as T);
+  }
+  return values;
+}
+
+async function emitExtractionImport(
+  output: NodeJS.WritableStream,
+  extraction: {
+    run: ExtractionRun;
+    labelAssets: LabelEvidenceAsset[];
+    attempts: ExtractionAttempt[];
+    attemptLabels: ExtractionAttemptLabel[];
+  },
+): Promise<void> {
+  const run = extraction.run;
+  await write(output, `INSERT OR IGNORE INTO extraction_runs (
+    id, ingestion_run_id, field_family, request_schema_hash, artifact_digest, adapter_version,
+    model_name, model_version, parent_source_run_id, parent_source_input_hash, repository,
+    workflow, branch, head_sha, source_complete, status, started_at, completed_at, accepted_at,
+    manifest_json
+  ) VALUES (${sql(run.id)}, ${sql(run.ingestionRunId)}, ${sql(run.fieldFamily)},
+    ${sql(run.requestSchemaHash)}, ${sql(run.artifactDigest)}, ${sql(run.adapterVersion)},
+    ${sql(run.modelName)}, ${sql(run.modelVersion)}, ${sql(run.parentSourceRunId)},
+    ${sql(run.parentSourceInputHash)}, ${sql(run.repository)}, ${sql(run.workflow)},
+    ${sql(run.branch)}, ${sql(run.headSha)}, ${sql(run.sourceComplete)}, ${sql(run.status)},
+    ${sql(run.startedAt)}, ${sql(run.completedAt)}, ${sql(run.acceptedAt)}, ${json(run.manifest)});`);
+  for (const asset of extraction.labelAssets) {
+    await write(output, `INSERT OR IGNORE INTO label_evidence_assets (
+      id, subject_source_record_id, subject_source_content_hash, product_id, field_family,
+      source_image_id, source_image_revision, requested_url, effective_url, content_sha256,
+      byte_length, media_type, fetched_at
+    ) VALUES (${sql(asset.id)}, ${sql(asset.subjectSourceRecordId)},
+      ${sql(asset.subjectSourceContentHash)}, ${sql(asset.productId)}, ${sql(asset.fieldFamily)},
+      ${sql(asset.sourceImageId)}, ${sql(asset.sourceImageRevision)}, ${sql(asset.requestedUrl)},
+      ${sql(asset.effectiveUrl)}, ${sql(asset.contentSha256)}, ${asset.byteLength},
+      ${sql(asset.mediaType)}, ${sql(asset.fetchedAt)});`);
+  }
+  for (const attempt of extraction.attempts) {
+    await write(output, `INSERT OR IGNORE INTO extraction_attempts (
+      id, extraction_run_id, subject_source_record_id, subject_source_record_key,
+      subject_source_content_hash, product_id, field_family, response_evidence_hash, status,
+      prediction_count, candidate_count, rejection_count, failure_count, conflict_count,
+      reasons_json, attempted_at, is_current
+    ) VALUES (${sql(attempt.id)}, ${sql(attempt.extractionRunId)},
+      ${sql(attempt.subjectSourceRecordId)}, ${sql(attempt.subjectSourceRecordKey)},
+      ${sql(attempt.subjectSourceContentHash)}, ${sql(attempt.productId)},
+      ${sql(attempt.fieldFamily)}, ${sql(attempt.responseEvidenceHash)}, ${sql(attempt.status)},
+      ${attempt.predictionCount}, ${attempt.candidateCount}, ${attempt.rejectionCount},
+      ${attempt.failureCount}, ${attempt.conflictCount}, ${json(attempt.reasons)},
+      ${sql(attempt.attemptedAt)}, 0);`);
+  }
+  for (const label of extraction.attemptLabels) {
+    await write(output, `INSERT OR IGNORE INTO extraction_attempt_labels (
+      id, attempt_id, label_asset_id, role, outcome, prediction_count, candidate_count,
+      rejection_count, failure_count, conflict_count, candidate_hashes_json, reasons_json
+    ) VALUES (${sql(label.id)}, ${sql(label.attemptId)}, ${sql(label.labelAssetId)},
+      ${sql(label.role)}, ${sql(label.outcome)}, ${label.predictionCount}, ${label.candidateCount},
+      ${label.rejectionCount}, ${label.failureCount}, ${label.conflictCount},
+      ${json(label.candidateHashes)}, ${json(label.reasons)});`);
+  }
+  for (const attempt of extraction.attempts.filter(({ isCurrent }) => isCurrent)) {
+    const newerThanCurrent = `(attempted_at < ${sql(attempt.attemptedAt)} OR (attempted_at = ${sql(attempt.attemptedAt)} AND id < ${sql(attempt.id)}))`;
+    const currentNewer = `(current.attempted_at > ${sql(attempt.attemptedAt)} OR (current.attempted_at = ${sql(attempt.attemptedAt)} AND current.id > ${sql(attempt.id)}))`;
+    await write(output, `UPDATE extraction_attempts SET is_current = 0
+      WHERE subject_source_record_id = ${sql(attempt.subjectSourceRecordId)}
+        AND field_family = ${sql(attempt.fieldFamily)} AND is_current = 1
+        AND id <> ${sql(attempt.id)} AND ${newerThanCurrent};`);
+    await write(output, `UPDATE extraction_attempts SET is_current = 1 WHERE id = ${sql(attempt.id)}
+      AND NOT EXISTS (SELECT 1 FROM extraction_attempts current
+        WHERE current.subject_source_record_id = ${sql(attempt.subjectSourceRecordId)}
+          AND current.field_family = ${sql(attempt.fieldFamily)} AND current.is_current = 1
+          AND current.id <> ${sql(attempt.id)} AND ${currentNewer});`);
+  }
+}
+
 async function nutritionDecisionCandidate(product: StagedProduct): Promise<NutritionDecisionCandidate | null> {
   const issue = product.validationIssues.find(({ code }) => code === "robotoff_nutrition_candidate");
   if (!issue) return null;
@@ -171,9 +282,55 @@ export async function emitImportSql(input: {
   outputPath: string;
   includeTransaction?: boolean;
   applyEvidenceDecisions?: boolean;
+  extraction?: ExtractionImportInput;
 }): Promise<{ products: number; outputPath: string; runId: string }> {
   const manifest = JSON.parse(await readFile(input.manifestPath, "utf8")) as SourceManifest;
   const runId = ingestionRunIdForManifest(manifest);
+  const expectedExtractionFamily = manifest.source === "open_food_facts_robotoff"
+    ? "nutrition"
+    : manifest.source === "open_food_facts_robotoff_ingredients" ? "ingredients" : null;
+  const extraction = input.extraction ? {
+    run: input.extraction.run,
+    labelAssets: await validatedJsonLines<LabelEvidenceAsset>(
+      input.extraction.labelAssetsPath,
+      "label-assets.jsonl",
+      validateLabelEvidenceAsset,
+    ),
+    attempts: await validatedJsonLines<ExtractionAttempt>(
+      input.extraction.extractionAttemptsPath,
+      "extraction-attempts.jsonl",
+      validateExtractionAttempt,
+    ),
+    attemptLabels: await validatedJsonLines<ExtractionAttemptLabel>(
+      input.extraction.extractionAttemptLabelsPath,
+      "extraction-attempt-labels.jsonl",
+      validateExtractionAttemptLabel,
+    ),
+  } : null;
+  if (extraction) {
+    const runErrors = validateExtractionRun(extraction.run);
+    if (runErrors.length > 0) throw new Error(`Extraction run is invalid: ${runErrors.join("; ")}`);
+    if (!expectedExtractionFamily || extraction.run.fieldFamily !== expectedExtractionFamily) {
+      throw new Error("Extraction run family does not match the publication source");
+    }
+    if (extraction.run.ingestionRunId !== runId || extraction.run.adapterVersion !== manifest.adapterVersion) {
+      throw new Error("Extraction run does not match the exact ingestion manifest");
+    }
+    if (extraction.run.status !== "accepted" || !extraction.run.sourceComplete) {
+      throw new Error("Only an accepted source-complete extraction run can be imported");
+    }
+    const assetIds = new Set(extraction.labelAssets.map(({ id }) => id));
+    const attemptIds = new Set(extraction.attempts.map(({ id }) => id));
+    if (assetIds.size !== extraction.labelAssets.length || attemptIds.size !== extraction.attempts.length) {
+      throw new Error("Extraction artifact contains duplicate immutable IDs");
+    }
+    if (extraction.attempts.some((attempt) => attempt.extractionRunId !== extraction.run.id)
+      || extraction.attemptLabels.some((label) => !attemptIds.has(label.attemptId) || !assetIds.has(label.labelAssetId))) {
+      throw new Error("Extraction artifact contains a cross-run or missing label binding");
+    }
+  } else if (expectedExtractionFamily && manifest.mode === "production") {
+    throw new Error("Production Robotoff imports require exact label and extraction ledgers");
+  }
   const applyEvidenceDecisions = input.applyEvidenceDecisions !== false;
   const output = createWriteStream(input.outputPath, { encoding: "utf8" });
   await write(output, "PRAGMA foreign_keys = ON;");
@@ -186,6 +343,7 @@ export async function emitImportSql(input: {
     output,
     `INSERT INTO ingestion_runs (id, source_id, adapter_version, mode, input_identifier, input_hash, input_bytes, advertised_total, records_read, india_records, staged_records, invalid_records, duplicate_records, terminal_evidence, source_complete, market_complete, status, started_at, completed_at, manifest_json) VALUES (${sql(runId)}, ${sql(manifest.source)}, ${sql(manifest.adapterVersion)}, ${sql(manifest.mode)}, ${sql(manifest.input)}, ${sql(manifest.inputHash)}, ${sql(manifest.inputBytes)}, ${sql(manifest.advertisedTotal)}, ${manifest.recordsRead}, ${manifest.indiaRecords}, ${manifest.stagedRecords}, ${manifest.invalidRecords}, ${manifest.duplicateRecords}, ${sql(manifest.terminalEvidence)}, ${sql(manifest.sourceComplete)}, 0, 'running', ${sql(manifest.startedAt)}, NULL, ${json(manifest)}) ON CONFLICT(id) DO UPDATE SET status = 'running', completed_at = NULL, manifest_json = excluded.manifest_json;`,
   );
+  if (extraction) await emitExtractionImport(output, extraction);
 
   const lines = createInterface({ input: createReadStream(input.stagedPath), crlfDelay: Infinity });
   let products = 0;
@@ -204,6 +362,13 @@ export async function emitImportSql(input: {
     const sourceProductIdSql = `CASE WHEN ${decisionKindSql} = 'no_match' THEN NULL ELSE ${productIdSql} END`;
     const automaticRule = product.gtin ? "exact_gtin" : compositeIdentityKey(product) ? "deterministic_composite" : "source_identity";
     const resolutionRuleSql = `COALESCE('manual_' || ${decisionKindSql}, ${sql(automaticRule)})`;
+    const extractionCurrentGuard = extraction
+      ? ` WHERE EXISTS (SELECT 1 FROM extraction_attempts current_attempt
+          WHERE current_attempt.id = json_extract(excluded.raw_evidence_json, '$.extractionAttemptId')
+            AND current_attempt.product_id = excluded.product_id
+            AND current_attempt.field_family = ${sql(extraction.run.fieldFamily)}
+            AND current_attempt.is_current = 1)`
+      : "";
     const now = manifest.completedAt;
     await write(
       output,
@@ -211,7 +376,7 @@ export async function emitImportSql(input: {
     );
     await write(
       output,
-      `INSERT INTO source_records (id, source_id, source_record_id, product_id, source_url, content_hash, identity_hash, observed_at, first_seen_run_id, last_seen_run_id, raw_evidence_json, resolution_rule) VALUES (${sql(sourceRecordId)}, ${sql(product.source)}, ${sql(product.sourceRecordId)}, ${sourceProductIdSql}, ${sql(product.sourceUrl)}, ${sql(product.contentHash)}, ${sql(identityHash)}, ${sql(product.observedAt)}, ${sql(runId)}, ${sql(runId)}, ${json(product.rawEvidence)}, ${resolutionRuleSql}) ON CONFLICT(source_id, source_record_id) DO UPDATE SET product_id = excluded.product_id, source_url = excluded.source_url, content_hash = excluded.content_hash, identity_hash = excluded.identity_hash, observed_at = excluded.observed_at, last_seen_run_id = excluded.last_seen_run_id, raw_evidence_json = excluded.raw_evidence_json, resolution_rule = excluded.resolution_rule;`,
+      `INSERT INTO source_records (id, source_id, source_record_id, product_id, source_url, content_hash, identity_hash, observed_at, first_seen_run_id, last_seen_run_id, raw_evidence_json, resolution_rule) VALUES (${sql(sourceRecordId)}, ${sql(product.source)}, ${sql(product.sourceRecordId)}, ${sourceProductIdSql}, ${sql(product.sourceUrl)}, ${sql(product.contentHash)}, ${sql(identityHash)}, ${sql(product.observedAt)}, ${sql(runId)}, ${sql(runId)}, ${json(product.rawEvidence)}, ${resolutionRuleSql}) ON CONFLICT(source_id, source_record_id) DO UPDATE SET product_id = excluded.product_id, source_url = excluded.source_url, content_hash = excluded.content_hash, identity_hash = excluded.identity_hash, observed_at = excluded.observed_at, last_seen_run_id = excluded.last_seen_run_id, raw_evidence_json = excluded.raw_evidence_json, resolution_rule = excluded.resolution_rule${extractionCurrentGuard};`,
     );
     await write(
       output,
@@ -475,9 +640,20 @@ export async function emitImportSql(input: {
         : isIngredientCandidate
           ? ingredientDecisionWhere
           : null;
-      const matchingDecisionAbsent = matchingDecisionWhere
-        ? `NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${matchingDecisionWhere})`
+      const issueDetails = record(issue.details);
+      const issueAttemptId = typeof issueDetails?.extractionAttemptId === "string" ? issueDetails.extractionAttemptId : null;
+      const issueLabelAssetId = typeof issueDetails?.labelAssetId === "string" ? issueDetails.labelAssetId : null;
+      const currentExtractionReviewGuard = extraction && (issue.code === "robotoff_nutrition_candidate" || isIngredientCandidate)
+        ? `EXISTS (SELECT 1 FROM extraction_attempts exact_attempt
+            JOIN extraction_attempt_labels exact_label
+              ON exact_label.attempt_id = exact_attempt.id AND exact_label.label_asset_id = ${sql(issueLabelAssetId)}
+            WHERE exact_attempt.id = ${sql(issueAttemptId)} AND exact_attempt.is_current = 1
+              AND exact_attempt.product_id = ${productIdSql}
+              AND exact_attempt.field_family = ${sql(extraction.run.fieldFamily)})`
         : "1 = 1";
+      const matchingDecisionAbsent = `${matchingDecisionWhere
+        ? `NOT EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${matchingDecisionWhere})`
+        : "1 = 1"} AND ${currentExtractionReviewGuard}`;
       const reviewEvidence = issue.code === "robotoff_nutrition_candidate" && nutritionCandidate
         ? { ...issue, details: { ...issue.details, candidateHash: nutritionCandidate.candidateHash } }
         : isIngredientCandidate

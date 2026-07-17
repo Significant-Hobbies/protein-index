@@ -1,5 +1,7 @@
 import type {
   CompletionFamily,
+  CompletionLabelEvidence,
+  CompletionLabelEvidenceResponse,
   CompletionLane,
   CompletionLedgerFilters,
   CompletionLedgerItem,
@@ -18,8 +20,10 @@ const LANES = [
   "evidence_inconsistent",
   "conflict_resolution",
   "review_ready",
+  "retry_extraction",
+  "run_extraction",
+  "manual_label_review",
   "structured_evidence_review",
-  "label_evidence_review",
   "source_evidence_needed",
 ] as const;
 const COMPLETION_LANES = LANES.filter((lane): lane is CompletionLane => lane !== "all");
@@ -33,8 +37,10 @@ interface SummaryRow {
   evidence_inconsistent: number;
   conflict_resolution: number;
   review_ready: number;
+  retry_extraction: number;
+  run_extraction: number;
+  manual_label_review: number;
   structured_evidence_review: number;
-  label_evidence_review: number;
   source_evidence_needed: number;
 }
 
@@ -57,12 +63,72 @@ interface LedgerRow {
   open_candidate_count: number;
   open_review_count: number;
   primary_review_id: string | null;
+  extraction_labels: number;
+  extraction_candidate: number;
+  extraction_no_prediction: number;
+  extraction_rejected: number;
+  extraction_failed: number;
+  extraction_unattempted: number;
+  extraction_stale: number;
+  extraction_conflicts: number;
+  labels_json: string;
+}
+
+interface LabelRow {
+  attempt_id: string;
+  label_asset_id: string;
+  source_image_id: string;
+  role: CompletionLabelEvidence["role"];
+  outcome: CompletionLabelEvidence["outcome"];
+  effective_url: string;
+  content_sha256: string;
+  fetched_at: string;
+  attempted_at: string;
 }
 
 interface CountRow { total: number }
 interface SnapshotRow { snapshot_at: string | null }
 
+const INLINE_LABEL_LIMIT = 4;
+
+function parseLabelEvidence(value: string): CompletionLabelEvidence[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.slice(0, INLINE_LABEL_LIMIT).filter((item): item is CompletionLabelEvidence => {
+      if (!item || typeof item !== "object") return false;
+      const value = item as Record<string, unknown>;
+      return typeof value.attemptId === "string"
+        && typeof value.labelAssetId === "string"
+        && typeof value.sourceImageId === "string"
+        && ["requested", "prediction"].includes(String(value.role))
+        && ["candidate", "no_prediction", "rejected", "failed"].includes(String(value.outcome))
+        && typeof value.labelUrl === "string"
+        && typeof value.contentSha256 === "string"
+        && typeof value.fetchedAt === "string"
+        && typeof value.attemptedAt === "string";
+    });
+  } catch {
+    return [];
+  }
+}
+
+function labelFromRow(row: LabelRow): CompletionLabelEvidence {
+  return {
+    attemptId: row.attempt_id,
+    labelAssetId: row.label_asset_id,
+    sourceImageId: row.source_image_id,
+    role: row.role,
+    outcome: row.outcome,
+    labelUrl: row.effective_url,
+    contentSha256: row.content_sha256,
+    fetchedAt: row.fetched_at,
+    attemptedAt: row.attempted_at,
+  };
+}
+
 function familySql(family: CompletionFamily, includeSources = true): string {
+  const supportsExtraction = family !== "identity";
   const factJoin = family === "nutrition"
     ? "LEFT JOIN nutrition_facts f ON f.product_id = p.id"
     : family === "ingredients"
@@ -83,11 +149,12 @@ function familySql(family: CompletionFamily, includeSources = true): string {
     : family === "ingredients"
       ? "r.type = 'ingredient_conflict'"
       : "r.type IN ('identity', 'invalid_gtin')";
-  const candidate = family === "nutrition"
-    ? "r.type = 'nutrition_validation' AND sr.source_id = 'open_food_facts_robotoff'"
-    : family === "ingredients"
-      ? "r.type = 'ingredient_conflict' AND sr.source_id = 'open_food_facts_robotoff_ingredients'"
-      : "0";
+  const candidateReviewType = family === "nutrition"
+    ? "r.type = 'nutrition_validation'"
+    : family === "ingredients" ? "r.type = 'ingredient_conflict'" : "0";
+  const extractionSourceId = family === "nutrition"
+    ? "open_food_facts_robotoff"
+    : family === "ingredients" ? "open_food_facts_robotoff_ingredients" : "";
   const verifiedFact = family === "identity"
     ? "0"
     : "j.field_status = 'verified' AND j.fact_authority = 100";
@@ -98,7 +165,20 @@ function familySql(family: CompletionFamily, includeSources = true): string {
       OR (j.outcome IN ('not_applicable', 'not_declared') AND (${verifiedFact}))
       OR (j.outcome IN ('not_applicable', 'not_declared') AND j.field_status = 'conflict')
       OR (j.outcome IN ('not_applicable', 'not_declared') AND TRIM(COALESCE(j.outcome_evidence_url, '')) = '')
-      OR (j.field_status = 'verified' AND j.fact_authority <> 100))`;
+      OR (j.field_status = 'verified' AND j.fact_authority <> 100)
+      OR (j.field_status = 'verified' AND j.fact_source_origin_id IN (
+        'open_food_facts_robotoff', 'open_food_facts_robotoff_ingredients'
+      ) AND j.current_linked_verify_count = 0)
+      OR (j.outcome IN ('not_applicable', 'not_declared')
+        AND j.outcome_source_origin_id IN (
+          'open_food_facts_robotoff', 'open_food_facts_robotoff_ingredients'
+        ))
+      OR (j.outcome IN ('not_applicable', 'not_declared')
+        AND j.outcome_source_record_id IS NOT NULL
+        AND COALESCE(j.outcome_source_record_observed_at, '') <> COALESCE(j.outcome_observed_at, ''))
+      OR (j.outcome_source_record_id IS NOT NULL AND COALESCE(j.outcome_source_product_id, '') <> j.id)
+      OR (j.linked_verify_count > j.current_linked_verify_count))`;
+  const materialConflict = supportsExtraction ? "j.extraction_conflicts > 0" : "0";
   const verified = family === "identity"
     ? "j.outcome = 'verified' AND TRIM(COALESCE(j.outcome_evidence_url, '')) <> ''"
     : `(${verifiedFact}) AND COALESCE(j.outcome, '') NOT IN ('not_applicable', 'not_declared')`;
@@ -108,12 +188,104 @@ function familySql(family: CompletionFamily, includeSources = true): string {
       AND NOT (${verifiedFact})
       AND TRIM(COALESCE(j.outcome_evidence_url, '')) <> ''`;
 
+  const extractionCtes = supportsExtraction ? `, current_label_ranked AS (
+    SELECT a.product_id, a.id AS attempt_id, l.id AS label_asset_id, l.source_image_id,
+      al.role, al.outcome, l.effective_url, l.content_sha256, l.fetched_at, a.attempted_at,
+      al.candidate_count, al.rejection_count, al.failure_count, al.conflict_count,
+      ROW_NUMBER() OVER (PARTITION BY a.product_id ORDER BY a.attempted_at DESC,
+        l.source_image_id, l.id, al.role) AS label_rank
+    FROM extraction_attempts a
+    JOIN source_records subject ON subject.id = a.subject_source_record_id
+      AND subject.product_id = a.product_id
+      AND subject.content_hash = a.subject_source_content_hash
+    JOIN extraction_attempt_labels al ON al.attempt_id = a.id
+    JOIN label_evidence_assets l ON l.id = al.label_asset_id
+      AND l.subject_source_record_id = a.subject_source_record_id
+      AND l.subject_source_content_hash = a.subject_source_content_hash
+      AND l.product_id = a.product_id AND l.field_family = a.field_family
+    WHERE a.is_current = 1 AND a.field_family = '${family}'
+  ), current_label_summary AS (
+    SELECT product_id, COUNT(*) AS extraction_labels,
+      SUM(CASE WHEN outcome = 'candidate' THEN 1 ELSE 0 END) AS extraction_candidate,
+      SUM(CASE WHEN outcome = 'no_prediction' THEN 1 ELSE 0 END) AS extraction_no_prediction,
+      SUM(CASE WHEN outcome = 'rejected' THEN 1 ELSE 0 END) AS extraction_rejected,
+      SUM(CASE WHEN outcome = 'failed' THEN 1 ELSE 0 END) AS extraction_failed,
+      SUM(conflict_count) AS extraction_conflicts,
+      COALESCE(json_group_array(json_object(
+        'attemptId', attempt_id, 'labelAssetId', label_asset_id,
+        'sourceImageId', source_image_id, 'role', role, 'outcome', outcome,
+        'labelUrl', effective_url, 'contentSha256', content_sha256,
+        'fetchedAt', fetched_at, 'attemptedAt', attempted_at
+      )) FILTER (WHERE label_rank <= 4), '[]') AS labels_json
+    FROM current_label_ranked GROUP BY product_id
+  ), stale_label_summary AS (
+    SELECT a.product_id, COUNT(DISTINCT al.label_asset_id) AS extraction_stale
+    FROM extraction_attempts a
+    JOIN extraction_attempt_labels al ON al.attempt_id = a.id
+    LEFT JOIN source_records subject ON subject.id = a.subject_source_record_id
+    WHERE a.field_family = '${family}' AND (
+      a.is_current = 0 OR subject.id IS NULL OR subject.product_id <> a.product_id
+      OR subject.content_hash <> a.subject_source_content_hash
+    ) GROUP BY a.product_id
+  ), linked_decision_summary AS (
+    SELECT d.product_id, d.source_record_id AS fact_source_record_id,
+      COUNT(*) AS linked_verify_count,
+      SUM(CASE WHEN a.is_current = 1
+        AND subject.product_id = d.product_id AND subject.content_hash = a.subject_source_content_hash
+        AND derived.product_id = d.product_id AND derived.content_hash = d.source_content_hash
+        AND json_extract(derived.raw_evidence_json, '$.extractionAttemptId') = a.id
+        AND json_extract(derived.raw_evidence_json, '$.labelAssetId') = d.label_asset_id
+        AND json_extract(derived.raw_evidence_json, '$.labelContentSha256') = l.content_sha256
+        AND al.label_asset_id = d.label_asset_id
+        AND instr(al.candidate_hashes_json, '"' || d.candidate_hash || '"') > 0
+        THEN 1 ELSE 0 END) AS current_linked_verify_count
+    FROM evidence_decisions d
+    JOIN extraction_attempts a ON a.id = d.extraction_attempt_id
+    JOIN extraction_attempt_labels al ON al.attempt_id = a.id AND al.label_asset_id = d.label_asset_id
+    JOIN label_evidence_assets l ON l.id = d.label_asset_id
+    JOIN source_records derived ON derived.id = d.source_record_id
+    JOIN source_records subject ON subject.id = a.subject_source_record_id
+    WHERE d.active = 1 AND d.decision = 'verify' AND d.field_family = '${family}'
+      AND derived.source_id = '${extractionSourceId}'
+    GROUP BY d.product_id, d.source_record_id
+  )` : "";
+  const exactCandidateCte = supportsExtraction ? `, exact_candidate_ranked AS (
+    SELECT r.product_id, r.id AS review_id,
+      ROW_NUMBER() OVER (PARTITION BY r.product_id ORDER BY r.priority DESC, r.created_at, r.id) AS candidate_rank
+    FROM review_items r
+    JOIN source_records sr ON sr.id = r.source_record_id AND sr.product_id = r.product_id
+    JOIN extraction_attempts a
+      ON a.id = json_extract(r.evidence_json, '$.details.extractionAttemptId')
+      AND a.is_current = 1 AND a.product_id = r.product_id AND a.field_family = '${family}'
+    JOIN source_records subject ON subject.id = a.subject_source_record_id
+      AND subject.product_id = a.product_id AND subject.content_hash = a.subject_source_content_hash
+    JOIN extraction_attempt_labels al
+      ON al.attempt_id = a.id
+      AND al.label_asset_id = json_extract(r.evidence_json, '$.details.labelAssetId')
+      AND al.outcome = 'candidate'
+    JOIN label_evidence_assets l ON l.id = al.label_asset_id
+      AND l.product_id = r.product_id AND l.field_family = '${family}'
+      AND l.subject_source_record_id = a.subject_source_record_id
+      AND l.subject_source_content_hash = a.subject_source_content_hash
+    WHERE r.status = 'open' AND r.product_id IS NOT NULL AND ${candidateReviewType}
+      AND sr.source_id = '${extractionSourceId}'
+      AND json_type(r.evidence_json, '$.details.candidateHash') = 'text'
+      AND json_extract(sr.raw_evidence_json, '$.extractionAttemptId') = a.id
+      AND json_extract(sr.raw_evidence_json, '$.labelAssetId') = l.id
+      AND json_extract(sr.raw_evidence_json, '$.labelContentSha256') = l.content_sha256
+      AND json_extract(sr.raw_evidence_json, '$.candidateHash') =
+        json_extract(r.evidence_json, '$.details.candidateHash')
+      AND instr(al.candidate_hashes_json,
+        '"' || json_extract(r.evidence_json, '$.details.candidateHash') || '"') > 0
+  ), exact_candidate_summary AS (
+    SELECT product_id, COUNT(*) AS open_candidate_count,
+      MAX(CASE WHEN candidate_rank = 1 THEN review_id END) AS primary_candidate_review_id
+    FROM exact_candidate_ranked GROUP BY product_id
+  )` : "";
   const sourceCtes = includeSources ? `, source_ranked AS (
     SELECT sr.product_id, sr.id AS source_record_id, sr.source_id, sr.source_url, sr.observed_at,
-      ROW_NUMBER() OVER (
-        PARTITION BY sr.product_id
-        ORDER BY ${sourceAuthority} DESC, sr.observed_at DESC, sr.id
-      ) AS source_rank
+      ROW_NUMBER() OVER (PARTITION BY sr.product_id
+        ORDER BY ${sourceAuthority} DESC, sr.observed_at DESC, sr.id) AS source_rank
     FROM source_records sr JOIN sources s ON s.id = sr.source_id
     WHERE sr.product_id IS NOT NULL
   ), source_best AS (
@@ -121,9 +293,8 @@ function familySql(family: CompletionFamily, includeSources = true): string {
     FROM source_ranked WHERE source_rank = 1
   )` : "";
   const sourceColumns = includeSources
-    ? `sb.source_record_id AS best_source_record_id,
-      sb.source_id AS best_source_id, sb.source_url AS best_source_url,
-      sb.observed_at AS best_source_observed_at`
+    ? `sb.source_record_id AS best_source_record_id, sb.source_id AS best_source_id,
+      sb.source_url AS best_source_url, sb.observed_at AS best_source_observed_at`
     : `NULL AS best_source_record_id, NULL AS best_source_id,
       NULL AS best_source_url, NULL AS best_source_observed_at`;
   const sourceJoin = includeSources ? "LEFT JOIN source_best sb ON sb.product_id = p.id" : "";
@@ -140,96 +311,102 @@ function familySql(family: CompletionFamily, includeSources = true): string {
   const evidenceSourceJoin = includeSources
     ? `LEFT JOIN source_records osr ON osr.id = eo.source_record_id
     ${family === "identity" ? "" : `LEFT JOIN source_records fsr ON fsr.id = ${factSourceRecord}`}`
-    : "";
+    : `LEFT JOIN source_records osr ON osr.id = eo.source_record_id
+    ${family === "identity" ? "" : `LEFT JOIN source_records fsr ON fsr.id = ${factSourceRecord}`}`;
+  const extractionColumns = supportsExtraction ? `
+      COALESCE(cls.extraction_labels, 0) AS extraction_labels,
+      COALESCE(cls.extraction_candidate, 0) AS extraction_candidate,
+      COALESCE(cls.extraction_no_prediction, 0) AS extraction_no_prediction,
+      COALESCE(cls.extraction_rejected, 0) AS extraction_rejected,
+      COALESCE(cls.extraction_failed, 0) AS extraction_failed,
+      CASE WHEN TRIM(COALESCE(${labelUrl}, '')) <> '' AND COALESCE(cls.extraction_labels, 0) = 0 THEN 1 ELSE 0 END AS extraction_unattempted,
+      COALESCE(sls.extraction_stale, 0) AS extraction_stale,
+      COALESCE(cls.extraction_conflicts, 0) AS extraction_conflicts,
+      COALESCE(cls.labels_json, '[]') AS labels_json,
+      COALESCE(lds.linked_verify_count, 0) AS linked_verify_count,
+      COALESCE(lds.current_linked_verify_count, 0) AS current_linked_verify_count`
+    : `0 AS extraction_labels, 0 AS extraction_candidate, 0 AS extraction_no_prediction,
+      0 AS extraction_rejected, 0 AS extraction_failed, 0 AS extraction_unattempted,
+      0 AS extraction_stale, 0 AS extraction_conflicts, '[]' AS labels_json,
+      0 AS linked_verify_count, 0 AS current_linked_verify_count`;
+  const extractionJoins = supportsExtraction ? `
+    LEFT JOIN current_label_summary cls ON cls.product_id = p.id
+    LEFT JOIN stale_label_summary sls ON sls.product_id = p.id
+    LEFT JOIN linked_decision_summary lds
+      ON lds.product_id = p.id AND lds.fact_source_record_id = f.source_record_id
+    LEFT JOIN exact_candidate_summary ecs ON ecs.product_id = p.id` : "";
+  const candidateColumns = supportsExtraction
+    ? "COALESCE(ecs.open_candidate_count, 0) AS open_candidate_count, COALESCE(ecs.primary_candidate_review_id, rs.primary_review_id) AS primary_review_id"
+    : "0 AS open_candidate_count, rs.primary_review_id";
 
   return `WITH review_ranked AS (
     SELECT r.product_id, r.id AS review_id,
-      CASE WHEN ${candidate} THEN 1 ELSE 0 END AS is_candidate,
-      ROW_NUMBER() OVER (
-        PARTITION BY r.product_id ORDER BY r.priority DESC, r.created_at, r.id
-      ) AS review_rank
+      ROW_NUMBER() OVER (PARTITION BY r.product_id ORDER BY r.priority DESC, r.created_at, r.id) AS review_rank
     FROM review_items r
-    LEFT JOIN source_records sr ON sr.id = r.source_record_id
     WHERE r.status = 'open' AND r.product_id IS NOT NULL AND ${reviewType}
   ), review_summary AS (
     SELECT product_id, COUNT(*) AS open_review_count,
-      SUM(is_candidate) AS open_candidate_count,
       MAX(CASE WHEN review_rank = 1 THEN review_id END) AS primary_review_id
     FROM review_ranked GROUP BY product_id
-  )${sourceCtes}, joined AS (
+  )${extractionCtes}${exactCandidateCte}${sourceCtes}, joined AS (
     SELECT p.id, p.gtin, p.brand, p.brand_normalized, p.name, p.name_normalized,
       p.category, p.image_url, ${labelUrl} AS label_url,
       ${fieldStatus} AS field_status, ${factAuthority} AS fact_authority,
       eo.outcome, eo.evidence_url AS outcome_evidence_url,
-      eo.source_record_id AS outcome_source_record_id, eo.observed_at AS outcome_observed_at,
-      ${evidenceSourceColumns},
+      eo.source_record_id AS outcome_source_record_id, osr.product_id AS outcome_source_product_id,
+      osr.source_id AS outcome_source_origin_id,
+      osr.observed_at AS outcome_source_record_observed_at,
+      ${family === "identity" ? "NULL" : "fsr.source_id"} AS fact_source_origin_id,
+      eo.observed_at AS outcome_observed_at, ${evidenceSourceColumns},
       COALESCE(rs.open_review_count, 0) AS open_review_count,
-      COALESCE(rs.open_candidate_count, 0) AS open_candidate_count,
-      rs.primary_review_id, ${sourceColumns}
-    FROM products p
-    ${factJoin}
-    LEFT JOIN evidence_outcomes eo
-      ON eo.product_id = p.id AND eo.field_family = '${family}'
+      ${candidateColumns}, ${extractionColumns}, ${sourceColumns}
+    FROM products p ${factJoin}
+    LEFT JOIN evidence_outcomes eo ON eo.product_id = p.id AND eo.field_family = '${family}'
     ${evidenceSourceJoin}
     LEFT JOIN review_summary rs ON rs.product_id = p.id
+    ${extractionJoins}
     ${sourceJoin}
     WHERE p.is_active = 1
   ), classified AS (
     SELECT j.*,
       CASE WHEN ${contradiction} THEN 1 ELSE 0 END AS contradiction,
-      CASE
-        WHEN ${contradiction} THEN 'outstanding'
+      CASE WHEN ${contradiction} OR ${materialConflict} THEN 'outstanding'
         WHEN ${verified} THEN 'verified'
         WHEN ${terminal} THEN 'terminal_unavailable'
-        ELSE 'outstanding'
-      END AS completion_state
+        ELSE 'outstanding' END AS completion_state
     FROM joined j
   ), ledger AS (
     SELECT c.*,
       CASE WHEN c.completion_state <> 'outstanding' THEN NULL
         WHEN c.contradiction = 1 THEN 'evidence_inconsistent'
-        WHEN c.field_status = 'conflict' THEN 'conflict_resolution'
+        WHEN c.field_status = 'conflict' OR c.extraction_conflicts > 0 THEN 'conflict_resolution'
         WHEN c.open_candidate_count > 0 THEN 'review_ready'
+        WHEN c.extraction_failed > 0 THEN 'retry_extraction'
+        WHEN c.extraction_unattempted > 0 THEN 'run_extraction'
+        WHEN c.extraction_labels > 0 AND c.extraction_candidate = 0
+          AND (c.extraction_no_prediction > 0 OR c.extraction_rejected > 0) THEN 'manual_label_review'
         WHEN c.field_status = 'unverified' THEN 'structured_evidence_review'
-        WHEN TRIM(COALESCE(c.label_url, '')) <> '' THEN 'label_evidence_review'
-        ELSE 'source_evidence_needed'
-      END AS lane,
-      CASE WHEN c.outcome IN ('not_applicable', 'not_declared')
-        THEN c.outcome ELSE NULL END AS terminal_outcome,
-      CASE
-        WHEN TRIM(COALESCE(c.outcome_evidence_url, '')) <> '' THEN c.outcome_evidence_url
+        ELSE 'source_evidence_needed' END AS lane,
+      CASE WHEN c.outcome IN ('not_applicable', 'not_declared') THEN c.outcome ELSE NULL END AS terminal_outcome,
+      CASE WHEN TRIM(COALESCE(c.outcome_evidence_url, '')) <> '' THEN c.outcome_evidence_url
         WHEN c.outcome_source_record_id IS NOT NULL THEN c.outcome_source_url
-        WHEN c.fact_source_record_id IS NOT NULL THEN c.fact_source_url
-        ELSE c.best_source_url
-      END AS source_url,
-      CASE
-        WHEN TRIM(COALESCE(c.outcome_evidence_url, '')) <> '' OR c.outcome_source_record_id IS NOT NULL
-          THEN c.outcome_source_id
-        WHEN c.fact_source_record_id IS NOT NULL THEN c.fact_source_id
-        ELSE c.best_source_id
-      END AS source_id,
-      CASE
-        WHEN TRIM(COALESCE(c.outcome_evidence_url, '')) <> '' OR c.outcome_source_record_id IS NOT NULL
-          THEN c.outcome_source_record_id
-        WHEN c.fact_source_record_id IS NOT NULL THEN c.fact_source_record_id
-        ELSE c.best_source_record_id
-      END AS source_record_id,
-      CASE
-        WHEN TRIM(COALESCE(c.outcome_evidence_url, '')) <> '' OR c.outcome_source_record_id IS NOT NULL
-          THEN c.outcome_observed_at
-        WHEN c.fact_source_record_id IS NOT NULL THEN c.fact_observed_at
-        ELSE c.best_source_observed_at
-      END AS evidence_observed_at,
-      CASE
-        WHEN c.completion_state = 'outstanding' AND c.contradiction = 1 THEN 1
-        WHEN c.completion_state = 'outstanding' AND c.field_status = 'conflict' THEN 2
+        WHEN c.fact_source_record_id IS NOT NULL THEN c.fact_source_url ELSE c.best_source_url END AS source_url,
+      CASE WHEN TRIM(COALESCE(c.outcome_evidence_url, '')) <> '' OR c.outcome_source_record_id IS NOT NULL THEN c.outcome_source_id
+        WHEN c.fact_source_record_id IS NOT NULL THEN c.fact_source_id ELSE c.best_source_id END AS source_id,
+      CASE WHEN TRIM(COALESCE(c.outcome_evidence_url, '')) <> '' OR c.outcome_source_record_id IS NOT NULL THEN c.outcome_source_record_id
+        WHEN c.fact_source_record_id IS NOT NULL THEN c.fact_source_record_id ELSE c.best_source_record_id END AS source_record_id,
+      CASE WHEN TRIM(COALESCE(c.outcome_evidence_url, '')) <> '' OR c.outcome_source_record_id IS NOT NULL THEN c.outcome_observed_at
+        WHEN c.fact_source_record_id IS NOT NULL THEN c.fact_observed_at ELSE c.best_source_observed_at END AS evidence_observed_at,
+      CASE WHEN c.completion_state = 'outstanding' AND c.contradiction = 1 THEN 1
+        WHEN c.completion_state = 'outstanding' AND (c.field_status = 'conflict' OR c.extraction_conflicts > 0) THEN 2
         WHEN c.completion_state = 'outstanding' AND c.open_candidate_count > 0 THEN 3
-        WHEN c.completion_state = 'outstanding' AND c.field_status = 'unverified' THEN 4
-        WHEN c.completion_state = 'outstanding' AND TRIM(COALESCE(c.label_url, '')) <> '' THEN 5
-        WHEN c.completion_state = 'outstanding' THEN 6
-        WHEN c.completion_state = 'verified' THEN 7
-        ELSE 8
-      END AS lane_priority
+        WHEN c.completion_state = 'outstanding' AND c.extraction_failed > 0 THEN 4
+        WHEN c.completion_state = 'outstanding' AND c.extraction_unattempted > 0 THEN 5
+        WHEN c.completion_state = 'outstanding' AND c.extraction_labels > 0 AND c.extraction_candidate = 0
+          AND (c.extraction_no_prediction > 0 OR c.extraction_rejected > 0) THEN 6
+        WHEN c.completion_state = 'outstanding' AND c.field_status = 'unverified' THEN 7
+        WHEN c.completion_state = 'outstanding' THEN 8
+        WHEN c.completion_state = 'verified' THEN 9 ELSE 10 END AS lane_priority
     FROM classified c
   )`;
 }
@@ -336,7 +513,9 @@ export async function getCompletionLedger(
   const listSql = `${base} SELECT id, gtin, brand, name, category, image_url,
     completion_state, lane, field_status, terminal_outcome, label_url, source_url,
     source_id, source_record_id, evidence_observed_at, open_candidate_count,
-    open_review_count, primary_review_id
+    open_review_count, primary_review_id, extraction_labels, extraction_candidate,
+    extraction_no_prediction, extraction_rejected, extraction_failed,
+    extraction_unattempted, extraction_stale, extraction_conflicts, labels_json
     FROM ledger ${filters.sql}
     ORDER BY lane_priority, brand_normalized, name_normalized, id LIMIT ? OFFSET ?`;
   const countSql = `${familySql(input.family, false)} SELECT COUNT(*) AS total FROM ledger ${filters.sql}`;
@@ -372,7 +551,20 @@ export async function getCompletionLedger(
       evidenceObservedAt: row.evidence_observed_at,
       openCandidateCount: row.open_candidate_count,
       openReviewCount: row.open_review_count,
-      primaryReviewId: row.primary_review_id,
+      primaryReviewId: row.lane === "review_ready" ? row.primary_review_id : null,
+      primaryActionId: row.lane === "review_ready" && row.primary_review_id ? row.primary_review_id : row.id,
+      extraction: {
+        labels: row.extraction_labels,
+        candidate: row.extraction_candidate,
+        noPrediction: row.extraction_no_prediction,
+        rejected: row.extraction_rejected,
+        failed: row.extraction_failed,
+        unattempted: row.extraction_unattempted,
+        stale: row.extraction_stale,
+        conflicts: row.extraction_conflicts,
+      },
+      labels: parseLabelEvidence(row.labels_json),
+      labelsTruncated: row.extraction_labels > INLINE_LABEL_LIMIT,
     })),
     summary,
     pagination: {
@@ -383,6 +575,63 @@ export async function getCompletionLedger(
     },
     filters: input,
     snapshotAt: (snapshotResult?.results[0] as SnapshotRow | undefined)?.snapshot_at ?? null,
+  };
+}
+
+export function validateCompletionLabels(input: URLSearchParams): {
+  value?: { family: "nutrition" | "ingredients"; page: number; pageSize: number };
+  error?: string;
+} {
+  const family = input.get("family") ?? "nutrition";
+  const page = Number(input.get("page") ?? 1);
+  const pageSize = Number(input.get("pageSize") ?? 25);
+  if (!(["nutrition", "ingredients"] as const).includes(family as "nutrition" | "ingredients")) {
+    return { error: "Invalid extraction family" };
+  }
+  if (!Number.isInteger(page) || page < 1) return { error: "Page must be a positive integer" };
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+    return { error: "Page size must be between 1 and 100" };
+  }
+  return { value: { family: family as "nutrition" | "ingredients", page, pageSize } };
+}
+
+export async function getCompletionLabels(
+  db: D1Database,
+  productId: string,
+  input: { family: "nutrition" | "ingredients"; page: number; pageSize: number },
+): Promise<CompletionLabelEvidenceResponse | null> {
+  const product = await db.prepare("SELECT id FROM products WHERE id = ? AND is_active = 1")
+    .bind(productId).first<{ id: string }>();
+  if (!product) return null;
+  const offset = (input.page - 1) * input.pageSize;
+  const currentBinding = `a.is_current = 1 AND a.product_id = ? AND a.field_family = ?
+    AND subject.product_id = a.product_id AND subject.content_hash = a.subject_source_content_hash
+    AND l.subject_source_record_id = a.subject_source_record_id
+    AND l.subject_source_content_hash = a.subject_source_content_hash
+    AND l.product_id = a.product_id AND l.field_family = a.field_family`;
+  const from = `FROM extraction_attempts a
+    JOIN source_records subject ON subject.id = a.subject_source_record_id
+    JOIN extraction_attempt_labels al ON al.attempt_id = a.id
+    JOIN label_evidence_assets l ON l.id = al.label_asset_id`;
+  const [countResult, pageResult] = await db.batch([
+    db.prepare(`SELECT COUNT(*) AS total ${from} WHERE ${currentBinding}`).bind(productId, input.family),
+    db.prepare(`SELECT a.id AS attempt_id, l.id AS label_asset_id, l.source_image_id,
+      al.role, al.outcome, l.effective_url, l.content_sha256, l.fetched_at, a.attempted_at
+      ${from} WHERE ${currentBinding}
+      ORDER BY a.attempted_at DESC, l.source_image_id, l.id, al.role LIMIT ? OFFSET ?`)
+      .bind(productId, input.family, input.pageSize, offset),
+  ]);
+  const total = (countResult?.results[0] as CountRow | undefined)?.total ?? 0;
+  return {
+    productId,
+    family: input.family,
+    items: (pageResult?.results ?? []).map((row) => labelFromRow(row as unknown as LabelRow)),
+    pagination: {
+      page: input.page,
+      pageSize: input.pageSize,
+      total,
+      pages: Math.ceil(total / input.pageSize),
+    },
   };
 }
 

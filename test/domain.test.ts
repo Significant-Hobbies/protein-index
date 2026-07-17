@@ -281,6 +281,15 @@ describe("metrics and completeness", () => {
       decidedAt: "2026-07-15T01:00:00.000Z",
     };
     expect(await validateEvidenceDecision(decision)).toEqual([]);
+    expect(await validateEvidenceDecision({
+      ...decision,
+      extractionAttemptId: `xat_${"a".repeat(24)}`,
+      labelAssetId: `lbl_${"b".repeat(24)}`,
+    })).toEqual([]);
+    expect(await validateEvidenceDecision({
+      ...decision,
+      extractionAttemptId: `xat_${"a".repeat(24)}`,
+    })).toContain("extraction linkage must include both attempt and label asset IDs");
     expect(await validateEvidenceDecision({ ...decision, candidateHash: "0".repeat(64) }))
       .toContain("candidateHash does not match payload");
   });
@@ -570,6 +579,15 @@ describe("ingredient intelligence", () => {
       decidedAt: "2026-07-16T00:00:00.000Z",
     };
     expect(await validateIngredientEvidenceDecision(decision)).toEqual([]);
+    expect(await validateIngredientEvidenceDecision({
+      ...decision,
+      extractionAttemptId: `xat_${"c".repeat(24)}`,
+      labelAssetId: `lbl_${"d".repeat(24)}`,
+    })).toEqual([]);
+    expect(await validateIngredientEvidenceDecision({
+      ...decision,
+      labelAssetId: `lbl_${"d".repeat(24)}`,
+    })).toContain("extraction linkage must include both attempt and label asset IDs");
     expect(await validateIngredientEvidenceDecision({
       ...decision,
       payload: {

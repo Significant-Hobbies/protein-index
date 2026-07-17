@@ -139,6 +139,20 @@ function requiredString(value: unknown, field: string): string {
   return value;
 }
 
+function extractionLink(input: Record<string, unknown>): {
+  extractionAttemptId?: string;
+  labelAssetId?: string;
+} {
+  const attempt = input.extractionAttemptId;
+  const asset = input.labelAssetId;
+  if ((attempt === undefined || attempt === null) && (asset === undefined || asset === null)) return {};
+  if (typeof attempt !== "string" || !/^xat_[a-f0-9]{24}$/.test(attempt)
+    || typeof asset !== "string" || !/^lbl_[a-f0-9]{24}$/.test(asset)) {
+    throw new Error("Decision extraction linkage must contain an exact attempt and label asset ID");
+  }
+  return { extractionAttemptId: attempt, labelAssetId: asset };
+}
+
 function parseDecision(value: unknown): ReviewEvidenceDecision {
   const input = record(value);
   if (!input) throw new Error("Decision record must be an object");
@@ -160,6 +174,7 @@ function parseDecision(value: unknown): ReviewEvidenceDecision {
     rationale: requiredString(input.rationale, "rationale"),
     decidedBy: requiredString(input.decidedBy, "decidedBy"),
     decidedAt: requiredString(input.decidedAt, "decidedAt"),
+    ...extractionLink(input),
   };
   const payloadRecord = record(input.payload);
   if (input.fieldFamily === "nutrition") {
@@ -221,6 +236,8 @@ export function evidenceDecisionFromDatabaseRow(row: Record<string, unknown>): R
     sourceContentHash: row.source_content_hash,
     productId: row.product_id,
     candidateHash: row.candidate_hash,
+    extractionAttemptId: row.extraction_attempt_id,
+    labelAssetId: row.label_asset_id,
     fieldFamily: row.field_family,
     decision: row.decision,
     payload: JSON.parse(row.payload_json) as unknown,
@@ -505,12 +522,13 @@ export async function emitReviewDecisionSql(
     statements.push(`INSERT INTO evidence_decisions
       (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
         candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
-        decided_by, decided_at, active)
+        decided_by, decided_at, active, extraction_attempt_id, label_asset_id)
       SELECT ${sql(decision.id)}, ${sql(decision.sourceId)}, ${sql(decision.sourceRecordKey)},
         ${sql(decision.sourceRecordId)}, ${sql(decision.sourceContentHash)}, ${sql(decision.productId)},
         ${sql(decision.candidateHash)}, ${sql(decision.fieldFamily)}, ${sql(decision.decision)},
         ${sql(canonicalJson(decision.payload))}, ${sql(decision.evidenceUrl)}, ${sql(decision.rationale)},
-        ${sql(decision.decidedBy)}, ${sql(decision.decidedAt)}, 1
+        ${sql(decision.decidedBy)}, ${sql(decision.decidedAt)}, 1,
+        ${sql(decision.extractionAttemptId ?? null)}, ${sql(decision.labelAssetId ?? null)}
       WHERE NOT EXISTS (SELECT 1 FROM evidence_decisions WHERE id = ${sql(decision.id)})${
         redundantGuard === null ? "" : ` AND ${redundantGuard}`
       };`);
@@ -689,7 +707,7 @@ function reviewPublicationStateStatements(bundle: ReviewDecisionBundle): [string
   const decisionIds = sqlList(bundle.decisions.map(({ id }) => id));
   return [
     `SELECT s.source_id, s.source_record_id AS source_record_key, s.id AS source_record_id, s.content_hash, s.product_id, p.gtin AS product_gtin FROM source_records s LEFT JOIN products p ON p.id = s.product_id WHERE s.id IN (${sourceRecordIds}) ORDER BY s.id;`,
-    `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id, candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at FROM evidence_decisions WHERE active = 1 AND (id IN (${decisionIds}) OR source_record_id IN (${sourceRecordIds})) ORDER BY id;`,
+    `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id, candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at, extraction_attempt_id, label_asset_id FROM evidence_decisions WHERE active = 1 AND (id IN (${decisionIds}) OR source_record_id IN (${sourceRecordIds})) ORDER BY id;`,
     selectedNutritionProjectionQuery(bundle),
   ];
 }
@@ -826,7 +844,7 @@ export async function emitReviewPostconditionQuery(bundle: ReviewDecisionBundle,
   const candidateHashes = sqlList(bundle.decisions.map(({ candidateHash }) => candidateHash));
   const redundantSourceRecordIds = sqlList(redundant.map(({ sourceRecordId }) => sourceRecordId));
   const statements = [
-    `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id, candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at FROM evidence_decisions WHERE active = 1 AND id IN (${decisionIds}) ORDER BY id;`,
+    `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id, candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at, extraction_attempt_id, label_asset_id FROM evidence_decisions WHERE active = 1 AND id IN (${decisionIds}) ORDER BY id;`,
     `SELECT product_id, source_record_id, status, authority, basis, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at FROM nutrition_facts WHERE product_id IN (${nutritionPostconditionProducts}) ORDER BY product_id;`,
     `SELECT product_id, source_record_id, raw_text, language, status, confidence, authority, observed_at, updated_at FROM ingredient_statements WHERE product_id IN (${ingredientVerifyProducts}) ORDER BY product_id;`,
     `SELECT id, product_id, source_record_id, parent_id, position, raw_text, normalized_name, percentage, resolved FROM product_ingredients WHERE product_id IN (${ingredientVerifyProducts}) ORDER BY product_id, parent_id, position, id;`,

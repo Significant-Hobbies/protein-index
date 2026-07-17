@@ -9,9 +9,32 @@ import { ingredientCandidateHash, validateIngredientCandidate } from "../../shar
 import { normalizeGtin } from "../../shared/gtin";
 import { emptyNutrition } from "../../shared/nutrition";
 import type { SourceManifest, StagedProduct, ValidationIssue } from "../../shared/types";
+import {
+  validateExtractionAttempt,
+  validateExtractionAttemptLabel,
+  validateLabelEvidenceAsset,
+  type ExtractionAttempt,
+  type ExtractionAttemptLabel,
+  type LabelEvidenceAsset,
+} from "../../shared/extraction-outcomes";
 import { parseRobotoffIngredientEvidence } from "./robotoff-ingredients";
+import {
+  createExtractionAttempt,
+  createExtractionAttemptLabel,
+  createLabelEvidenceAsset,
+  hashHttpsLabelImage,
+  labelReferenceFromUrl,
+  labelAssetReuseKey,
+  predictionLabelReference,
+  readPriorLabelAssets,
+  stableExtractionId,
+  stagedProductId,
+  stagedSourceRecordId,
+  type LabelImageFetchLike,
+  type LabelImageReference,
+} from "./label-image";
 
-export const ROBOTOFF_INGREDIENT_API_ADAPTER_VERSION = "robotoff-ingredients-api-v2";
+export const ROBOTOFF_INGREDIENT_API_ADAPTER_VERSION = "robotoff-ingredients-api-v3";
 export const ROBOTOFF_IMAGE_PREDICTIONS_URL = "https://robotoff.openfoodfacts.org/api/v1/image_predictions";
 const PAGE_SIZE = 50;
 export const ROBOTOFF_INGREDIENT_REQUEST_SCHEMA = createHash("sha256")
@@ -26,6 +49,15 @@ interface IngredientContext {
   code: string;
   ingredientImageUrl: string;
   product: StagedProduct;
+}
+
+interface IngredientCohortRow {
+  code: string;
+  subjectSourceRecordKey: string;
+  ingredientImageUrl: string;
+  subjectSourceRecordId: string;
+  subjectSourceContentHash: string;
+  productId: string;
 }
 
 interface StoredIngredientResponse {
@@ -52,6 +84,9 @@ export interface StoredIngredientCandidate {
   issues: ValidationIssue[];
   hasConflict: boolean;
   prediction: RawRecord;
+  extractionAttemptId?: string;
+  labelAssetId?: string;
+  labelContentSha256?: string;
 }
 
 export interface RobotoffIngredientApiOptions {
@@ -65,6 +100,9 @@ export interface RobotoffIngredientApiOptions {
   retryBaseMs?: number;
   maximumAttempts?: number;
   fetcher?: FetchLike;
+  labelFetcher?: LabelImageFetchLike;
+  maximumLabelBytes?: number;
+  maximumLabelChunks?: number;
   userAgent?: string;
 }
 
@@ -78,6 +116,9 @@ export interface RobotoffIngredientApiResult {
   manifestPath: string;
   reportPath: string;
   checksumsPath: string;
+  labelAssetsPath: string;
+  extractionAttemptsPath: string;
+  extractionAttemptLabelsPath: string;
   contexts: number;
   inputHash: string;
   inputBytes: number;
@@ -115,6 +156,11 @@ export interface RobotoffIngredientReport {
   requestSchema: string;
   cohortHash: string;
   inputManifestHash: string | null;
+  extractionRunId: string;
+  parentSourceRunId: string;
+  labelAssets: number;
+  extractionAttempts: number;
+  extractionAttemptLabels: number;
   exclusions: { records: number; path: string; reconcilesIndiaSlice: boolean };
 }
 
@@ -124,6 +170,9 @@ export interface RobotoffIngredientArtifact {
   outcomes: IngredientExtractionOutcome[];
   candidates: StoredIngredientCandidate[];
   staged: StagedProduct[];
+  labelAssets: LabelEvidenceAsset[];
+  extractionAttempts: ExtractionAttempt[];
+  extractionAttemptLabels: ExtractionAttemptLabel[];
 }
 
 function isRecord(value: unknown): value is RawRecord {
@@ -158,6 +207,21 @@ async function readContexts(path: string, limit: number | null): Promise<Ingredi
   }
   const contexts = [...byCode.values()].sort((left, right) => left.code.localeCompare(right.code));
   return limit === null ? contexts : contexts.slice(0, limit);
+}
+
+function ingredientCohortRow(context: IngredientContext): IngredientCohortRow {
+  return {
+    code: context.code,
+    subjectSourceRecordKey: context.product.sourceRecordId,
+    ingredientImageUrl: context.ingredientImageUrl,
+    subjectSourceRecordId: stagedSourceRecordId(context.product),
+    subjectSourceContentHash: context.product.contentHash,
+    productId: stagedProductId(context.product),
+  };
+}
+
+function jsonHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 function sleep(milliseconds: number): Promise<void> {
@@ -209,6 +273,9 @@ function stageIngredientCandidate(
     hasConflict: stored.hasConflict,
     warnings: stored.issues,
     selectedIngredientImageUrl: context.ingredientImageUrl,
+    extractionAttemptId: stored.extractionAttemptId ?? null,
+    labelAssetId: stored.labelAssetId ?? null,
+    labelContentSha256: stored.labelContentSha256 ?? null,
   };
   return {
     source: "open_food_facts_robotoff_ingredients",
@@ -274,6 +341,9 @@ function stageIngredientCandidate(
         candidateHash: stored.candidateHash,
         hasConflict: stored.hasConflict,
         warnings: stored.issues,
+        extractionAttemptId: stored.extractionAttemptId,
+        labelAssetId: stored.labelAssetId,
+        labelContentSha256: stored.labelContentSha256,
       },
     }],
   };
@@ -336,20 +406,27 @@ export async function extractRobotoffIngredientApi(
   if (contexts.length === 0) throw new Error("Robotoff ingredient extraction found no valid barcodes with ingredient label images.");
 
   await mkdir(options.outputDirectory, { recursive: true });
+  const priorLabelAssets = await readPriorLabelAssets(join(options.outputDirectory, "prior-label-assets.jsonl"));
   const responsesDirectory = join(options.outputDirectory, "responses");
   await mkdir(responsesDirectory, { recursive: true });
   const cohortPath = join(options.outputDirectory, "cohort.jsonl");
+  const labelAssetsPath = join(options.outputDirectory, "label-assets.jsonl");
+  const extractionAttemptsPath = join(options.outputDirectory, "extraction-attempts.jsonl");
+  const extractionAttemptLabelsPath = join(options.outputDirectory, "extraction-attempt-labels.jsonl");
   const candidatesPath = join(options.outputDirectory, "candidates.jsonl");
   const outcomesPath = join(options.outputDirectory, "outcomes.jsonl");
   const exclusionsPath = join(options.outputDirectory, "exclusions.jsonl");
   const manifestPath = join(options.outputDirectory, "manifest.json");
   const reportPath = join(options.outputDirectory, "report.json");
   const checksumsPath = join(options.outputDirectory, "checksums.sha256");
-  await writeFile(cohortPath, `${contexts.map(({ code, ingredientImageUrl }) => JSON.stringify({ code, ingredientImageUrl })).join("\n")}\n`, "utf8");
+  await writeFile(cohortPath, `${contexts.map((context) => JSON.stringify(ingredientCohortRow(context))).join("\n")}\n`, "utf8");
   const cohortHash = await hashFile(cohortPath);
   const stagedPath = join(options.outputDirectory, "staged-products.jsonl");
   const indexPath = join(options.outputDirectory, "source-index.jsonl");
   const candidateOutput = createWriteStream(candidatesPath, { encoding: "utf8" });
+  const labelAssetOutput = createWriteStream(labelAssetsPath, { encoding: "utf8" });
+  const extractionAttemptOutput = createWriteStream(extractionAttemptsPath, { encoding: "utf8" });
+  const extractionAttemptLabelOutput = createWriteStream(extractionAttemptLabelsPath, { encoding: "utf8" });
   const stagedOutput = createWriteStream(stagedPath, { encoding: "utf8" });
   const indexOutput = createWriteStream(indexPath, { encoding: "utf8" });
   const outcomeOutput = createWriteStream(outcomesPath, { encoding: "utf8" });
@@ -366,6 +443,14 @@ export async function extractRobotoffIngredientApi(
   const taxonomyRecognition = { belowSixtyPercent: 0, atLeastSixtyPercent: 0 };
   const seenCandidateHashes = new Set<string>();
   const startedAt = new Date().toISOString();
+  const extractionRunId = stableExtractionId(
+    "xrun",
+    `ingredients:${sourceManifest.inputHash ?? inputHash}:${startedAt}:${ROBOTOFF_INGREDIENT_API_ADAPTER_VERSION}:${ROBOTOFF_INGREDIENT_REQUEST_SCHEMA}`,
+  );
+  const parentSourceRunId = stableExtractionId(
+    "run",
+    `${sourceManifest.source}:${sourceManifest.startedAt}:${sourceManifest.inputHash ?? sourceManifest.input}`,
+  );
   let candidateRecords = 0;
   let duplicateCandidates = 0;
   let fetchedBarcodes = 0;
@@ -373,6 +458,7 @@ export async function extractRobotoffIngredientApi(
   let requests = 0;
   let lastFetchStartedAt: number | null = null;
   const fetcher = options.fetcher ?? fetch;
+  const labelFetcher = options.labelFetcher ?? fetch;
   const userAgent = options.userAgent
     ?? "protein-index/0.1 (+https://github.com/sarthakagrawal927/protein-index; ingredient-label-evidence)";
 
@@ -467,9 +553,87 @@ export async function extractRobotoffIngredientApi(
         }
       }
 
+      const responseEvidenceHash = jsonHash(stored);
+      const requestedReference = labelReferenceFromUrl(context.ingredientImageUrl);
+      const predictionRecords = stored.response.image_predictions.filter((prediction) => (
+        prediction.type === "ner" && prediction.model_name === "ingredient_detection"
+      ));
+      const predictionReferences = predictionRecords.map((prediction) => ({ prediction, reference: predictionLabelReference(prediction) }));
+      const missingReference = predictionReferences.some(({ reference }) => reference === null);
+      const references = new Map<string, LabelImageReference>();
+      references.set(requestedReference.url, requestedReference);
+      for (const item of predictionReferences) if (item.reference) references.set(item.reference.url, item.reference);
+      const assetsByUrl = new Map<string, LabelEvidenceAsset>();
+      let labelFailure = missingReference ? "prediction_label_reference_missing" : null;
+      if (!labelFailure) {
+        for (const reference of references.values()) {
+          try {
+            const reusable = priorLabelAssets.get(labelAssetReuseKey({
+              subjectSourceRecordId: stagedSourceRecordId(context.product),
+              subjectSourceContentHash: context.product.contentHash,
+              fieldFamily: "ingredients",
+              requestedUrl: reference.url,
+            }));
+            if (reusable && reusable.productId === stagedProductId(context.product)) {
+              assetsByUrl.set(reference.url, reusable);
+              await writeLine(labelAssetOutput, reusable);
+              continue;
+            }
+            const hashed = await hashHttpsLabelImage({
+              url: reference.url,
+              fetcher: labelFetcher,
+              maximumBytes: options.maximumLabelBytes,
+              maximumChunks: options.maximumLabelChunks,
+              userAgent,
+            });
+            const asset = createLabelEvidenceAsset({ product: context.product, fieldFamily: "ingredients", reference, hash: hashed });
+            assetsByUrl.set(reference.url, asset);
+            await writeLine(labelAssetOutput, asset);
+          } catch (error) {
+            labelFailure = error instanceof Error && "code" in error && typeof error.code === "string"
+              ? `label_${error.code}`
+              : "label_stream_read_failed";
+            break;
+          }
+        }
+      }
+      if (labelFailure) {
+        const failed = createExtractionAttempt({
+          extractionRunId,
+          subjectSourceRecordId: stagedSourceRecordId(context.product),
+          subjectSourceRecordKey: context.product.sourceRecordId,
+          subjectSourceContentHash: context.product.contentHash,
+          productId: stagedProductId(context.product),
+          fieldFamily: "ingredients",
+          responseEvidenceHash,
+          status: "failed",
+          predictionCount: predictionRecords.length,
+          candidateCount: 0,
+          rejectionCount: 0,
+          failureCount: 1,
+          conflictCount: 0,
+          reasons: [labelFailure],
+          attemptedAt: startedAt,
+          isCurrent: false,
+        });
+        await writeLine(extractionAttemptOutput, failed);
+        const outcome: IngredientExtractionOutcome = {
+          requestedCode: context.code,
+          status: "failed",
+          predictions: predictionRecords.length,
+          entities: 0,
+          candidates: 0,
+          reasons: [labelFailure],
+        };
+        outcomes.failed += 1;
+        await writeLine(outcomeOutput, outcome);
+        await writeLine(exclusionOutput, outcome);
+        continue;
+      }
+
       const parsed = parseRobotoffIngredientEvidence(stored.response, context, confidenceThreshold);
       for (const issue of parsed.issues) issueCounts[issue.code] = (issueCounts[issue.code] ?? 0) + 1;
-      let acceptedCandidates = 0;
+      const pendingCandidates: Array<{ item: (typeof parsed.evidence)[number]; candidateHash: string; asset: LabelEvidenceAsset }> = [];
       for (const item of parsed.evidence) {
         if (!item.candidate) continue;
         const candidateHash = await ingredientCandidateHash(item.candidate);
@@ -477,47 +641,124 @@ export async function extractRobotoffIngredientApi(
           duplicateCandidates += 1;
           continue;
         }
+        const asset = assetsByUrl.get(item.candidate.imageUrl);
+        if (!asset) throw new Error(`Ingredient candidate ${candidateHash} has no exact label asset`);
         seenCandidateHashes.add(candidateHash);
+        pendingCandidates.push({ item, candidateHash, asset });
+      }
+      const acceptedCandidates = pendingCandidates.length;
+      const status: IngredientExtractionOutcomeStatus = acceptedCandidates > 0
+        ? "candidate"
+        : parsed.predictionCount > 0
+          ? "rejected"
+          : "no_prediction";
+      const acceptedPredictionIds = new Set(pendingCandidates.map(({ item }) => String(item.prediction.id ?? "")));
+      const rejectedPredictionCount = parsed.predictionCount - acceptedPredictionIds.size;
+      const reasons = status === "candidate"
+        ? rejectedPredictionCount > 0 ? ["partial_prediction_rejection"] : []
+        : status === "no_prediction"
+          ? ["no_ingredient_detection_entity"]
+          : parsed.issues.length > 0
+            ? [...new Set(parsed.issues.map(({ code }) => code))]
+            : ["no_ingredient_detection_entity"];
+      const attempt = createExtractionAttempt({
+        extractionRunId,
+        subjectSourceRecordId: stagedSourceRecordId(context.product),
+        subjectSourceRecordKey: context.product.sourceRecordId,
+        subjectSourceContentHash: context.product.contentHash,
+        productId: stagedProductId(context.product),
+        fieldFamily: "ingredients",
+        responseEvidenceHash,
+        status,
+        predictionCount: parsed.predictionCount,
+        candidateCount: acceptedCandidates,
+        rejectionCount: rejectedPredictionCount,
+        failureCount: 0,
+        conflictCount: parsed.hasConflict ? acceptedCandidates : 0,
+        reasons,
+        attemptedAt: startedAt,
+        isCurrent: true,
+      });
+      await writeLine(extractionAttemptOutput, attempt);
+      for (const { item, candidateHash, asset } of pendingCandidates) {
         const storedCandidate: StoredIngredientCandidate = {
           requestedCode: context.code,
           ingredientImageUrl: context.ingredientImageUrl,
           candidateHash,
-          candidate: item.candidate,
+          candidate: item.candidate!,
           issues: item.issues,
           hasConflict: parsed.hasConflict,
           prediction: item.prediction,
+          extractionAttemptId: attempt.id,
+          labelAssetId: asset.id,
+          labelContentSha256: asset.contentSha256,
         };
         await writeLine(candidateOutput, storedCandidate);
         const staged = stageIngredientCandidate(context, storedCandidate);
         await writeLine(stagedOutput, staged);
         await writeLine(indexOutput, { sourceRecordId: staged.sourceRecordId, contentHash: staged.contentHash });
-        acceptedCandidates += 1;
         candidateRecords += 1;
-        modelVersions[item.candidate.modelVersion] = (modelVersions[item.candidate.modelVersion] ?? 0) + 1;
-        languages[item.candidate.language.code] = (languages[item.candidate.language.code] ?? 0) + 1;
-        if (item.candidate.ingredientCount > 0
-          && item.candidate.knownIngredientCount / item.candidate.ingredientCount >= 0.6) {
+        modelVersions[item.candidate!.modelVersion] = (modelVersions[item.candidate!.modelVersion] ?? 0) + 1;
+        languages[item.candidate!.language.code] = (languages[item.candidate!.language.code] ?? 0) + 1;
+        if (item.candidate!.ingredientCount > 0
+          && item.candidate!.knownIngredientCount / item.candidate!.ingredientCount >= 0.6) {
           taxonomyRecognition.atLeastSixtyPercent += 1;
         } else {
           taxonomyRecognition.belowSixtyPercent += 1;
         }
       }
-      const status: IngredientExtractionOutcomeStatus = acceptedCandidates > 0
-        ? "candidate"
-        : parsed.entityCount > 0 || parsed.issues.length > 0
-          ? "rejected"
-          : "no_prediction";
+      const predictionGroups = new Map<string, Array<{ prediction: RawRecord; reference: LabelImageReference }>>();
+      for (const item of predictionReferences) {
+        const current = predictionGroups.get(item.reference!.url) ?? [];
+        current.push({ prediction: item.prediction, reference: item.reference! });
+        predictionGroups.set(item.reference!.url, current);
+      }
+      const accountedUrls = new Set<string>();
+      for (const [url, group] of predictionGroups) {
+        const asset = assetsByUrl.get(url)!;
+        const predictionIds = new Set(group.map(({ prediction }) => String(prediction.id ?? "")));
+        const groupCandidates = pendingCandidates.filter(({ item }) => predictionIds.has(String(item.prediction.id ?? "")));
+        const rejectedPredictions = group.filter(({ prediction }) => !acceptedPredictionIds.has(String(prediction.id ?? ""))).length;
+        const labelOutcome: IngredientExtractionOutcomeStatus = groupCandidates.length > 0 ? "candidate" : "rejected";
+        await writeLine(extractionAttemptLabelOutput, createExtractionAttemptLabel({
+          attemptId: attempt.id,
+          labelAssetId: asset.id,
+          role: url === requestedReference.url ? "requested" : "prediction",
+          outcome: labelOutcome,
+          predictionCount: group.length,
+          candidateCount: groupCandidates.length,
+          rejectionCount: rejectedPredictions,
+          failureCount: 0,
+          conflictCount: parsed.hasConflict ? groupCandidates.length : 0,
+          candidateHashes: groupCandidates.map(({ candidateHash }) => candidateHash),
+          reasons: labelOutcome === "candidate"
+            ? rejectedPredictions > 0 ? ["partial_prediction_rejection"] : []
+            : ["ingredient_prediction_rejected"],
+        }));
+        accountedUrls.add(url);
+      }
+      if (!accountedUrls.has(requestedReference.url)) {
+        await writeLine(extractionAttemptLabelOutput, createExtractionAttemptLabel({
+          attemptId: attempt.id,
+          labelAssetId: assetsByUrl.get(requestedReference.url)!.id,
+          role: "requested",
+          outcome: "no_prediction",
+          predictionCount: 0,
+          candidateCount: 0,
+          rejectionCount: 0,
+          failureCount: 0,
+          conflictCount: 0,
+          candidateHashes: [],
+          reasons: ["no_prediction_for_requested_label"],
+        }));
+      }
       const outcome: IngredientExtractionOutcome = {
         requestedCode: context.code,
         status,
         predictions: parsed.predictionCount,
         entities: parsed.entityCount,
         candidates: acceptedCandidates,
-        reasons: status === "candidate"
-          ? []
-          : status === "no_prediction"
-            ? ["no_ingredient_detection_entity"]
-            : [...new Set(parsed.issues.map(({ code }) => code))],
+        reasons,
       };
       outcomes[status] += 1;
       await writeLine(outcomeOutput, outcome);
@@ -526,6 +767,9 @@ export async function extractRobotoffIngredientApi(
   } finally {
     await Promise.all([
       closeStream(candidateOutput),
+      closeStream(labelAssetOutput),
+      closeStream(extractionAttemptOutput),
+      closeStream(extractionAttemptLabelOutput),
       closeStream(stagedOutput),
       closeStream(indexOutput),
       closeStream(outcomeOutput),
@@ -538,6 +782,11 @@ export async function extractRobotoffIngredientApi(
     throw new Error(`Robotoff ingredient accounting mismatch: ${accountedBarcodes} outcomes for ${contexts.length} requested barcodes.`);
   }
   const completedAt = new Date().toISOString();
+  const [labelAssets, extractionAttempts, extractionAttemptLabels] = await Promise.all([
+    readFile(labelAssetsPath, "utf8").then((value) => parseJsonLines<LabelEvidenceAsset>(value, "label-assets.jsonl")),
+    readFile(extractionAttemptsPath, "utf8").then((value) => parseJsonLines<ExtractionAttempt>(value, "extraction-attempts.jsonl")),
+    readFile(extractionAttemptLabelsPath, "utf8").then((value) => parseJsonLines<ExtractionAttemptLabel>(value, "extraction-attempt-labels.jsonl")),
+  ]);
   const sourceComplete = outcomes.failed === 0;
   const manifest: SourceManifest = {
     schemaVersion: 1,
@@ -592,6 +841,11 @@ export async function extractRobotoffIngredientApi(
     requestSchema: ROBOTOFF_INGREDIENT_REQUEST_SCHEMA,
     cohortHash,
     inputManifestHash: sourceManifest.inputHash,
+    extractionRunId,
+    parentSourceRunId,
+    labelAssets: labelAssets.length,
+    extractionAttempts: extractionAttempts.length,
+    extractionAttemptLabels: extractionAttemptLabels.length,
     exclusions: {
       records: outcomes.no_prediction + outcomes.rejected + outcomes.failed,
       path: basename(exclusionsPath),
@@ -607,6 +861,9 @@ export async function extractRobotoffIngredientApi(
     .map((name) => `responses/${name}`);
   await writeChecksums(options.outputDirectory, [
     basename(cohortPath),
+    basename(labelAssetsPath),
+    basename(extractionAttemptsPath),
+    basename(extractionAttemptLabelsPath),
     basename(candidatesPath),
     basename(stagedPath),
     basename(indexPath),
@@ -626,6 +883,9 @@ export async function extractRobotoffIngredientApi(
     manifestPath,
     reportPath,
     checksumsPath,
+    labelAssetsPath,
+    extractionAttemptsPath,
+    extractionAttemptLabelsPath,
     contexts: contexts.length,
     inputHash,
     inputBytes: inputStats.size,
@@ -655,8 +915,17 @@ export async function validateRobotoffIngredientArtifact(directory: string): Pro
   const stagedPath = join(directory, "staged-products.jsonl");
   const indexPath = join(directory, "source-index.jsonl");
   const exclusionsPath = join(directory, "exclusions.jsonl");
+  const labelAssetsPath = join(directory, "label-assets.jsonl");
+  const extractionAttemptsPath = join(directory, "extraction-attempts.jsonl");
+  const extractionAttemptLabelsPath = join(directory, "extraction-attempt-labels.jsonl");
   const checksumsPath = join(directory, "checksums.sha256");
-  const [manifestText, reportText, cohortText, outcomesText, candidatesText, stagedText, indexText, exclusionsText, checksumsText] = await Promise.all([
+  let labelAssetsText: string;
+  try {
+    labelAssetsText = await readFile(labelAssetsPath, "utf8");
+  } catch {
+    throw new Error("Ingredient artifact is legacy or incomplete: label-assets.jsonl is required");
+  }
+  const [manifestText, reportText, cohortText, outcomesText, candidatesText, stagedText, indexText, exclusionsText, extractionAttemptsText, extractionAttemptLabelsText, checksumsText] = await Promise.all([
     readFile(manifestPath, "utf8"),
     readFile(reportPath, "utf8"),
     readFile(cohortPath, "utf8"),
@@ -665,16 +934,21 @@ export async function validateRobotoffIngredientArtifact(directory: string): Pro
     readFile(stagedPath, "utf8"),
     readFile(indexPath, "utf8"),
     readFile(exclusionsPath, "utf8"),
+    readFile(extractionAttemptsPath, "utf8"),
+    readFile(extractionAttemptLabelsPath, "utf8"),
     readFile(checksumsPath, "utf8"),
   ]);
   const manifest = JSON.parse(manifestText) as SourceManifest;
   const report = JSON.parse(reportText) as RobotoffIngredientReport;
-  const cohort = parseJsonLines<IngredientContext>(cohortText, "cohort.jsonl");
+  const cohort = parseJsonLines<IngredientCohortRow>(cohortText, "cohort.jsonl");
   const outcomes = parseJsonLines<IngredientExtractionOutcome>(outcomesText, "outcomes.jsonl");
   const candidates = parseJsonLines<StoredIngredientCandidate>(candidatesText, "candidates.jsonl");
   const staged = parseJsonLines<StagedProduct>(stagedText, "staged-products.jsonl");
   const sourceIndex = parseJsonLines<{ sourceRecordId: string; contentHash: string }>(indexText, "source-index.jsonl");
   const exclusions = parseJsonLines<IngredientExtractionOutcome>(exclusionsText, "exclusions.jsonl");
+  const labelAssets = parseJsonLines<LabelEvidenceAsset>(labelAssetsText, "label-assets.jsonl");
+  const extractionAttempts = parseJsonLines<ExtractionAttempt>(extractionAttemptsText, "extraction-attempts.jsonl");
+  const extractionAttemptLabels = parseJsonLines<ExtractionAttemptLabel>(extractionAttemptLabelsText, "extraction-attempt-labels.jsonl");
 
   const expectedChecksums = new Map<string, string>();
   for (const line of checksumsText.split(/\r?\n/)) {
@@ -690,6 +964,9 @@ export async function validateRobotoffIngredientArtifact(directory: string): Pro
   }
   const requiredFiles = [
     "cohort.jsonl",
+    "label-assets.jsonl",
+    "extraction-attempts.jsonl",
+    "extraction-attempt-labels.jsonl",
     "candidates.jsonl",
     "staged-products.jsonl",
     "source-index.jsonl",
@@ -705,14 +982,18 @@ export async function validateRobotoffIngredientArtifact(directory: string): Pro
   }
 
   if (manifest.source !== "open_food_facts_robotoff_ingredients") throw new Error("Ingredient artifact has an unexpected source");
+  if (manifest.adapterVersion !== ROBOTOFF_INGREDIENT_API_ADAPTER_VERSION) throw new Error("Ingredient artifact adapter version has drifted");
   if (manifest.sourceComplete !== true || manifest.terminalEvidence !== "end_of_file") {
     throw new Error("Ingredient artifact is not source complete");
   }
   if (report.sourceComplete !== true || report.marketComplete !== false) throw new Error("Ingredient artifact report is not complete");
   if (report.requestSchema !== ROBOTOFF_INGREDIENT_REQUEST_SCHEMA) throw new Error("Ingredient artifact request schema has drifted");
+  if (!/^xrun_[a-f0-9]{24}$/.test(report.extractionRunId) || !/^run_[a-f0-9]{24}$/.test(report.parentSourceRunId)) {
+    throw new Error("Ingredient artifact extraction lineage is incomplete");
+  }
   if (report.cohortHash !== await hashFile(cohortPath)) throw new Error("Ingredient artifact cohort hash does not match its ledger");
   if (cohort.length === 0) throw new Error("Ingredient artifact cohort is empty");
-  const cohortByCode = new Map<string, IngredientContext>();
+  const cohortByCode = new Map<string, IngredientCohortRow>();
   let priorCode = "";
   for (const context of cohort) {
     const code = normalizeGtin(context.code);
@@ -751,6 +1032,72 @@ export async function validateRobotoffIngredientArtifact(directory: string): Pro
     throw new Error("Ingredient artifact cohort counts do not reconcile");
   }
 
+  if (report.labelAssets !== labelAssets.length
+    || report.extractionAttempts !== extractionAttempts.length
+    || report.extractionAttemptLabels !== extractionAttemptLabels.length) {
+    throw new Error("Ingredient artifact exact extraction ledger counts do not reconcile");
+  }
+  const assetById = new Map<string, LabelEvidenceAsset>();
+  for (const asset of labelAssets) {
+    const errors = validateLabelEvidenceAsset(asset);
+    if (errors.length > 0) throw new Error(`Ingredient label asset is invalid: ${errors.join("; ")}`);
+    if (asset.fieldFamily !== "ingredients" || assetById.has(asset.id)) throw new Error("Ingredient artifact has a duplicate or wrong-family label asset");
+    assetById.set(asset.id, asset);
+  }
+  const attemptById = new Map<string, ExtractionAttempt>();
+  const attemptBySourceKey = new Map<string, ExtractionAttempt>();
+  for (const attempt of extractionAttempts) {
+    const errors = validateExtractionAttempt(attempt);
+    if (errors.length > 0) throw new Error(`Ingredient extraction attempt is invalid: ${errors.join("; ")}`);
+    if (attempt.extractionRunId !== report.extractionRunId || attempt.fieldFamily !== "ingredients" || attempt.isCurrent !== true) {
+      throw new Error("Ingredient extraction attempt does not match its accepted run");
+    }
+    if (attemptById.has(attempt.id) || attemptBySourceKey.has(attempt.subjectSourceRecordKey)) {
+      throw new Error("Ingredient extraction attempt is duplicated");
+    }
+    const subject = cohort.find(({ subjectSourceRecordKey }) => subjectSourceRecordKey === attempt.subjectSourceRecordKey);
+    if (!subject || subject.subjectSourceRecordId !== attempt.subjectSourceRecordId
+      || subject.subjectSourceContentHash !== attempt.subjectSourceContentHash || subject.productId !== attempt.productId) {
+      throw new Error("Ingredient extraction attempt subject binding does not match its cohort");
+    }
+    const response = JSON.parse(await readFile(join(directory, "responses", `${subject.code}.json`), "utf8"));
+    if (jsonHash(response) !== attempt.responseEvidenceHash) throw new Error("Ingredient extraction response evidence hash does not match");
+    attemptById.set(attempt.id, attempt);
+    attemptBySourceKey.set(attempt.subjectSourceRecordKey, attempt);
+  }
+  if (attemptBySourceKey.size !== cohort.length) throw new Error("Ingredient exact attempt accounting is incomplete");
+  const labelsByAttempt = new Map<string, ExtractionAttemptLabel[]>();
+  const labelIds = new Set<string>();
+  const usedAssetIds = new Set<string>();
+  for (const label of extractionAttemptLabels) {
+    const errors = validateExtractionAttemptLabel(label);
+    if (errors.length > 0) throw new Error(`Ingredient per-label outcome is invalid: ${errors.join("; ")}`);
+    if (!attemptById.has(label.attemptId) || !assetById.has(label.labelAssetId) || labelIds.has(label.id)) {
+      throw new Error("Ingredient per-label outcome has a missing or duplicate reference");
+    }
+    const attempt = attemptById.get(label.attemptId)!;
+    const asset = assetById.get(label.labelAssetId)!;
+    if (asset.subjectSourceRecordId !== attempt.subjectSourceRecordId
+      || asset.subjectSourceContentHash !== attempt.subjectSourceContentHash
+      || asset.productId !== attempt.productId || asset.fieldFamily !== attempt.fieldFamily) {
+      throw new Error("Ingredient label asset does not match its attempt subject binding");
+    }
+    labelIds.add(label.id);
+    usedAssetIds.add(label.labelAssetId);
+    const rows = labelsByAttempt.get(label.attemptId) ?? [];
+    rows.push(label);
+    labelsByAttempt.set(label.attemptId, rows);
+  }
+  if (usedAssetIds.size !== assetById.size) throw new Error("Ingredient artifact contains an unlinked label asset");
+  for (const attempt of extractionAttempts) {
+    const labels = labelsByAttempt.get(attempt.id) ?? [];
+    if (!labels.some(({ role }) => role === "requested")) throw new Error("Ingredient attempt has no requested label outcome");
+    for (const [field, labelField] of [["predictionCount", "predictionCount"], ["candidateCount", "candidateCount"], ["rejectionCount", "rejectionCount"], ["failureCount", "failureCount"], ["conflictCount", "conflictCount"]] as const) {
+      const total = labels.reduce((sum, label) => sum + label[labelField], 0);
+      if (attempt[field] !== total) throw new Error(`Ingredient attempt ${field} does not reconcile with per-label outcomes`);
+    }
+  }
+
   const countedOutcomes: Record<IngredientExtractionOutcomeStatus, number> = {
     candidate: 0,
     no_prediction: 0,
@@ -783,6 +1130,11 @@ export async function validateRobotoffIngredientArtifact(directory: string): Pro
     if (!cohortContext || stored.ingredientImageUrl !== cohortContext.ingredientImageUrl) {
       throw new Error("Ingredient candidate does not match its cohort context");
     }
+    const attempt = stored.extractionAttemptId ? attemptById.get(stored.extractionAttemptId) : null;
+    const asset = stored.labelAssetId ? assetById.get(stored.labelAssetId) : null;
+    if (!attempt || !asset || stored.labelContentSha256 !== asset.contentSha256 || attempt.subjectSourceRecordKey !== stored.requestedCode) {
+      throw new Error("Ingredient candidate is not bound to its exact extraction attempt and label bytes");
+    }
     const errors = validateIngredientCandidate(stored.candidate, { expectedGtin: stored.requestedCode, confidenceThreshold: report.confidenceThreshold });
     if (errors.length > 0) throw new Error(`Ingredient candidate failed current validation: ${errors.join("; ")}`);
     if (await ingredientCandidateHash(stored.candidate) !== stored.candidateHash) throw new Error("Ingredient candidate hash does not match its payload");
@@ -798,6 +1150,10 @@ export async function validateRobotoffIngredientArtifact(directory: string): Pro
       taxonomyRecognition.belowSixtyPercent += 1;
     }
   }
+  const labelCandidateHashes = extractionAttemptLabels.flatMap(({ candidateHashes }) => candidateHashes).sort();
+  if (JSON.stringify([...candidateHashes].sort()) !== JSON.stringify(labelCandidateHashes)) {
+    throw new Error("Ingredient candidate hashes do not reconcile with per-label outcomes");
+  }
   for (const outcome of outcomes) {
     const actualCandidates = candidateCountByCode.get(outcome.requestedCode) ?? 0;
     if (outcome.candidates !== actualCandidates) throw new Error(`Ingredient candidate count does not reconcile for ${outcome.requestedCode}`);
@@ -810,6 +1166,7 @@ export async function validateRobotoffIngredientArtifact(directory: string): Pro
     throw new Error("Ingredient artifact staged records do not reconcile");
   }
   const indexByRecord = new Map(sourceIndex.map((row) => [row.sourceRecordId, row.contentHash]));
+  if (indexByRecord.size !== sourceIndex.length) throw new Error("Ingredient source index contains duplicate rows");
   for (const product of staged) {
     const rawEvidence = isRecord(product.rawEvidence) ? product.rawEvidence : null;
     const rawCandidate = rawEvidence && isRecord(rawEvidence.candidate) ? rawEvidence.candidate : null;
@@ -820,6 +1177,13 @@ export async function validateRobotoffIngredientArtifact(directory: string): Pro
       || typeof rawEvidence?.candidateHash !== "string"
       || indexByRecord.get(product.sourceRecordId) !== product.contentHash) {
       throw new Error("Ingredient staged record is not review-only or does not match its source index");
+    }
+    const attemptId = rawEvidence.extractionAttemptId;
+    const assetId = rawEvidence.labelAssetId;
+    const asset = typeof assetId === "string" ? assetById.get(assetId) : null;
+    if (typeof attemptId !== "string" || !attemptById.has(attemptId) || !asset
+      || rawEvidence.labelContentSha256 !== asset.contentSha256) {
+      throw new Error("Ingredient staged record is not bound to exact label bytes");
     }
   }
   if (manifest.duplicateRecords !== report.duplicateCandidates) throw new Error("Ingredient duplicate accounting does not reconcile");
@@ -835,5 +1199,5 @@ export async function validateRobotoffIngredientArtifact(directory: string): Pro
     || expectedExclusions.some((outcome) => excludedByCode.get(outcome.requestedCode)?.status !== outcome.status)) {
     throw new Error("Ingredient exclusion accounting does not reconcile");
   }
-  return { manifest, report, outcomes, candidates, staged };
+  return { manifest, report, outcomes, candidates, staged, labelAssets, extractionAttempts, extractionAttemptLabels };
 }

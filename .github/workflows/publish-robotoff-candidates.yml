@@ -19,6 +19,14 @@ on:
         description: Reviewed extraction manifest input SHA-256
         required: true
         type: string
+      expected_head_sha:
+        description: Exact successful extraction commit SHA reviewed for publication
+        required: true
+        type: string
+      expected_artifact_digest:
+        description: Exact GitHub artifact digest in sha256:<hex> form
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -39,6 +47,8 @@ jobs:
       CANDIDATE_FAMILY: ${{ inputs.candidate_family }}
       EXTRACTION_RUN_ID: ${{ inputs.extraction_run_id }}
       EXPECTED_INPUT_HASH: ${{ inputs.expected_input_hash }}
+      EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+      EXPECTED_ARTIFACT_DIGEST: ${{ inputs.expected_artifact_digest }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -54,6 +64,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - name: Download the selected reviewed extraction
+        id: reviewed
         uses: actions/github-script@v9
         env:
           RUN_ID: ${{ env.EXTRACTION_RUN_ID }}
@@ -62,8 +73,24 @@ jobs:
             const fs = require('fs');
             const runId = Number(process.env.RUN_ID);
             if (!Number.isSafeInteger(runId) || runId <= 0) throw new Error('extraction_run_id must be a positive workflow run ID');
+            if (new Set([29551181430, 29552807113]).has(runId)) throw new Error('The selected extraction workflow run is explicitly superseded and denied');
             const family = process.env.CANDIDATE_FAMILY;
             if (!['nutrition', 'ingredients'].includes(family)) throw new Error('candidate_family is not supported');
+            if (!/^[a-f0-9]{40}$/.test(process.env.EXPECTED_HEAD_SHA ?? '')) throw new Error('expected_head_sha must be an exact lowercase commit SHA');
+            if (!/^sha256:[a-f0-9]{64}$/.test(process.env.EXPECTED_ARTIFACT_DIGEST ?? '')) throw new Error('expected_artifact_digest must be an immutable GitHub artifact digest');
+            const selectedRun = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            });
+            const run = selectedRun.data;
+            const expectedWorkflow = family === 'ingredients'
+              ? 'Extract ingredient label evidence'
+              : 'Extract label evidence with Robotoff';
+            if (run.name !== expectedWorkflow || run.conclusion !== 'success') throw new Error('Selected run is not a successful expected extraction workflow');
+            if (run.head_branch !== context.payload.repository.default_branch) throw new Error('Selected extraction is not from the default branch');
+            if (run.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`) throw new Error('Selected extraction is not from this repository');
+            if (run.head_sha !== process.env.EXPECTED_HEAD_SHA) throw new Error('Selected extraction head SHA differs from the reviewed SHA');
             const response = await github.rest.actions.listWorkflowRunArtifacts({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -72,8 +99,19 @@ jobs:
             });
             const prefix = family === 'ingredients' ? 'robotoff-ingredient-candidates' : 'robotoff-label-candidates';
             const expectedName = `${prefix}-${runId}`;
-            const artifact = response.data.artifacts.find((candidate) => candidate.name === expectedName && !candidate.expired);
-            if (!artifact) throw new Error(`Reviewed artifact ${expectedName} was not found or has expired`);
+            const matches = response.data.artifacts.filter((candidate) => candidate.name === expectedName && !candidate.expired);
+            if (matches.length !== 1) throw new Error(`Expected exactly one unexpired reviewed artifact named ${expectedName}`);
+            const artifact = matches[0];
+            if (artifact && new Set([8395774354, 8396363821]).has(artifact.id)) {
+              throw new Error('The selected extraction artifact is explicitly superseded and denied');
+            }
+            if (!artifact || artifact.digest !== process.env.EXPECTED_ARTIFACT_DIGEST || artifact.size_in_bytes <= 0) {
+              throw new Error('Reviewed artifact digest or size differs from the pinned evidence');
+            }
+            core.setOutput('artifact_name', expectedName);
+            core.setOutput('artifact_digest', artifact.digest);
+            core.setOutput('artifact_bytes', String(artifact.size_in_bytes));
+            core.setOutput('workflow_name', expectedWorkflow);
             const download = await github.rest.actions.downloadArtifact({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -98,18 +136,47 @@ jobs:
           const expectedSource = process.env.CANDIDATE_FAMILY === 'ingredients'
             ? 'open_food_facts_robotoff_ingredients'
             : 'open_food_facts_robotoff';
+          const expectedAdapter = process.env.CANDIDATE_FAMILY === 'ingredients'
+            ? 'robotoff-ingredients-api-v3'
+            : 'robotoff-api-v8';
           if (manifest.source !== expectedSource) failures.push('unexpected extraction source');
+          if (manifest.adapterVersion !== expectedAdapter) failures.push('extraction adapter is not the current reviewed version');
           if (manifest.mode !== 'production') failures.push('extraction mode is not production');
           if (manifest.sourceComplete !== true || report.sourceComplete !== true) failures.push('extraction is incomplete');
           if (manifest.terminalEvidence !== 'end_of_file') failures.push('extraction did not exhaust its eligible barcode set');
           if (manifest.inputHash !== process.env.EXPECTED_INPUT_HASH) failures.push('extraction input hash differs from the reviewed hash');
           if (report.accountedBarcodes !== report.requestedBarcodes) failures.push('barcode accounting does not reconcile');
           if (report.outcomes?.failed !== 0) failures.push('extraction contains failed barcodes');
+          if (typeof report.requestSchema !== 'string' || !/^[a-f0-9]{64}$/.test(report.requestSchema)) failures.push('extraction request schema is missing');
+          if (typeof report.extractionRunId !== 'string' || !/^xrun_[a-f0-9]{24}$/.test(report.extractionRunId)) failures.push('extraction run identity is missing');
+          if (typeof report.parentSourceRunId !== 'string' || !/^run_[a-f0-9]{24}$/.test(report.parentSourceRunId)) failures.push('parent source run identity is missing');
+          if (![report.labelAssets, report.extractionAttempts, report.extractionAttemptLabels].every(Number.isSafeInteger)) failures.push('exact label accounting is missing');
           if (failures.length) throw new Error(failures.join('; '));
           NODE
 
       - name: Publish review-gated candidate source records
-        run: pnpm data:publish -- --input .data/publish-robotoff --remote --confirm-remote
+        shell: bash
+        env:
+          ARTIFACT_NAME: ${{ steps.reviewed.outputs.artifact_name }}
+          ARTIFACT_DIGEST: ${{ steps.reviewed.outputs.artifact_digest }}
+          ARTIFACT_BYTES: ${{ steps.reviewed.outputs.artifact_bytes }}
+          WORKFLOW_NAME: ${{ steps.reviewed.outputs.workflow_name }}
+        run: |
+          set -euo pipefail
+          pnpm data:publish -- \
+            --input .data/publish-robotoff \
+            --remote \
+            --confirm-remote \
+            --automatic \
+            --skip-migrations \
+            --workflow-name "$WORKFLOW_NAME" \
+            --upstream-run-id "$EXTRACTION_RUN_ID" \
+            --upstream-head-sha "$EXPECTED_HEAD_SHA" \
+            --upstream-head-branch main \
+            --upstream-repository Significant-Hobbies/protein-index \
+            --artifact-name "$ARTIFACT_NAME" \
+            --artifact-digest "$ARTIFACT_DIGEST" \
+            --artifact-bytes "$ARTIFACT_BYTES"
 
       - name: Record candidate publication state
         shell: bash

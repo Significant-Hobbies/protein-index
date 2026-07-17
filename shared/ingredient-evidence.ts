@@ -58,6 +58,8 @@ export interface IngredientEvidenceDecisionInput {
   sourceContentHash: string;
   productId: string;
   candidateHash: string;
+  extractionAttemptId?: string | null;
+  labelAssetId?: string | null;
   fieldFamily: "ingredients";
   decision: "verify" | "reject";
   payload: IngredientDecisionPayload;
@@ -264,6 +266,11 @@ export async function validateIngredientEvidenceDecision(
   if (input.fieldFamily !== "ingredients") errors.push("fieldFamily is not supported");
   if (!(input.decision === "verify" || input.decision === "reject")) errors.push("decision is not supported");
   if (!/^[a-f0-9]{64}$/.test(input.candidateHash)) errors.push("candidateHash must be a lowercase SHA-256 digest");
+  const extractionAttemptId = input.extractionAttemptId ?? null;
+  const labelAssetId = input.labelAssetId ?? null;
+  if ((extractionAttemptId === null) !== (labelAssetId === null)) errors.push("extraction linkage must include both attempt and label asset IDs");
+  if (extractionAttemptId !== null && !/^xat_[a-f0-9]{24}$/.test(extractionAttemptId)) errors.push("extractionAttemptId is invalid");
+  if (labelAssetId !== null && !/^lbl_[a-f0-9]{24}$/.test(labelAssetId)) errors.push("labelAssetId is invalid");
   if (!validHttpsUrl(input.evidenceUrl)) errors.push("evidenceUrl must use HTTPS");
   if (!Number.isFinite(Date.parse(input.decidedAt))) errors.push("decidedAt must be a valid timestamp");
   const candidateErrors = validateIngredientCandidate(input.payload.candidate, {
