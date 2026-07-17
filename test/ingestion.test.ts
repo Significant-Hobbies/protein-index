@@ -1823,7 +1823,8 @@ describe("Open Food Facts bulk staging", () => {
       expect(extraction).toContain("--fail-on candidate_key_active_state_ambiguous");
       expect(extraction).toContain("decision-drift audit");
       expect(extraction).toContain("if: always()");
-      expect(extraction).toContain("timeout-minutes: 225");
+      expect(extraction).toContain("timeout-minutes: 360");
+      expect(extraction).toContain("timeout-minutes: 345");
       expect(extraction).toContain("Upload extraction diagnostics");
       expect(extraction).toContain("responses/*.error.json");
     }
