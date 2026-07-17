@@ -393,6 +393,59 @@ describe("completion outcome dashboard", () => {
     expect(markup).toContain("Authoritative source missing");
   });
 
+  it("presents a no-label failure as an unresolved residual exception", () => {
+    const residual = item("retry_extraction");
+    residual.fieldStatus = null;
+    residual.openCandidateCount = 0;
+    residual.openReviewCount = 0;
+    residual.reasonCodes = ["extraction_failed", "label_declared_size_exceeded", "label_http_error"];
+    residual.extraction = {
+      labels: 0,
+      candidate: 0,
+      noPrediction: 0,
+      rejected: 0,
+      failed: 1,
+      unattempted: 0,
+      stale: 0,
+      conflicts: 0,
+    };
+    residual.labels = [];
+    residual.labelsTruncated = false;
+
+    const evidence = renderToStaticMarkup(createElement(CompletionOutcomeEvidence, { item: residual }));
+    const action = renderToStaticMarkup(createElement(CompletionPrimaryAction, {
+      item: residual,
+      onOpenProduct: () => undefined,
+      onOpenReview: () => undefined,
+    }));
+    expect(evidence).toContain("Residual exception:");
+    expect(evidence).toContain("No linked per-label outcome is available for the current failed attempt");
+    expect(evidence).toContain("neither verified nor evidence-backed unavailable");
+    expect(evidence).toContain("Retry extraction is the current next action");
+    expect(evidence).toContain("<dt>failed</dt><dd>1</dd>");
+    expect(evidence).toContain("Extraction failed · Label declared size exceeded · Label http error");
+    expect(evidence).not.toContain("No exact label extraction recorded");
+    expect(action).toContain("Retry automated extraction");
+    expect(action).not.toContain("Record unavailable");
+  });
+
+  it("keeps residual retry visible without replacing a higher-priority review action", () => {
+    const residual = item("review_ready");
+    residual.reasonCodes = ["extraction_failed", "label_http_error", "review_candidate_pending"];
+    residual.extraction.failed = 1;
+
+    const evidence = renderToStaticMarkup(createElement(CompletionOutcomeEvidence, { item: residual }));
+    const action = renderToStaticMarkup(createElement(CompletionPrimaryAction, {
+      item: residual,
+      onOpenProduct: () => undefined,
+      onOpenReview: () => undefined,
+    }));
+    expect(evidence).toContain("Residual exception:");
+    expect(evidence).toContain("Retry extraction remains required after the higher-priority action");
+    expect(action).toContain("Review exact candidate");
+    expect(action).not.toContain("Retry automated extraction");
+  });
+
   it("uses exact review actions and explicit non-terminal extraction language", () => {
     const review = renderToStaticMarkup(createElement(CompletionPrimaryAction, {
       item: item("review_ready"),

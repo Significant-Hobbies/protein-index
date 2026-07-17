@@ -5,6 +5,15 @@ an import means every record in that configured source was considered; it does
 not mean that every Indian food exists in the source or that every contributed
 label value is correct.
 
+Label extraction likewise separates outcome accounting from verification. An
+exhaustive run assigns every requested barcode exactly one checksummed outcome.
+A publishable artifact can retain only an explicitly reason-coded residual set
+of at most 10 and at most 0.25% of requested barcodes, and only for allow-listed
+label failures after a successful raw model response was retained. Upstream
+model/API failures, unknown reasons, incomplete accounting, or either exceeded
+bound remain run-fatal. Failed outcomes create no nutrition, ingredient,
+identity, or unavailable fact.
+
 ## Open Food Facts bootstrap
 
 The scheduled workflow streams the official complete tab-separated export from
@@ -56,18 +65,20 @@ explicitly; it never substitutes Open Food Facts data and labels it official.
 
 ## Hosted publication
 
-Successful producer runs currently route exact checksummed artifacts into one
-serialized, credential-scoped D1 publication workflow. It revalidates the
-manifest, source/cohort accounting, portable checksums, immutable run identity,
-and authority boundary before generating idempotent SQL. Community observations
-remain unverified, model output remains review-only, and reviewed decisions are
-never accepted from this automatic path.
+Successful producer runs retain exact checksummed artifacts but do not trigger
+a credentialed D1 write. An operator must explicitly dispatch the serialized
+publication workflow for an exact successful run and provide its hard
+confirmation input. The workflow then revalidates the manifest, source/cohort
+accounting, portable checksums, immutable run identity, and authority boundary
+before generating idempotent SQL. Community observations remain unverified,
+model output remains review-only, and reviewed decisions are never accepted
+from this path.
 
-Automatic publication cannot apply migrations and currently fails closed while
-the remote schema is behind. The GitHub `production` environment does not yet
-require a reviewer, so pending migrations must not be applied until automatic
-publication is disabled or protected by a hard human approval gate. Credentials
-remain environment-scoped and must never be written to repository files.
+Fresh-evidence publication cannot apply migrations and fails closed while the
+remote schema is behind. Explicit dispatch confirmation is required before any
+credential-bearing or write step, while the GitHub `production` environment
+continues to scope credentials as defense in depth. Credentials must never be
+written to repository files.
 
 ## Evidence policy
 
@@ -83,6 +94,9 @@ Trusted comparisons require exact current identity, authority-100 verified
 nutrition, and terminal ingredient evidence, with contradictions failing
 closed. Raw observations and provenance remain available so verification
 decisions are auditable and can be revisited when packaging changes.
+Failure-only products remain outstanding and outside Trusted. A failed
+extraction is not positive or negative evidence and therefore does not revoke
+separate exact-current verified or terminal evidence for the same product.
 
 Reviewed label evidence preserves its physical basis. Mass candidates use per
 100 g; liquid candidates use per 100 mL. Serving rows are normalized only from

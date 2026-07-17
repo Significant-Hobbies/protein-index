@@ -12,6 +12,7 @@ import { parseRobotoffIngredientEvidence } from "../scripts/adapters/robotoff-in
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "../scripts/adapters/robotoff";
 import {
   AUTOMATIC_PUBLICATION_FAMILIES,
+  CURRENT_PUBLICATION_ADAPTER_VERSIONS,
   automaticPublicationContract,
   assertAutomaticPublicationPostconditions,
   assertIdempotentPublicationReplay,
@@ -24,7 +25,7 @@ import {
   type ExactExtractionSnapshot,
   type PublicationState,
 } from "../scripts/publication";
-import { emitImportSql } from "../scripts/reconcile";
+import { emitImportSql, ingestionRunIdForManifest } from "../scripts/reconcile";
 import {
   evidenceDecisionFromDatabaseRow,
   emitReviewDecisionSql,
@@ -50,6 +51,16 @@ import {
 } from "../shared/evidence-decisions";
 import { ingredientCandidateHash, type IngredientEvidenceDecisionInput } from "../shared/ingredient-evidence";
 import { parseIngredients } from "../shared/ingredients";
+import {
+  EXTRACTION_RESIDUAL_EXCEPTION_MAX_COUNT,
+  EXTRACTION_RESIDUAL_EXCEPTION_MAX_RATE,
+  extractionAccountingSummary,
+  isResidualExceptionReason,
+  residualExceptionBoundsSatisfied,
+  validateExtractionAccountingSummary,
+  validateExtractionOutcomePartition,
+  type ExtractionRun,
+} from "../shared/extraction-outcomes";
 import type { SourceManifest } from "../shared/types";
 
 const labelImageFetcher = async () => new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), {
@@ -93,6 +104,71 @@ const automaticInput = (overrides: Partial<AutomaticPublicationInput> = {}): Aut
   ...overrides,
 });
 
+function fixtureEan13(sequence: number): string {
+  const body = `89000000${String(sequence).padStart(4, "0")}`;
+  const sum = [...body].reduce((total, digit, index) => total + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
+  return `${body}${(10 - (sum % 10)) % 10}`;
+}
+
+describe("bounded extraction residual accounting", () => {
+  it("keeps zero-failure accounting complete and verification complete", () => {
+    const summary = extractionAccountingSummary(5_196, 5_196, 0);
+    expect(summary).toEqual({
+      outcomeAccountingComplete: true,
+      verificationComplete: true,
+      residualExceptionCount: 0,
+      residualExceptionRate: 0,
+      residualExceptionLimits: {
+        maxCount: EXTRACTION_RESIDUAL_EXCEPTION_MAX_COUNT,
+        maxRate: EXTRACTION_RESIDUAL_EXCEPTION_MAX_RATE,
+      },
+    });
+    expect(residualExceptionBoundsSatisfied(summary)).toBe(true);
+    expect(validateExtractionAccountingSummary(summary, 5_196, 5_196, 0)).toEqual([]);
+  });
+
+  it("accepts eight fully accounted exceptions among 5,196 requests", () => {
+    const summary = extractionAccountingSummary(5_196, 5_196, 8);
+    expect(summary).toMatchObject({
+      outcomeAccountingComplete: true,
+      verificationComplete: false,
+      residualExceptionCount: 8,
+      residualExceptionRate: 8 / 5_196,
+    });
+    expect(residualExceptionBoundsSatisfied(summary)).toBe(true);
+    expect(validateExtractionAccountingSummary(summary, 5_196, 5_196, 8)).toEqual([]);
+  });
+
+  it("rejects either an excessive exception count or rate", () => {
+    const countExceeded = extractionAccountingSummary(10_000, 10_000, 11);
+    expect(residualExceptionBoundsSatisfied(countExceeded)).toBe(false);
+    expect(validateExtractionAccountingSummary(countExceeded, 10_000, 10_000, 11)).toContain(
+      "residual exception count exceeds the fixed limit",
+    );
+    const rateExceeded = extractionAccountingSummary(399, 399, 1);
+    expect(residualExceptionBoundsSatisfied(rateExceeded)).toBe(false);
+    expect(validateExtractionAccountingSummary(rateExceeded, 399, 399, 1)).toContain(
+      "residual exception rate exceeds the fixed limit",
+    );
+  });
+
+  it("rejects missing, duplicate, outside, and malformed accounting", () => {
+    expect(validateExtractionOutcomePartition(["a", "b"], ["a"])).toContain("extraction outcome is missing for b");
+    expect(validateExtractionOutcomePartition(["a", "b"], ["a", "a"])).toEqual(expect.arrayContaining([
+      "extraction outcomes contain duplicate subjects",
+      "extraction outcome is missing for b",
+    ]));
+    expect(validateExtractionOutcomePartition(["a"], ["a", "b"])).toContain("extraction outcome is outside the requested set: b");
+    expect(validateExtractionAccountingSummary({
+      ...extractionAccountingSummary(5_196, 5_196, 8),
+      residualExceptionCount: 7,
+    }, 5_196, 5_196, 8)).toContain("residual exception count does not match failed outcomes");
+    expect(isResidualExceptionReason("label_http_error")).toBe(true);
+    expect(isResidualExceptionReason("Robotoff returned HTTP 503")).toBe(false);
+    expect(isResidualExceptionReason("prediction_label_reference_missing")).toBe(false);
+  });
+});
+
 async function writeAutomaticArtifact(input: {
   directory: string;
   source?: SourceManifest["source"];
@@ -103,6 +179,8 @@ async function writeAutomaticArtifact(input: {
   if (!normalized) throw new Error("Expected the Open Food Facts fixture to normalize");
   const product: Record<string, unknown> = input.product ?? { ...normalized };
   const source = input.source ?? "open_food_facts";
+  const exactExtraction = source === "open_food_facts_robotoff" || source === "open_food_facts_robotoff_ingredients";
+  const extractionAccounting = exactExtraction ? extractionAccountingSummary(1, 1, 0) : {};
   product.source = source;
   const now = "2026-07-16T10:00:00.000Z";
   const manifest: SourceManifest = {
@@ -114,7 +192,13 @@ async function writeAutomaticArtifact(input: {
       : { identity: 40, nutrition: 35, ingredients: 35 },
     sourceLicenseUrl: "https://opendatacommons.org/licenses/odbl/1-0/",
     sourceRetentionNotes: "Automatic publication test fixture",
-    adapterVersion: "test-v1",
+    adapterVersion: source === "open_food_facts"
+      ? "off-bulk-v3"
+      : source === "open_food_facts_api"
+        ? "off-api-enrichment-v6"
+        : source === "open_food_facts_robotoff"
+          ? "robotoff-api-v8"
+          : "robotoff-ingredients-api-v3",
     input: "fixture",
     inputHash: "b".repeat(64),
     inputBytes: 1,
@@ -124,6 +208,7 @@ async function writeAutomaticArtifact(input: {
     mode: "production",
     terminalEvidence: "end_of_file",
     sourceComplete: true,
+    ...extractionAccounting,
     marketComplete: false,
     advertisedTotal: 1,
     recordsRead: 1,
@@ -143,6 +228,7 @@ async function writeAutomaticArtifact(input: {
     sourceComplete: true,
     marketComplete: false,
     ...(barcodeAccounted ? { requestedBarcodes: 1, accountedBarcodes: 1, outcomes: { failed: 0 } } : {}),
+    ...extractionAccounting,
     continuity: { currentStagedRecords: 1, previousStagedRecords: 1, missingSinceRecords: 0, maximumDropRatio: 0.2 },
     exclusions: { records: 0, reconcilesIndiaSlice: true },
   };
@@ -157,6 +243,51 @@ async function writeAutomaticArtifact(input: {
   for (const [name, contents] of files) await writeFile(join(input.directory, name), contents, "utf8");
   const checksums = [...files].map(([name, contents]) => `${createHash("sha256").update(contents).digest("hex")}  ${name}`);
   await writeFile(join(input.directory, "checksums.sha256"), `${checksums.join("\n")}\n`, "utf8");
+}
+
+async function bindPassingDecisionDrift(directory: string, fieldFamily: "nutrition" | "ingredients"): Promise<void> {
+  const [manifest, report] = await Promise.all([
+    readFile(join(directory, "manifest.json"), "utf8").then(JSON.parse) as Promise<SourceManifest>,
+    readFile(join(directory, "report.json"), "utf8").then(JSON.parse) as Promise<Record<string, unknown>>,
+  ]);
+  const evidence = {
+    schemaVersion: 1,
+    artifact: {
+      directory: directory.split("/").at(-1),
+      fieldFamily,
+      sourceId: manifest.source,
+      adapterVersion: manifest.adapterVersion,
+      inputHash: manifest.inputHash,
+      extractionRunId: report.extractionRunId,
+      parentSourceRunId: report.parentSourceRunId,
+      sourceComplete: true,
+      candidateCount: manifest.stagedRecords,
+    },
+    inputs: { bundleCount: 0, decisionRecords: 0, uniqueDecisions: 0, duplicateDecisionRecords: 0, currentCandidates: manifest.stagedRecords },
+    classificationCounts: {},
+    conflicts: [],
+    findings: [],
+    unreviewedCurrentCandidates: [],
+    hasHardFailure: false,
+    policy: { failOn: ["candidate_key_active_state_ambiguous"], failures: [], passed: true },
+  };
+  const contents = `${JSON.stringify(evidence, null, 2)}\n`;
+  await writeFile(join(directory, "decision-drift.json"), contents, "utf8");
+  const checksumsPath = join(directory, "checksums.sha256");
+  const checksums = await readFile(checksumsPath, "utf8");
+  await writeFile(checksumsPath, `${checksums.trimEnd()}\n${createHash("sha256").update(contents).digest("hex")}  decision-drift.json\n`, "utf8");
+}
+
+async function rewritePortableChecksum(directory: string, file: string): Promise<void> {
+  const contents = await readFile(join(directory, file));
+  const digest = createHash("sha256").update(contents).digest("hex");
+  const checksumsPath = join(directory, "checksums.sha256");
+  const lines = (await readFile(checksumsPath, "utf8")).trim().split(/\r?\n/).map((line) => (
+    line.replace(/^[a-f0-9]{64}(\s+\*?)(.+)$/, (whole, spacing: string, name: string) => (
+      name.replace(/^\.\//, "") === file ? `${digest}${spacing}${name}` : whole
+    ))
+  ));
+  await writeFile(checksumsPath, `${lines.join("\n")}\n`, "utf8");
 }
 
 const ingredientPrediction = {
@@ -343,6 +474,10 @@ describe("Robotoff ingredient evidence", () => {
         taxonomyRecognition: { belowSixtyPercent: 1, atLeastSixtyPercent: 0 },
       },
     });
+    await expect(validateRobotoffIngredientArtifact(outputDirectory, { requireDecisionDrift: true }))
+      .rejects.toThrow("missing checksummed decision-drift evidence");
+    await bindPassingDecisionDrift(outputDirectory, "ingredients");
+    await expect(validateRobotoffIngredientArtifact(outputDirectory, { requireDecisionDrift: true })).resolves.toBeDefined();
     const resumed = await extractRobotoffIngredientApi({
       input: source.stagedPath,
       inputManifest: source.manifestPath,
@@ -354,6 +489,16 @@ describe("Robotoff ingredient evidence", () => {
       fetcher: async () => { throw new Error("completed GTIN should not be fetched again"); },
     });
     expect(resumed).toMatchObject({ fetchedBarcodes: 0, resumedBarcodes: 1, outcomes: { candidate: 1 } });
+
+    const inflatedManifest = JSON.parse(await readFile(resumed.manifestPath, "utf8"));
+    const inflatedReport = JSON.parse(await readFile(resumed.reportPath, "utf8"));
+    Object.assign(inflatedManifest, { advertisedTotal: 2, recordsRead: 2, indiaRecords: 2 });
+    Object.assign(inflatedReport, { requestedBarcodes: 2, accountedBarcodes: 2, eligibleIngredientImages: 2 });
+    await writeFile(resumed.manifestPath, `${JSON.stringify(inflatedManifest, null, 2)}\n`, "utf8");
+    await writeFile(resumed.reportPath, `${JSON.stringify(inflatedReport, null, 2)}\n`, "utf8");
+    await rewritePortableChecksum(outputDirectory, "manifest.json");
+    await rewritePortableChecksum(outputDirectory, "report.json");
+    await expect(validateRobotoffIngredientArtifact(outputDirectory)).rejects.toThrow("cohort counts do not reconcile");
   });
 
   it("retries ingredient requests and records terminal failure evidence", async () => {
@@ -435,6 +580,215 @@ describe("Robotoff ingredient evidence", () => {
       outcomes: { candidate: 1, failed: 0 },
     });
   });
+
+  it("retains one bounded ingredient failure as replay-safe attempt state without promoting evidence", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-ingredient-residual-"));
+    const input = join(directory, "source.jsonl");
+    const products = Array.from({ length: 400 }, (_, index) => ({
+      ...indiaProduct,
+      code: fixtureEan13(index),
+      product_name: `Ingredient residual fixture ${index}`,
+      image_ingredients_url: `https://images.openfoodfacts.org/ingredient-residual/${index}.jpg`,
+    }));
+    await writeFile(input, `${products.map((product) => JSON.stringify(product)).join("\n")}\n`, "utf8");
+    const source = await stageOpenFoodFacts({
+      input,
+      outputDirectory: join(directory, "source"),
+      mode: "production",
+      limit: null,
+    });
+    let modelRequests = 0;
+    let labelRequests = 0;
+    const outputDirectory = join(directory, "ingredients");
+    const result = await extractRobotoffIngredientApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "production",
+      limit: null,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      fetcher: async () => {
+        modelRequests += 1;
+        return new Response(JSON.stringify({ image_predictions: modelRequests === 1 ? [ingredientPrediction] : [] }), { status: 200 });
+      },
+      labelFetcher: async () => {
+        labelRequests += 1;
+        return labelRequests === 2
+          ? new Response("unavailable", { status: 503 })
+          : labelImageFetcher();
+      },
+    });
+    expect(labelRequests).toBe(401);
+    expect(result.report).toMatchObject({
+      sourceComplete: true,
+      outcomeAccountingComplete: true,
+      verificationComplete: false,
+      requestedBarcodes: 400,
+      accountedBarcodes: 400,
+      residualExceptionCount: 1,
+      residualExceptionRate: 1 / 400,
+      residualExceptionLimits: { maxCount: 10, maxRate: 0.0025 },
+    });
+    const artifact = await validateRobotoffIngredientArtifact(outputDirectory);
+    expect(artifact.outcomes).toHaveLength(400);
+    expect(artifact.labelAssets).toHaveLength(400);
+    expect(artifact.extractionAttempts).toHaveLength(400);
+    expect(artifact.extractionAttemptLabels).toHaveLength(399);
+    const failedAttempts = artifact.extractionAttempts.filter(({ status }) => status === "failed");
+    expect(failedAttempts).toEqual([expect.objectContaining({
+      candidateCount: 0,
+      failureCount: 1,
+      reasons: ["label_http_error"],
+      isCurrent: true,
+      responseEvidenceHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    })]);
+    const failedAttempt = failedAttempts[0]!;
+    expect(artifact.labelAssets.filter(({ subjectSourceRecordId }) => subjectSourceRecordId === failedAttempt.subjectSourceRecordId))
+      .toEqual([expect.objectContaining({
+        subjectSourceContentHash: failedAttempt.subjectSourceContentHash,
+        productId: failedAttempt.productId,
+        fieldFamily: "ingredients",
+      })]);
+    await expect(validateRobotoffIngredientArtifact(outputDirectory, { requireDecisionDrift: true }))
+      .rejects.toThrow("missing checksummed decision-drift evidence");
+    await bindPassingDecisionDrift(outputDirectory, "ingredients");
+    await expect(validateRobotoffIngredientArtifact(outputDirectory, { requireDecisionDrift: true })).resolves.toBeDefined();
+
+    const database = new DatabaseSync(":memory:");
+    for (const migration of (await readdir("migrations")).filter((name) => name.endsWith(".sql")).sort()) {
+      database.exec(await readFile(join("migrations", migration), "utf8"));
+    }
+    const sourceSqlPath = join(directory, "source-import.sql");
+    await emitImportSql({ stagedPath: source.stagedPath, manifestPath: source.manifestPath, outputPath: sourceSqlPath });
+    database.exec(await readFile(sourceSqlPath, "utf8"));
+    const before = database.prepare(`SELECT
+      (SELECT COUNT(*) FROM nutrition_facts) AS nutrition_facts,
+      (SELECT COUNT(*) FROM nutrient_values) AS nutrient_values,
+      (SELECT COUNT(*) FROM ingredient_statements) AS ingredient_statements,
+      (SELECT COUNT(*) FROM field_observations) AS field_observations,
+      (SELECT COUNT(*) FROM identity_evidence_decisions) AS identity_decisions,
+      (SELECT COUNT(*) FROM terminal_evidence_decisions) AS terminal_decisions`).get();
+    const extractionRun: ExtractionRun = {
+      id: result.report.extractionRunId,
+      ingestionRunId: ingestionRunIdForManifest(result.manifest),
+      fieldFamily: "ingredients",
+      requestSchemaHash: result.report.requestSchema,
+      artifactDigest: "c".repeat(64),
+      adapterVersion: result.manifest.adapterVersion,
+      modelName: "ingredient_detection",
+      modelVersion: JSON.stringify(result.report.modelVersions),
+      parentSourceRunId: result.report.parentSourceRunId,
+      parentSourceInputHash: result.report.inputManifestHash!,
+      repository: "Significant-Hobbies/protein-index",
+      workflow: "Extract ingredient label evidence",
+      branch: "main",
+      headSha: "d".repeat(40),
+      sourceComplete: true,
+      status: "accepted",
+      startedAt: result.manifest.startedAt,
+      completedAt: result.manifest.completedAt,
+      acceptedAt: result.manifest.completedAt,
+      manifest: { ...result.manifest },
+    };
+    const extractionSqlPath = join(directory, "extraction-import.sql");
+    await emitImportSql({
+      stagedPath: result.stagedPath,
+      manifestPath: result.manifestPath,
+      outputPath: extractionSqlPath,
+      applyEvidenceDecisions: false,
+      extraction: {
+        run: extractionRun,
+        labelAssetsPath: result.labelAssetsPath,
+        extractionAttemptsPath: result.extractionAttemptsPath,
+        extractionAttemptLabelsPath: result.extractionAttemptLabelsPath,
+      },
+    });
+    const extractionSql = await readFile(extractionSqlPath, "utf8");
+    database.exec(extractionSql);
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM extraction_attempts WHERE is_current = 1) AS current_attempts,
+      (SELECT COUNT(*) FROM extraction_attempts WHERE is_current = 1 AND status = 'failed') AS failed_attempts,
+      (SELECT COUNT(*) FROM review_items WHERE source_record_id IN (
+        SELECT id FROM source_records WHERE source_id = 'open_food_facts_robotoff_ingredients'
+      )) AS reviews`).get()).toEqual({ current_attempts: 400, failed_attempts: 1, reviews: 0 });
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM nutrition_facts) AS nutrition_facts,
+      (SELECT COUNT(*) FROM nutrient_values) AS nutrient_values,
+      (SELECT COUNT(*) FROM ingredient_statements) AS ingredient_statements,
+      (SELECT COUNT(*) FROM field_observations) AS field_observations,
+      (SELECT COUNT(*) FROM identity_evidence_decisions) AS identity_decisions,
+      (SELECT COUNT(*) FROM terminal_evidence_decisions) AS terminal_decisions`).get()).toEqual(before);
+    const beforeReplay = database.prepare(`SELECT
+      (SELECT COUNT(*) FROM extraction_runs) AS runs,
+      (SELECT COUNT(*) FROM label_evidence_assets) AS assets,
+      (SELECT COUNT(*) FROM extraction_attempts) AS attempts,
+      (SELECT COUNT(*) FROM extraction_attempt_labels) AS labels`).get();
+    database.exec(extractionSql);
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM extraction_runs) AS runs,
+      (SELECT COUNT(*) FROM label_evidence_assets) AS assets,
+      (SELECT COUNT(*) FROM extraction_attempts) AS attempts,
+      (SELECT COUNT(*) FROM extraction_attempt_labels) AS labels`).get()).toEqual(beforeReplay);
+    database.close();
+
+    const originalManifest = await readFile(result.manifestPath, "utf8");
+    const originalReport = await readFile(result.reportPath, "utf8");
+    const originalOutcomes = await readFile(result.outcomesPath, "utf8");
+    const originalExclusions = await readFile(result.exclusionsPath, "utf8");
+    const mismatchedManifest = JSON.parse(originalManifest);
+    const mismatchedReport = JSON.parse(originalReport);
+    const mismatchedOutcomes = originalOutcomes.trim().split("\n").map((line) => JSON.parse(line));
+    const mismatchedExclusions = originalExclusions.trim().split("\n").map((line) => JSON.parse(line));
+    const failedOutcome = mismatchedOutcomes.find((outcome) => outcome.status === "failed");
+    const failedExclusion = mismatchedExclusions.find((outcome) => outcome.status === "failed");
+    if (!failedOutcome || !failedExclusion) throw new Error("Expected failed ingredient outcome and exclusion");
+    failedOutcome.status = "no_prediction";
+    failedExclusion.status = "no_prediction";
+    mismatchedReport.outcomes.failed = 0;
+    mismatchedReport.outcomes.no_prediction += 1;
+    for (const target of [mismatchedManifest, mismatchedReport]) {
+      target.verificationComplete = true;
+      target.residualExceptionCount = 0;
+      target.residualExceptionRate = 0;
+    }
+    await writeFile(result.manifestPath, `${JSON.stringify(mismatchedManifest, null, 2)}\n`, "utf8");
+    await writeFile(result.reportPath, `${JSON.stringify(mismatchedReport, null, 2)}\n`, "utf8");
+    await writeFile(result.outcomesPath, `${mismatchedOutcomes.map((outcome) => JSON.stringify(outcome)).join("\n")}\n`, "utf8");
+    await writeFile(result.exclusionsPath, `${mismatchedExclusions.map((outcome) => JSON.stringify(outcome)).join("\n")}\n`, "utf8");
+    for (const file of ["manifest.json", "report.json", "outcomes.jsonl", "exclusions.jsonl"]) {
+      await rewritePortableChecksum(outputDirectory, file);
+    }
+    await expect(validateRobotoffIngredientArtifact(outputDirectory, { requireDecisionDrift: true }))
+      .rejects.toThrow("status does not match exact attempt provenance");
+    await writeFile(result.manifestPath, originalManifest, "utf8");
+    await writeFile(result.reportPath, originalReport, "utf8");
+    await writeFile(result.outcomesPath, originalOutcomes, "utf8");
+    await writeFile(result.exclusionsPath, originalExclusions, "utf8");
+    for (const file of ["manifest.json", "report.json", "outcomes.jsonl", "exclusions.jsonl"]) {
+      await rewritePortableChecksum(outputDirectory, file);
+    }
+
+    const mismatchedIngredientExclusions = originalExclusions.trim().split("\n").map((line) => JSON.parse(line));
+    mismatchedIngredientExclusions[0].reasons = ["different_reason"];
+    await writeFile(result.exclusionsPath, `${mismatchedIngredientExclusions.map((outcome) => JSON.stringify(outcome)).join("\n")}\n`, "utf8");
+    await rewritePortableChecksum(outputDirectory, "exclusions.jsonl");
+    await expect(validateRobotoffIngredientArtifact(outputDirectory, { requireDecisionDrift: true }))
+      .rejects.toThrow("exclusion accounting does not reconcile");
+    await writeFile(result.exclusionsPath, originalExclusions, "utf8");
+    await rewritePortableChecksum(outputDirectory, "exclusions.jsonl");
+
+    const assets = (await readFile(result.labelAssetsPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    const failedAsset = assets.find((asset) => asset.subjectSourceRecordId === failedAttempt.subjectSourceRecordId);
+    if (!failedAsset) throw new Error("Expected retained failed-subject ingredient asset");
+    failedAsset.requestedUrl = "https://images.openfoodfacts.org/arbitrary-same-subject-ingredient.jpg";
+    failedAsset.sourceImageId = "/arbitrary-same-subject-ingredient.jpg";
+    failedAsset.sourceImageRevision = null;
+    await writeFile(result.labelAssetsPath, `${assets.map((asset) => JSON.stringify(asset)).join("\n")}\n`, "utf8");
+    await rewritePortableChecksum(outputDirectory, "label-assets.jsonl");
+    await expect(validateRobotoffIngredientArtifact(outputDirectory, { requireDecisionDrift: true }))
+      .rejects.toThrow("not an exact requested or prediction URL");
+  }, 30_000);
 
   it("keeps exact multi-image and multi-entity ingredient outcomes", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-ingredients-mixed-"));
@@ -1785,19 +2139,27 @@ describe("Open Food Facts bulk staging", () => {
     expect(() => assertIdempotentPublicationReplay(after, { ...after, sourceRecords: 22 })).toThrow("sourceRecords");
   });
 
-  it("keeps the automatic workflow router pinned, serialized, migration-free, and auditable", async () => {
+  it("keeps the manual publication router explicit, pinned, serialized, migration-free, and auditable", async () => {
     const workflow = await readFile(".github/workflows/publish-automatic-evidence.yml", "utf8");
     for (const [name, family] of Object.entries(AUTOMATIC_PUBLICATION_FAMILIES)) {
-      expect(workflow).toContain(`- ${name}`);
-      expect(workflow).toContain(`'${name}': Object.freeze({ source: '${family.source}', artifactPrefix: '${family.artifactPrefix}' })`);
+      expect(workflow).toContain(`'${name}': Object.freeze({ source: '${family.source}', adapterVersion: '${CURRENT_PUBLICATION_ADAPTER_VERSIONS[family.source]}', artifactPrefix: '${family.artifactPrefix}' })`);
     }
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain("upstream_run_id:");
+    expect(workflow).toContain("confirm_production_publication:");
+    expect(workflow).toContain("PUBLISH_VERIFIED_EVIDENCE_TO_PRODUCTION");
+    expect(workflow).toContain("needs: authorize");
+    expect(workflow).toContain("if: needs.authorize.outputs.approved == 'true'");
+    expect(workflow).not.toContain("workflow_run:");
     expect(workflow).toContain("actions: read");
     expect(workflow).toContain("contents: read");
-    expect(workflow).toContain("github.event.workflow_run.head_branch == github.event.repository.default_branch");
-    expect(workflow).toContain("github.event.workflow_run.head_repository.full_name == github.repository");
-    expect(workflow).toContain("ref: ${{ github.event.workflow_run.head_sha }}");
+    expect(workflow).toContain("getWorkflowRun");
+    expect(workflow).toContain("run.head_branch !== context.payload.repository.default_branch");
+    expect(workflow).toContain("run.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`");
+    expect(workflow).toContain("ref: ${{ github.sha }}");
     expect(workflow).toContain("persist-credentials: false");
-    expect(workflow).toContain("Require automatic-publication contract at upstream commit");
+    expect(workflow).toContain("Require current publisher and upstream ancestry");
+    expect(workflow).toContain("git merge-base --is-ancestor");
     expect(workflow).toContain("test -f migrations/0009_extraction_outcome_ledger.sql");
     expect(workflow).toContain("validateAutomaticPublicationSnapshot");
     expect(workflow).toContain("applyEvidenceDecisions: !automatic");
@@ -1820,6 +2182,9 @@ describe("Open Food Facts bulk staging", () => {
     expect(workflow).toContain("--upstream-repository");
     expect(workflow).toContain("--artifact-digest");
     expect(workflow).toContain("--artifact-bytes");
+    expect(workflow).toContain("Re-audit current reviewed decisions against extraction evidence");
+    expect(workflow).toContain("bound-decision-drift.json");
+    expect(workflow).toContain("publication-decision-drift.json");
     expect(workflow).not.toContain("migrations apply");
     expect(workflow).not.toContain("wrangler deploy");
     expect(workflow).toContain("retention-days: 90");
@@ -1830,6 +2195,15 @@ describe("Open Food Facts bulk staging", () => {
     const reviewed = await readFile(".github/workflows/publish-robotoff-candidates.yml", "utf8");
     expect(reviewed).toContain("expected_head_sha:");
     expect(reviewed).toContain("expected_artifact_digest:");
+    expect(reviewed).toContain("confirm_production_publication:");
+    expect(reviewed).toContain("PUBLISH_REVIEWED_LABEL_CANDIDATES_TO_PRODUCTION");
+    expect(reviewed).toContain("needs: authorize");
+    expect(reviewed).toContain("if: needs.authorize.outputs.approved == 'true'");
+    expect(reviewed).toContain("ref: ${{ github.sha }}");
+    expect(reviewed).toContain("persist-credentials: false");
+    expect(reviewed).toContain("git merge-base --is-ancestor");
+    expect(reviewed).toContain("actual_digest=\"$(sha256sum .data-robotoff.zip");
+    expect(reviewed).toContain("publication-decision-drift.json");
     expect(reviewed).toContain("getWorkflowRun");
     expect(reviewed).toContain("new Set([29551181430, 29552807113])");
     expect(reviewed).toContain("new Set([8395774354, 8396363821]).has(artifact.id)");
@@ -1842,6 +2216,10 @@ describe("Open Food Facts bulk staging", () => {
 
     const restore = await readFile(".github/actions/restore-exact-responses/action.yml", "utf8");
     expect(restore).toContain("expected-adapter-version:");
+    expect(restore).toContain("expected-workflow-name:");
+    expect(restore).toContain("github.paginate");
+    expect(restore).toContain("run.conclusion === 'success'");
+    expect(restore).toContain("digest !== artifact.digest");
     expect(restore).toContain("restore-label-proofs:");
     expect(restore).toContain("prior-label-assets.jsonl");
     expect(restore).toContain('outcomes.jsonl "$OUTPUT_DIRECTORY/outcomes.jsonl"');
@@ -1875,7 +2253,9 @@ describe("Open Food Facts bulk staging", () => {
       expect(extraction).toContain("timeout-minutes: 360");
       expect(extraction).toContain("timeout-minutes: 345");
       expect(extraction).toContain("Upload extraction diagnostics");
-      expect(extraction).toContain("responses/*.error.json");
+      expect(extraction).toContain("responses/*.json");
+      expect(extraction).toContain("digest !== artifact.digest");
+      expect(extraction).toContain("retention-days: 90");
     }
   });
 
@@ -1904,6 +2284,7 @@ describe("Open Food Facts bulk staging", () => {
   it("requires exact terminal accounting for API enrichment publication", () => {
     const manifest = {
       source: "open_food_facts_api",
+      adapterVersion: "off-api-enrichment-v6",
       mode: "production",
       sourceComplete: true,
       terminalEvidence: "end_of_file",
@@ -1924,13 +2305,16 @@ describe("Open Food Facts bulk staging", () => {
   });
 
   it("requires terminal barcode accounting for multi-prediction Robotoff evidence", () => {
+    const accounting = extractionAccountingSummary(10, 10, 0);
     const manifest = {
       source: "open_food_facts_robotoff",
+      adapterVersion: "robotoff-api-v8",
       mode: "production",
       sourceComplete: true,
       terminalEvidence: "end_of_file",
       stagedRecords: 14,
       indiaRecords: 10,
+      ...accounting,
     } as SourceManifest;
     const report = {
       sourceComplete: true,
@@ -1938,21 +2322,25 @@ describe("Open Food Facts bulk staging", () => {
       requestedBarcodes: 10,
       accountedBarcodes: 10,
       outcomes: { failed: 0 },
+      ...accounting,
       exclusions: { records: 2, reconcilesIndiaSlice: true },
     };
     expect(() => assertPublicationEvidence(manifest, report)).not.toThrow();
     expect(() => assertPublicationEvidence(manifest, { ...report, accountedBarcodes: 9 })).toThrow("barcode accounting");
-    expect(() => assertPublicationEvidence(manifest, { ...report, outcomes: { failed: 1 } })).toThrow("failed barcodes");
+    expect(() => assertPublicationEvidence(manifest, { ...report, outcomes: { failed: 1 } })).toThrow("residual exception");
   });
 
   it("requires terminal barcode accounting for multi-prediction Robotoff ingredient evidence", () => {
+    const accounting = extractionAccountingSummary(10, 10, 0);
     const manifest = {
       source: "open_food_facts_robotoff_ingredients",
+      adapterVersion: "robotoff-ingredients-api-v3",
       mode: "production",
       sourceComplete: true,
       terminalEvidence: "end_of_file",
       stagedRecords: 14,
       indiaRecords: 10,
+      ...accounting,
     } as SourceManifest;
     const report = {
       sourceComplete: true,
@@ -1960,11 +2348,12 @@ describe("Open Food Facts bulk staging", () => {
       requestedBarcodes: 10,
       accountedBarcodes: 10,
       outcomes: { failed: 0 },
+      ...accounting,
       exclusions: { records: 2, reconcilesIndiaSlice: true },
     };
     expect(() => assertPublicationEvidence(manifest, report)).not.toThrow();
     expect(() => assertPublicationEvidence(manifest, { ...report, accountedBarcodes: 9 })).toThrow("barcode accounting");
-    expect(() => assertPublicationEvidence(manifest, { ...report, outcomes: { failed: 1 } })).toThrow("failed barcodes");
+    expect(() => assertPublicationEvidence(manifest, { ...report, outcomes: { failed: 1 } })).toThrow("residual exception");
   });
 
   it("streams all India-tagged foods without protein prefiltering", async () => {
@@ -3298,6 +3687,10 @@ describe("Robotoff label evidence", () => {
         expect.objectContaining({ role: "prediction", outcome: "candidate" }),
       ]),
     });
+    await expect(validateRobotoffNutritionArtifact(outputDirectory, { requireDecisionDrift: true }))
+      .rejects.toThrow("missing checksummed decision-drift evidence");
+    await bindPassingDecisionDrift(outputDirectory, "nutrition");
+    await expect(validateRobotoffNutritionArtifact(outputDirectory, { requireDecisionDrift: true })).resolves.toBeDefined();
     const automaticSnapshot = await validateAutomaticPublicationSnapshot(outputDirectory, automaticInput({
       workflowName: "Extract label evidence with Robotoff",
       artifactName: "robotoff-label-candidates-123",
@@ -3384,6 +3777,35 @@ describe("Robotoff label evidence", () => {
     });
     const resumedReport = JSON.parse(await readFile(resumed.reportPath, "utf8")) as Record<string, unknown>;
     expect(resumedReport).toMatchObject({ requestedBarcodes: 1, accountedBarcodes: 1, fetchedBarcodes: 0, resumedBarcodes: 1 });
+
+    const inflatedManifest = JSON.parse(await readFile(resumed.manifestPath, "utf8"));
+    const inflatedReport = JSON.parse(await readFile(resumed.reportPath, "utf8"));
+    Object.assign(inflatedManifest, { advertisedTotal: 2, recordsRead: 2, indiaRecords: 2 });
+    Object.assign(inflatedReport, { requestedBarcodes: 2, accountedBarcodes: 2, eligibleNutritionImages: 2 });
+    await writeFile(resumed.manifestPath, `${JSON.stringify(inflatedManifest, null, 2)}\n`, "utf8");
+    await writeFile(resumed.reportPath, `${JSON.stringify(inflatedReport, null, 2)}\n`, "utf8");
+    await rewritePortableChecksum(outputDirectory, "manifest.json");
+    await rewritePortableChecksum(outputDirectory, "report.json");
+    await expect(validateRobotoffNutritionArtifact(outputDirectory)).rejects.toThrow("cohort counts do not reconcile");
+  });
+
+  it("keeps unexpected label-processing errors outside the residual allowlist", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-internal-label-error-"));
+    const source = await sourceWithNutritionImage(directory);
+    const outputDirectory = join(directory, "robotoff");
+    await expect(extractRobotoffApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "sample",
+      limit: null,
+      minimumIntervalMs: 0,
+      maximumLabelBytes: 0,
+      fetcher: async () => new Response(JSON.stringify({ image_predictions: [] }), { status: 200 }),
+    })).rejects.toThrow("incomplete");
+    const attempt = JSON.parse((await readFile(join(outputDirectory, "extraction-attempts.jsonl"), "utf8")).trim());
+    expect(attempt).toMatchObject({ status: "failed", reasons: ["label_internal_error"], isCurrent: true });
+    expect(isResidualExceptionReason(attempt.reasons[0])).toBe(false);
   });
 
   it("accounts for absent predictions without inventing nutrition", async () => {
@@ -3446,4 +3868,205 @@ describe("Robotoff label evidence", () => {
     expect(repaired.outcomes).toEqual({ candidate: 1, no_prediction: 0, rejected: 0, failed: 0 });
     expect(JSON.parse(await readFile(repaired.reportPath, "utf8"))).toMatchObject({ fetchedBarcodes: 1, resumedBarcodes: 0 });
   });
+
+  it("publishes one bounded post-response failure only as replay-safe current attempt state", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-residual-"));
+    const input = join(directory, "source.jsonl");
+    const products = Array.from({ length: 400 }, (_, index) => ({
+      ...indiaProduct,
+      code: fixtureEan13(index),
+      product_name: `Residual accounting fixture ${index}`,
+      image_nutrition_url: `https://images.openfoodfacts.org/residual/${index}.jpg`,
+    }));
+    await writeFile(input, `${products.map((product) => JSON.stringify(product)).join("\n")}\n`, "utf8");
+    const source = await stageOpenFoodFacts({
+      input,
+      outputDirectory: join(directory, "source"),
+      mode: "production",
+      limit: null,
+    });
+    let labelRequests = 0;
+    let modelRequests = 0;
+    const outputDirectory = join(directory, "robotoff");
+    const result = await extractRobotoffApi({
+      input: source.stagedPath,
+      inputManifest: source.manifestPath,
+      outputDirectory,
+      mode: "production",
+      limit: null,
+      minimumIntervalMs: 0,
+      retryBaseMs: 0,
+      fetcher: async () => {
+        modelRequests += 1;
+        return new Response(JSON.stringify({ image_predictions: modelRequests === 1
+          ? [prediction(99, "99", {
+            "energy-kcal_100g": nutrient(365, "kcal"),
+            proteins_100g: nutrient(25, "g"),
+          })]
+          : [] }), { status: 200 });
+      },
+      labelFetcher: async () => {
+        labelRequests += 1;
+        return labelRequests === 2
+          ? new Response("unavailable", { status: 503 })
+          : labelImageFetcher();
+      },
+    });
+    expect(labelRequests).toBe(401);
+    expect(result.manifest).toMatchObject({
+      sourceComplete: true,
+      terminalEvidence: "end_of_file",
+      outcomeAccountingComplete: true,
+      verificationComplete: false,
+      residualExceptionCount: 1,
+      residualExceptionRate: 1 / 400,
+      residualExceptionLimits: { maxCount: 10, maxRate: 0.0025 },
+    });
+    const artifact = await validateRobotoffNutritionArtifact(outputDirectory);
+    expect(artifact.outcomes).toHaveLength(400);
+    expect(artifact.labelAssets).toHaveLength(400);
+    expect(artifact.extractionAttempts).toHaveLength(400);
+    expect(artifact.extractionAttemptLabels).toHaveLength(399);
+    const failedAttempts = artifact.extractionAttempts.filter(({ status }) => status === "failed");
+    expect(failedAttempts).toEqual([
+      expect.objectContaining({
+        status: "failed",
+        candidateCount: 0,
+        failureCount: 1,
+        reasons: ["label_http_error"],
+        isCurrent: true,
+        responseEvidenceHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+    ]);
+    const failedAttempt = failedAttempts[0]!;
+    expect(artifact.labelAssets.filter(({ subjectSourceRecordId }) => subjectSourceRecordId === failedAttempt.subjectSourceRecordId))
+      .toEqual([expect.objectContaining({
+        subjectSourceContentHash: failedAttempt.subjectSourceContentHash,
+        productId: failedAttempt.productId,
+        fieldFamily: "nutrition",
+      })]);
+    await expect(validateRobotoffNutritionArtifact(outputDirectory, { requireDecisionDrift: true }))
+      .rejects.toThrow("missing checksummed decision-drift evidence");
+    await bindPassingDecisionDrift(outputDirectory, "nutrition");
+    await expect(validateRobotoffNutritionArtifact(outputDirectory, { requireDecisionDrift: true })).resolves.toBeDefined();
+
+    const database = new DatabaseSync(":memory:");
+    for (const migration of (await readdir("migrations")).filter((name) => name.endsWith(".sql")).sort()) {
+      database.exec(await readFile(join("migrations", migration), "utf8"));
+    }
+    const sourceSqlPath = join(directory, "source-import.sql");
+    await emitImportSql({ stagedPath: source.stagedPath, manifestPath: source.manifestPath, outputPath: sourceSqlPath });
+    database.exec(await readFile(sourceSqlPath, "utf8"));
+    const before = database.prepare(`SELECT
+      (SELECT COUNT(*) FROM nutrition_facts) AS nutrition_facts,
+      (SELECT COUNT(*) FROM nutrient_values) AS nutrient_values,
+      (SELECT COUNT(*) FROM ingredient_statements) AS ingredient_statements,
+      (SELECT COUNT(*) FROM field_observations) AS field_observations,
+      (SELECT COUNT(*) FROM identity_evidence_decisions) AS identity_decisions,
+      (SELECT COUNT(*) FROM terminal_evidence_decisions) AS terminal_decisions`).get();
+    const report = artifact.report;
+    const extractionRun: ExtractionRun = {
+      id: report.extractionRunId,
+      ingestionRunId: ingestionRunIdForManifest(result.manifest),
+      fieldFamily: "nutrition",
+      requestSchemaHash: report.requestSchema,
+      artifactDigest: "a".repeat(64),
+      adapterVersion: result.manifest.adapterVersion,
+      modelName: "nutrition_extractor",
+      modelVersion: JSON.stringify(report.modelVersions),
+      parentSourceRunId: report.parentSourceRunId,
+      parentSourceInputHash: report.inputManifestHash!,
+      repository: "Significant-Hobbies/protein-index",
+      workflow: "Extract label evidence with Robotoff",
+      branch: "main",
+      headSha: "b".repeat(40),
+      sourceComplete: true,
+      status: "accepted",
+      startedAt: result.manifest.startedAt,
+      completedAt: result.manifest.completedAt,
+      acceptedAt: result.manifest.completedAt,
+      manifest: { ...result.manifest },
+    };
+    const extractionSqlPath = join(directory, "extraction-import.sql");
+    await emitImportSql({
+      stagedPath: result.stagedPath,
+      manifestPath: result.manifestPath,
+      outputPath: extractionSqlPath,
+      applyEvidenceDecisions: false,
+      extraction: {
+        run: extractionRun,
+        labelAssetsPath: result.labelAssetsPath,
+        extractionAttemptsPath: result.extractionAttemptsPath,
+        extractionAttemptLabelsPath: result.extractionAttemptLabelsPath,
+      },
+    });
+    const extractionSql = await readFile(extractionSqlPath, "utf8");
+    database.exec(extractionSql);
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM extraction_attempts WHERE is_current = 1) AS current_attempts,
+      (SELECT COUNT(*) FROM extraction_attempts WHERE is_current = 1 AND status = 'failed') AS failed_attempts,
+      (SELECT COUNT(*) FROM review_items WHERE source_record_id IN (
+        SELECT id FROM source_records WHERE source_id = 'open_food_facts_robotoff'
+      )) AS reviews`).get()).toEqual({ current_attempts: 400, failed_attempts: 1, reviews: 0 });
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM nutrition_facts) AS nutrition_facts,
+      (SELECT COUNT(*) FROM nutrient_values) AS nutrient_values,
+      (SELECT COUNT(*) FROM ingredient_statements) AS ingredient_statements,
+      (SELECT COUNT(*) FROM field_observations) AS field_observations,
+      (SELECT COUNT(*) FROM identity_evidence_decisions) AS identity_decisions,
+      (SELECT COUNT(*) FROM terminal_evidence_decisions) AS terminal_decisions`).get()).toEqual(before);
+    const beforeReplay = database.prepare(`SELECT
+      (SELECT COUNT(*) FROM extraction_runs) AS runs,
+      (SELECT COUNT(*) FROM label_evidence_assets) AS assets,
+      (SELECT COUNT(*) FROM extraction_attempts) AS attempts,
+      (SELECT COUNT(*) FROM extraction_attempt_labels) AS labels`).get();
+    database.exec(extractionSql);
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM extraction_runs) AS runs,
+      (SELECT COUNT(*) FROM label_evidence_assets) AS assets,
+      (SELECT COUNT(*) FROM extraction_attempts) AS attempts,
+      (SELECT COUNT(*) FROM extraction_attempt_labels) AS labels`).get()).toEqual(beforeReplay);
+    database.close();
+
+    const originalOutcomes = await readFile(result.outcomesPath, "utf8");
+    const originalExclusions = await readFile(result.exclusionsPath, "utf8");
+    const mismatchedOutcomes = originalOutcomes.trim().split("\n").map((line) => JSON.parse(line));
+    const countMismatch = mismatchedOutcomes.find((outcome) => outcome.status === "failed");
+    if (!countMismatch) throw new Error("Expected failed nutrition outcome");
+    countMismatch.predictions += 1;
+    const countMismatchExclusions = originalExclusions.trim().split("\n").map((line) => JSON.parse(line));
+    const countMismatchExclusion = countMismatchExclusions.find((outcome) => outcome.requestedCode === countMismatch.requestedCode);
+    if (!countMismatchExclusion) throw new Error("Expected failed nutrition exclusion");
+    countMismatchExclusion.predictions += 1;
+    await writeFile(result.outcomesPath, `${mismatchedOutcomes.map((outcome) => JSON.stringify(outcome)).join("\n")}\n`, "utf8");
+    await writeFile(result.exclusionsPath, `${countMismatchExclusions.map((outcome) => JSON.stringify(outcome)).join("\n")}\n`, "utf8");
+    await rewritePortableChecksum(outputDirectory, "outcomes.jsonl");
+    await rewritePortableChecksum(outputDirectory, "exclusions.jsonl");
+    await expect(validateRobotoffNutritionArtifact(outputDirectory, { requireDecisionDrift: true }))
+      .rejects.toThrow("counts do not match exact attempt provenance");
+    await writeFile(result.outcomesPath, originalOutcomes, "utf8");
+    await writeFile(result.exclusionsPath, originalExclusions, "utf8");
+    await rewritePortableChecksum(outputDirectory, "outcomes.jsonl");
+    await rewritePortableChecksum(outputDirectory, "exclusions.jsonl");
+
+    const mismatchedNutritionExclusions = originalExclusions.trim().split("\n").map((line) => JSON.parse(line));
+    mismatchedNutritionExclusions[0].reasons = ["different_reason"];
+    await writeFile(result.exclusionsPath, `${mismatchedNutritionExclusions.map((outcome) => JSON.stringify(outcome)).join("\n")}\n`, "utf8");
+    await rewritePortableChecksum(outputDirectory, "exclusions.jsonl");
+    await expect(validateRobotoffNutritionArtifact(outputDirectory, { requireDecisionDrift: true }))
+      .rejects.toThrow("exclusion accounting does not reconcile");
+    await writeFile(result.exclusionsPath, originalExclusions, "utf8");
+    await rewritePortableChecksum(outputDirectory, "exclusions.jsonl");
+
+    const assets = (await readFile(result.labelAssetsPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    const failedAsset = assets.find((asset) => asset.subjectSourceRecordId === failedAttempt.subjectSourceRecordId);
+    if (!failedAsset) throw new Error("Expected retained failed-subject nutrition asset");
+    failedAsset.requestedUrl = "https://images.openfoodfacts.org/arbitrary-same-subject-nutrition.jpg";
+    failedAsset.sourceImageId = "/arbitrary-same-subject-nutrition.jpg";
+    failedAsset.sourceImageRevision = null;
+    await writeFile(result.labelAssetsPath, `${assets.map((asset) => JSON.stringify(asset)).join("\n")}\n`, "utf8");
+    await rewritePortableChecksum(outputDirectory, "label-assets.jsonl");
+    await expect(validateRobotoffNutritionArtifact(outputDirectory, { requireDecisionDrift: true }))
+      .rejects.toThrow("not an exact requested or prediction URL");
+  }, 30_000);
 });

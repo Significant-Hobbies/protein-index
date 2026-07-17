@@ -27,6 +27,10 @@ on:
         description: Exact GitHub artifact digest in sha256:<hex> form
         required: true
         type: string
+      confirm_production_publication:
+        description: Type PUBLISH_REVIEWED_LABEL_CANDIDATES_TO_PRODUCTION exactly
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -37,13 +41,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+    steps:
+      - name: Require explicit candidate publication approval
+        id: gate
+        shell: bash
+        env:
+          CONFIRM_PRODUCTION_PUBLICATION: ${{ inputs.confirm_production_publication }}
+          EXTRACTION_RUN_ID: ${{ inputs.extraction_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Candidate publication must be dispatched from main."
+            exit 1
+          fi
+          if [[ "$CONFIRM_PRODUCTION_PUBLICATION" != "PUBLISH_REVIEWED_LABEL_CANDIDATES_TO_PRODUCTION" ]]; then
+            echo "::error::Exact candidate publication confirmation was not supplied."
+            exit 1
+          fi
+          if [[ ! "$EXTRACTION_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::extraction_run_id must be a positive workflow run ID."
+            exit 1
+          fi
+          echo "approved=true" >> "$GITHUB_OUTPUT"
+
   publish:
+    needs: authorize
+    if: needs.authorize.outputs.approved == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: production
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CANDIDATE_FAMILY: ${{ inputs.candidate_family }}
       EXTRACTION_RUN_ID: ${{ inputs.extraction_run_id }}
       EXPECTED_INPUT_HASH: ${{ inputs.expected_input_hash }}
@@ -52,7 +85,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: main
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
 
       - uses: pnpm/action-setup@v6
 
@@ -61,7 +96,7 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Download the selected reviewed extraction
         id: reviewed
@@ -112,6 +147,7 @@ jobs:
             core.setOutput('artifact_digest', artifact.digest);
             core.setOutput('artifact_bytes', String(artifact.size_in_bytes));
             core.setOutput('workflow_name', expectedWorkflow);
+            core.setOutput('upstream_head_sha', run.head_sha);
             const download = await github.rest.actions.downloadArtifact({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -120,10 +156,35 @@ jobs:
             });
             fs.writeFileSync('.data-robotoff.zip', Buffer.from(download.data));
 
-      - name: Expand and pin reviewed extraction
+      - name: Require current publisher and extraction ancestry
         shell: bash
+        env:
+          PUBLISHER_HEAD_SHA: ${{ github.sha }}
+          UPSTREAM_HEAD_SHA: ${{ steps.reviewed.outputs.upstream_head_sha }}
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PUBLISHER_HEAD_SHA"
+          git merge-base --is-ancestor "$UPSTREAM_HEAD_SHA" "$PUBLISHER_HEAD_SHA"
+          test -f .github/workflows/publish-robotoff-candidates.yml
+
+      - name: Expand and pin reviewed extraction
+        shell: bash
+        env:
+          ARTIFACT_DIGEST: ${{ steps.reviewed.outputs.artifact_digest }}
+          ARTIFACT_BYTES: ${{ steps.reviewed.outputs.artifact_bytes }}
+        run: |
+          set -euo pipefail
+          expected_digest="${ARTIFACT_DIGEST#sha256:}"
+          actual_digest="$(sha256sum .data-robotoff.zip | awk '{print $1}')"
+          actual_bytes="$(stat --format=%s .data-robotoff.zip)"
+          if [[ "$actual_digest" != "$expected_digest" ]]; then
+            echo "::error::Downloaded extraction artifact digest differs from the reviewed GitHub digest."
+            exit 1
+          fi
+          if [[ "$actual_bytes" != "$ARTIFACT_BYTES" ]]; then
+            echo "::error::Downloaded extraction artifact size differs from the reviewed GitHub size."
+            exit 1
+          fi
           mkdir -p .data/publish-robotoff
           unzip -q .data-robotoff.zip -d .data/publish-robotoff
           cd .data/publish-robotoff
@@ -146,17 +207,50 @@ jobs:
           if (manifest.terminalEvidence !== 'end_of_file') failures.push('extraction did not exhaust its eligible barcode set');
           if (manifest.inputHash !== process.env.EXPECTED_INPUT_HASH) failures.push('extraction input hash differs from the reviewed hash');
           if (report.accountedBarcodes !== report.requestedBarcodes) failures.push('barcode accounting does not reconcile');
-          if (report.outcomes?.failed !== 0) failures.push('extraction contains failed barcodes');
+          const failed = report.outcomes?.failed;
+          const rate = failed / report.requestedBarcodes;
+          if (manifest.outcomeAccountingComplete !== true || report.outcomeAccountingComplete !== true) failures.push('outcome accounting is incomplete');
+          if (manifest.verificationComplete !== (failed === 0) || report.verificationComplete !== (failed === 0)) failures.push('verification completeness is inconsistent');
+          if (manifest.residualExceptionCount !== failed || report.residualExceptionCount !== failed) failures.push('residual exception count is inconsistent');
+          if (manifest.residualExceptionRate !== rate || report.residualExceptionRate !== rate) failures.push('residual exception rate is inconsistent');
+          if (manifest.residualExceptionLimits?.maxCount !== 10 || report.residualExceptionLimits?.maxCount !== 10) failures.push('residual count limit has drifted');
+          if (manifest.residualExceptionLimits?.maxRate !== 0.0025 || report.residualExceptionLimits?.maxRate !== 0.0025) failures.push('residual rate limit has drifted');
+          if (!Number.isSafeInteger(failed) || failed < 0 || failed > 10 || rate > 0.0025) failures.push('residual exceptions exceed the fixed policy');
           if (typeof report.requestSchema !== 'string' || !/^[a-f0-9]{64}$/.test(report.requestSchema)) failures.push('extraction request schema is missing');
           if (typeof report.extractionRunId !== 'string' || !/^xrun_[a-f0-9]{24}$/.test(report.extractionRunId)) failures.push('extraction run identity is missing');
           if (typeof report.parentSourceRunId !== 'string' || !/^run_[a-f0-9]{24}$/.test(report.parentSourceRunId)) failures.push('parent source run identity is missing');
           if (![report.labelAssets, report.extractionAttempts, report.extractionAttemptLabels].every(Number.isSafeInteger)) failures.push('exact label accounting is missing');
+          await readFile('decision-drift.json', 'utf8').then(JSON.parse).catch(() => failures.push('bound decision-drift evidence is missing or invalid'));
           if (failures.length) throw new Error(failures.join('; '));
           NODE
+
+      - name: Re-audit reviewed decisions against the pinned extraction
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm data:audit-decisions -- \
+            --artifact .data/publish-robotoff \
+            --bundles review-decisions \
+            --output .data/publish-robotoff/publication-decision-drift.json \
+            --fail-on candidate_key_active_state_ambiguous
+
+      - name: Require protected publication credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo "::error::The protected production environment is missing Cloudflare publication credentials."
+            exit 1
+          fi
 
       - name: Publish review-gated candidate source records
         shell: bash
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ARTIFACT_NAME: ${{ steps.reviewed.outputs.artifact_name }}
           ARTIFACT_DIGEST: ${{ steps.reviewed.outputs.artifact_digest }}
           ARTIFACT_BYTES: ${{ steps.reviewed.outputs.artifact_bytes }}
@@ -180,6 +274,9 @@ jobs:
 
       - name: Record candidate publication state
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           if [[ "$CANDIDATE_FAMILY" == "ingredients" ]]; then
@@ -219,5 +316,7 @@ jobs:
             .data/publish-robotoff/manifest.json
             .data/publish-robotoff/report.json
             .data/publish-robotoff/checksums.sha256
+            .data/publish-robotoff/decision-drift.json
+            .data/publish-robotoff/publication-decision-drift.json
             .data/publish-robotoff/publication-state.json
             .data/publish-robotoff/publication-checksums.sha256

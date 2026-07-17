@@ -176,6 +176,15 @@ export interface SourceManifest {
   mode: "sample" | "production";
   terminalEvidence: "end_of_file" | "limit" | "error";
   sourceComplete: boolean;
+  /** Present on exact label-extraction manifests. Source traversal and evidence verification are separate. */
+  outcomeAccountingComplete?: boolean;
+  verificationComplete?: boolean;
+  residualExceptionCount?: number;
+  residualExceptionRate?: number;
+  residualExceptionLimits?: {
+    maxCount: number;
+    maxRate: number;
+  };
   marketComplete: false;
   advertisedTotal: number | null;
   recordsRead: number;

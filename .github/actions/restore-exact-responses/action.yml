@@ -12,6 +12,9 @@ inputs:
     description: Optional exact adapter version required for reuse
     required: false
     default: ""
+  expected-workflow-name:
+    description: Exact successful producer workflow allowed to supply reusable evidence
+    required: true
   restore-label-proofs:
     description: Copy a validated prior label ledger for zero-refetch replay
     required: false
@@ -25,24 +28,47 @@ runs:
       uses: actions/github-script@v9
       env:
         ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+        EXPECTED_WORKFLOW_NAME: ${{ inputs.expected-workflow-name }}
       with:
         script: |
           const fs = require('fs');
-          const response = await github.rest.actions.listArtifactsForRepo({
+          const { createHash } = require('crypto');
+          const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
             owner: context.repo.owner,
             repo: context.repo.repo,
             per_page: 100,
           });
-          const artifact = response.data.artifacts
+          const candidates = artifacts
             .filter((candidate) =>
               !candidate.expired &&
               candidate.name.startsWith(process.env.ARTIFACT_PREFIX) &&
               candidate.workflow_run?.head_branch === context.payload.repository.default_branch)
-            .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at))[0];
+            .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+          let artifact = null;
+          for (const candidate of candidates) {
+            const runId = candidate.workflow_run?.id;
+            if (!Number.isSafeInteger(runId) || runId <= 0) continue;
+            const response = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            });
+            const run = response.data;
+            if (run.name === process.env.EXPECTED_WORKFLOW_NAME &&
+                run.conclusion === 'success' &&
+                run.head_branch === context.payload.repository.default_branch &&
+                run.head_repository?.full_name === `${context.repo.owner}/${context.repo.repo}`) {
+              artifact = candidate;
+              break;
+            }
+          }
           if (!artifact) {
             core.notice(`No prior ${process.env.ARTIFACT_PREFIX} response artifact is available.`);
             core.setOutput('available', 'false');
             return;
+          }
+          if (!/^sha256:[a-f0-9]{64}$/.test(artifact.digest ?? '') || artifact.size_in_bytes <= 0) {
+            throw new Error('Prior response artifact does not expose a valid immutable digest and size');
           }
           const download = await github.rest.actions.downloadArtifact({
             owner: context.repo.owner,
@@ -50,7 +76,12 @@ runs:
             artifact_id: artifact.id,
             archive_format: 'zip',
           });
-          fs.writeFileSync('.data-prior-exact.zip', Buffer.from(download.data));
+          const archive = Buffer.from(download.data);
+          const digest = `sha256:${createHash('sha256').update(archive).digest('hex')}`;
+          if (digest !== artifact.digest || archive.byteLength !== artifact.size_in_bytes) {
+            throw new Error('Downloaded prior response artifact digest or size differs from immutable GitHub metadata');
+          }
+          fs.writeFileSync('.data-prior-exact.zip', archive);
           core.setOutput('available', 'true');
           core.setOutput('artifact_id', String(artifact.id));
           core.setOutput('artifact_name', artifact.name);
@@ -80,10 +111,28 @@ runs:
           readFile('.data/prior-exact/report.json', 'utf8').then(JSON.parse),
           readFile('.data/source-snapshot/manifest.json', 'utf8').then(JSON.parse),
         ]);
+        const failed = priorReport.outcomes?.failed;
+        const residualAccounting = priorManifest.outcomeAccountingComplete === true
+          && priorReport.outcomeAccountingComplete === true
+          && priorManifest.verificationComplete === (failed === 0)
+          && priorReport.verificationComplete === (failed === 0)
+          && priorManifest.residualExceptionCount === failed
+          && priorReport.residualExceptionCount === failed
+          && priorManifest.residualExceptionRate === failed / priorReport.requestedBarcodes
+          && priorReport.residualExceptionRate === failed / priorReport.requestedBarcodes
+          && priorManifest.residualExceptionLimits?.maxCount === 10
+          && priorManifest.residualExceptionLimits?.maxRate === 0.0025
+          && priorReport.residualExceptionLimits?.maxCount === 10
+          && priorReport.residualExceptionLimits?.maxRate === 0.0025
+          && Number.isSafeInteger(failed)
+          && failed >= 0
+          && failed <= 10
+          && failed / priorReport.requestedBarcodes <= 0.0025;
         const exact = priorManifest.inputHash === process.env.SOURCE_STAGED_HASH
           && priorReport.inputManifestHash === sourceManifest.inputHash
           && priorManifest.sourceComplete === true
-          && priorReport.outcomes?.failed === 0
+          && priorReport.sourceComplete === true
+          && residualAccounting
           && (!process.env.EXPECTED_ADAPTER_VERSION || priorManifest.adapterVersion === process.env.EXPECTED_ADAPTER_VERSION)
           && (process.env.RESTORE_LABEL_PROOFS !== 'true'
             || (Number.isSafeInteger(priorReport.labelAssets) && priorReport.labelAssets > 0));

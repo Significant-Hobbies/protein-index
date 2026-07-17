@@ -1088,9 +1088,14 @@ function completionReasonLabel(code: string): string {
 
 export function CompletionOutcomeEvidence({ item }: { item: CompletionLedgerItem }) {
   const summary = item.extraction;
-  if (summary.labels === 0 && summary.unattempted === 0 && summary.stale === 0) {
+  const hasCurrentOutcome = summary.candidate + summary.noPrediction + summary.rejected + summary.failed > 0;
+  if (summary.labels === 0 && !hasCurrentOutcome && summary.unattempted === 0 && summary.stale === 0) {
     return <div className="completion-outcomes"><span>No exact label extraction recorded</span>{item.reasonCodes.length > 0 && <p className="completion-reason-codes"><strong>Why outstanding:</strong> {item.reasonCodes.map(completionReasonLabel).join(" · ")}</p>}</div>;
   }
+  const residualException = item.state === "outstanding" && summary.failed > 0;
+  const residualNextStep = item.lane === "retry_extraction"
+    ? "Retry extraction is the current next action."
+    : "Retry extraction remains required after the higher-priority action shown for this product.";
   const summaryItems = [
     ["candidate", "candidate", summary.candidate],
     ["no prediction", "no-prediction", summary.noPrediction],
@@ -1101,6 +1106,7 @@ export function CompletionOutcomeEvidence({ item }: { item: CompletionLedgerItem
   ] as const;
   return (
     <section className="completion-outcomes" aria-label={`Exact ${item.family} extraction outcomes for ${item.product.name}`}>
+      {residualException && <p className="completion-reason-codes"><strong>Residual exception:</strong> Extraction remains unresolved. It is neither verified nor evidence-backed unavailable.{summary.labels === 0 ? " No linked per-label outcome is available for the current failed attempt." : ""} {residualNextStep}</p>}
       <dl className="completion-outcome-counts">
         {summaryItems.map(([label, className, count]) => <div key={label} className={`completion-outcome-${className}`}><dt>{label}</dt><dd>{count.toLocaleString("en-IN")}</dd></div>)}
       </dl>

@@ -12,6 +12,7 @@ import {
   validateRobotoffIngredientArtifact,
 } from "./adapters/robotoff-ingredients-api";
 import type { ExtractionRun } from "../shared/extraction-outcomes";
+import { validateExtractionAccountingSummary } from "../shared/extraction-outcomes";
 import type { SourceManifest } from "../shared/types";
 import { ingestionRunIdForManifest, type ExtractionImportInput } from "./reconcile";
 
@@ -23,6 +24,11 @@ interface PublicationReport {
   outcomes?: {
     failed?: number;
   };
+  outcomeAccountingComplete?: boolean;
+  verificationComplete?: boolean;
+  residualExceptionCount?: number;
+  residualExceptionRate?: number;
+  residualExceptionLimits?: { maxCount?: number; maxRate?: number };
   continuity?: {
     currentStagedRecords?: number;
     previousStagedRecords?: number;
@@ -45,6 +51,13 @@ const MULTI_PREDICTION_SOURCES = new Set([
   "open_food_facts_robotoff",
   "open_food_facts_robotoff_ingredients",
 ]);
+
+export const CURRENT_PUBLICATION_ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
+  open_food_facts: "off-bulk-v3",
+  open_food_facts_api: "off-api-enrichment-v6",
+  open_food_facts_robotoff: "robotoff-api-v8",
+  open_food_facts_robotoff_ingredients: "robotoff-ingredients-api-v3",
+});
 
 export const AUTOMATIC_DISCOVERY_DROP_CEILING = 0.2;
 export const AUTOMATIC_PUBLICATION_REPOSITORY = "Significant-Hobbies/protein-index";
@@ -168,6 +181,10 @@ export interface ExactExtractionSnapshot {
 
 export function assertPublicationEvidence(manifest: SourceManifest, report: PublicationReport): void {
   const failures: string[] = [];
+  const expectedAdapterVersion = CURRENT_PUBLICATION_ADAPTER_VERSIONS[manifest.source];
+  if (expectedAdapterVersion && manifest.adapterVersion !== expectedAdapterVersion) {
+    failures.push(`adapter version is not ${expectedAdapterVersion}`);
+  }
   if (manifest.mode !== "production") failures.push("manifest mode is not production");
   if (manifest.sourceComplete !== true) failures.push("manifest is not source complete");
   if (manifest.terminalEvidence !== "end_of_file") failures.push("terminal evidence is not end_of_file");
@@ -193,7 +210,22 @@ export function assertPublicationEvidence(manifest: SourceManifest, report: Publ
   if (BARCODE_ACCOUNTED_SOURCES.has(manifest.source)) {
     if (report.requestedBarcodes !== manifest.indiaRecords) failures.push("requested barcode count differs from the manifest");
     if (report.accountedBarcodes !== report.requestedBarcodes) failures.push("barcode accounting does not reconcile");
-    if (report.outcomes?.failed !== 0) failures.push("enrichment contains failed barcodes");
+    if (MULTI_PREDICTION_SOURCES.has(manifest.source)) {
+      const requested = report.requestedBarcodes ?? 0;
+      const accounted = report.accountedBarcodes ?? 0;
+      const failed = report.outcomes?.failed ?? -1;
+      if (Number.isSafeInteger(requested) && requested > 0 && Number.isSafeInteger(accounted) && accounted >= 0
+        && Number.isSafeInteger(failed) && failed >= 0) {
+        failures.push(...validateExtractionAccountingSummary(manifest, requested, accounted, failed)
+          .map((error) => `manifest ${error}`));
+        failures.push(...validateExtractionAccountingSummary(report, requested, accounted, failed)
+          .map((error) => `report ${error}`));
+      } else {
+        failures.push("extraction residual accounting is malformed");
+      }
+    } else if (report.outcomes?.failed !== 0) {
+      failures.push("enrichment contains failed barcodes");
+    }
   }
   if (failures.length > 0) throw new Error(`Publication snapshot rejected: ${failures.join("; ")}`);
 }
@@ -231,8 +263,8 @@ async function validateExactExtractionSnapshot(
 ): Promise<ExactExtractionSnapshot | null> {
   if (manifest.source !== "open_food_facts_robotoff" && manifest.source !== "open_food_facts_robotoff_ingredients") return null;
   const artifact = manifest.source === "open_food_facts_robotoff"
-    ? await validateRobotoffNutritionArtifact(directory)
-    : await validateRobotoffIngredientArtifact(directory);
+    ? await validateRobotoffNutritionArtifact(directory, { requireDecisionDrift: true })
+    : await validateRobotoffIngredientArtifact(directory, { requireDecisionDrift: true });
   const report = artifact.report as unknown as Record<string, unknown>;
   const nutrition = manifest.source === "open_food_facts_robotoff";
   const requestSchemaHash = reportString(report, "requestSchema");
@@ -361,6 +393,11 @@ function extractionImportForAutomaticSnapshot(
     manifest: {
       source: snapshot.manifest.source,
       inputHash: snapshot.manifest.inputHash,
+      outcomeAccountingComplete: snapshot.manifest.outcomeAccountingComplete,
+      verificationComplete: snapshot.manifest.verificationComplete,
+      residualExceptionCount: snapshot.manifest.residualExceptionCount,
+      residualExceptionRate: snapshot.manifest.residualExceptionRate,
+      residualExceptionLimits: snapshot.manifest.residualExceptionLimits,
       artifactName: contract.artifactName,
       artifactDigest: contract.artifactDigest,
       artifactBytes: contract.artifactBytes,

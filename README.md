@@ -88,8 +88,13 @@ pnpm data:extract -- \
 ```
 
 The Robotoff job is resumable per barcode, identifies the client, observes the
-documented request limit, and records every eligible barcode as candidate,
-no-prediction, rejected, or failed. Model output never becomes verified
+documented request limit, and records every eligible barcode exactly once as
+candidate, no-prediction, rejected, or failed. Complete outcome accounting is
+separate from verification completeness. A checksummed artifact may retain at
+most 10 post-response label failures and at most 0.25% of its requested cohort;
+both limits must hold. Upstream model/API failures without a retained raw
+response, missing or duplicate outcomes, unknown reasons, or larger residual
+sets still fail the artifact closed. Model output never becomes verified
 nutrition automatically; an operator must review the current label image, and
 verification applies that exact candidate with its provenance.
 Exact label downloads have a 30-second total deadline plus byte and chunk
@@ -110,26 +115,28 @@ exactly match a previously checksummed artifact. A changed source snapshot
 fetches current responses; a request-schema mismatch is rejected by the adapter
 and fetched again.
 
-## Automatic fresh-evidence publication
+## Manual fresh-evidence publication
 
-Successful default-branch runs of `Source sync`, API enrichment, nutrition-label
-extraction, and ingredient-label extraction currently enter one serialized,
-credential-scoped publication path. The path accepts only the exact run artifact and
-head commit from its four-workflow allowlist. It verifies portable checksums,
-source/cohort accounting, the fixed 20% discovery-drop ceiling, and every staged
-record before generating SQL.
+Successful producer runs do not start a credentialed publication job. An
+operator must explicitly dispatch the serialized production workflow, identify
+the exact successful run, and provide its hard confirmation input before any
+credential-bearing or D1 step can begin. The path accepts only the exact run
+artifact and head commit from its four-workflow allowlist. It verifies portable
+checksums, source/cohort accounting, the fixed 20% discovery-drop ceiling, and
+every staged record before generating SQL.
 
-The repository's `production` environment currently has no required reviewer.
-Keep automatic publication fail-closed on pending migrations until that path is
-disabled or a hard human approval gate is configured; applying the pending
-migrations without one would allow a later successful producer run to write D1.
+The repository's `production` environment remains defense in depth for
+credential scoping. The workflow's explicit dispatch confirmation is the
+repository-enforced approval gate even when the environment has no required
+reviewer. Pending migrations still fail closed; this evidence path cannot apply
+them.
 
-Automatic publication has a deliberately narrower authority boundary than
-manual publication:
+Fresh-evidence publication has a deliberately narrower authority boundary than
+reviewed catalog publication:
 
 - Open Food Facts values remain unverified community evidence.
 - Robotoff records remain review-only candidates with no selected facts.
-- Existing verified rows cannot be overwritten by automatic evidence, and
+- Existing verified rows cannot be overwritten by fresh evidence, and
   verified counts cannot increase.
 - Pending D1 migrations stop the run; this path cannot apply schema changes.
 - DataKart, retailer offers/ratings, review decisions, and Worker deployment are
@@ -138,12 +145,11 @@ manual publication:
 Every credentialed attempt retains the trigger identity, artifact/manifest
 hashes, publication log, exact D1 pre/post state, and live health/catalog checks
 for 90 days. If a write or postcondition fails, the workflow makes no success claim.
-The same checksummed artifact remains replayable through the protected manual
-workflow after investigation. The scheduled cadence remains weekly; manual
-producer runs use the same automatic evidence boundary. Missing protected
-credentials retain the trigger and immutable artifact digest, then fail before
-artifact download so blocked runs do not repeatedly transfer large evidence
-bundles.
+The same checksummed artifact remains replayable through the protected workflow
+after investigation. The scheduled producer cadence remains weekly, but
+publication is always a separate explicit action. The workflow may download and
+validate the immutable artifact before checking protected credentials, but
+missing credentials still fail before any D1 read or write.
 
 ## Review decision drift audit
 

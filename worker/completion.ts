@@ -254,7 +254,18 @@ function familySql(family: CompletionFamily, includeSources = true): string {
       AND NOT (${verifiedFact})
       AND j.field_status IS NULL`;
 
-  const extractionCtes = supportsExtraction ? `, current_label_ranked AS (
+  const extractionCtes = supportsExtraction ? `, current_attempt_failures AS (
+    SELECT a.product_id, a.failure_count, a.reasons_json
+    FROM extraction_attempts a
+    JOIN source_records subject ON subject.id = a.subject_source_record_id
+      AND subject.product_id = a.product_id
+      AND subject.content_hash = a.subject_source_content_hash
+    WHERE a.is_current = 1 AND a.field_family = '${family}' AND a.status = 'failed'
+  ), current_attempt_failure_summary AS (
+    SELECT product_id, COUNT(*) AS failed_attempts,
+      SUM(failure_count) AS extraction_failed
+    FROM current_attempt_failures GROUP BY product_id
+  ), current_label_ranked AS (
     SELECT a.product_id, a.id AS attempt_id, l.id AS label_asset_id, l.source_image_id,
       al.role, al.outcome, l.effective_url, l.content_sha256, l.fetched_at, a.attempted_at,
       al.candidate_count, al.rejection_count, al.failure_count, al.conflict_count, al.reasons_json,
@@ -284,14 +295,22 @@ function familySql(family: CompletionFamily, includeSources = true): string {
         'fetchedAt', fetched_at, 'attemptedAt', attempted_at, 'reasonsJson', reasons_json
       )) FILTER (WHERE label_rank <= 4), '[]') AS labels_json
     FROM current_label_ranked GROUP BY product_id
-  ), current_label_reason_summary AS (
+  ), current_extraction_reason_summary AS (
     SELECT product_id, json_group_array(reason_code) AS reason_codes_json
     FROM (
-      SELECT DISTINCT ranked.product_id, CAST(reason.value AS TEXT) AS reason_code
-      FROM current_label_ranked ranked
-      JOIN json_each(ranked.reasons_json) reason
-      WHERE reason.type = 'text'
-      ORDER BY ranked.product_id, reason_code
+      SELECT DISTINCT product_id, reason_code
+      FROM (
+        SELECT ranked.product_id, CAST(reason.value AS TEXT) AS reason_code
+        FROM current_label_ranked ranked
+        JOIN json_each(ranked.reasons_json) reason
+        WHERE reason.type = 'text'
+        UNION ALL
+        SELECT failed.product_id, CAST(reason.value AS TEXT) AS reason_code
+        FROM current_attempt_failures failed
+        JOIN json_each(failed.reasons_json) reason
+        WHERE reason.type = 'text'
+      )
+      ORDER BY product_id, reason_code
     ) GROUP BY product_id
   ), stale_label_summary AS (
     SELECT a.product_id, COUNT(DISTINCT al.label_asset_id) AS extraction_stale
@@ -476,11 +495,13 @@ function familySql(family: CompletionFamily, includeSources = true): string {
       COALESCE(cls.extraction_candidate, 0) AS extraction_candidate,
       COALESCE(cls.extraction_no_prediction, 0) AS extraction_no_prediction,
       COALESCE(cls.extraction_rejected, 0) AS extraction_rejected,
-      COALESCE(cls.extraction_failed, 0) AS extraction_failed,
-      CASE WHEN TRIM(COALESCE(${labelUrl}, '')) <> '' AND COALESCE(cls.extraction_labels, 0) = 0 THEN 1 ELSE 0 END AS extraction_unattempted,
+      MAX(COALESCE(cls.extraction_failed, 0), COALESCE(cafs.extraction_failed, 0)) AS extraction_failed,
+      CASE WHEN TRIM(COALESCE(${labelUrl}, '')) <> ''
+        AND COALESCE(cls.extraction_labels, 0) = 0
+        AND COALESCE(cafs.failed_attempts, 0) = 0 THEN 1 ELSE 0 END AS extraction_unattempted,
       COALESCE(sls.extraction_stale, 0) AS extraction_stale,
       COALESCE(cls.extraction_conflicts, 0) AS extraction_conflicts,
-      COALESCE(clrs.reason_codes_json, '[]') AS reason_codes_json,
+      COALESCE(cers.reason_codes_json, '[]') AS reason_codes_json,
       COALESCE(cls.labels_json, '[]') AS labels_json,
       COALESCE(lds.linked_verify_count, 0) AS linked_verify_count,
       COALESCE(lds.current_linked_verify_count, 0) AS current_linked_verify_count`
@@ -489,8 +510,9 @@ function familySql(family: CompletionFamily, includeSources = true): string {
       0 AS extraction_stale, 0 AS extraction_conflicts, '[]' AS reason_codes_json, '[]' AS labels_json,
       0 AS linked_verify_count, 0 AS current_linked_verify_count`;
   const extractionJoins = supportsExtraction ? `
+    LEFT JOIN current_attempt_failure_summary cafs ON cafs.product_id = p.id
     LEFT JOIN current_label_summary cls ON cls.product_id = p.id
-    LEFT JOIN current_label_reason_summary clrs ON clrs.product_id = p.id
+    LEFT JOIN current_extraction_reason_summary cers ON cers.product_id = p.id
     LEFT JOIN stale_label_summary sls ON sls.product_id = p.id
     LEFT JOIN linked_decision_summary lds
       ON lds.product_id = p.id AND lds.fact_source_record_id = f.source_record_id

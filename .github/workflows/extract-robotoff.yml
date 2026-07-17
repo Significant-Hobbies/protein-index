@@ -50,6 +50,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            const { createHash } = require('crypto');
             const runId = Number(process.env.RUN_ID);
             if (!Number.isSafeInteger(runId) || runId <= 0) throw new Error('source_run_id must be a positive workflow run ID');
             const selectedRun = await github.rest.actions.getWorkflowRun({
@@ -80,7 +81,12 @@ jobs:
               artifact_id: artifact.id,
               archive_format: 'zip',
             });
-            fs.writeFileSync('.data-source.zip', Buffer.from(download.data));
+            const archive = Buffer.from(download.data);
+            const digest = `sha256:${createHash('sha256').update(archive).digest('hex')}`;
+            if (digest !== artifact.digest || archive.byteLength !== artifact.size_in_bytes) {
+              throw new Error('Downloaded source artifact digest or size differs from immutable GitHub metadata');
+            }
+            fs.writeFileSync('.data-source.zip', archive);
 
       - name: Expand and validate source snapshot
         shell: bash
@@ -110,6 +116,7 @@ jobs:
           artifact-prefix: robotoff-label-candidates-
           output-directory: .data/robotoff
           expected-adapter-version: robotoff-api-v8
+          expected-workflow-name: Extract label evidence with Robotoff
           restore-label-proofs: "true"
 
       - name: Extract every eligible nutrition label image
@@ -155,7 +162,15 @@ jobs:
           if (manifest.sourceComplete !== true || report.sourceComplete !== true) failures.push('extraction is incomplete');
           if (manifest.terminalEvidence !== 'end_of_file') failures.push('extraction did not exhaust the eligible barcode set');
           if (report.accountedBarcodes !== report.requestedBarcodes) failures.push('barcode accounting does not reconcile');
-          if (report.outcomes?.failed !== 0) failures.push('extraction contains failed barcodes');
+          const failed = report.outcomes?.failed;
+          const rate = failed / report.requestedBarcodes;
+          if (manifest.outcomeAccountingComplete !== true || report.outcomeAccountingComplete !== true) failures.push('outcome accounting is incomplete');
+          if (manifest.verificationComplete !== (failed === 0) || report.verificationComplete !== (failed === 0)) failures.push('verification completeness is inconsistent');
+          if (manifest.residualExceptionCount !== failed || report.residualExceptionCount !== failed) failures.push('residual exception count is inconsistent');
+          if (manifest.residualExceptionRate !== rate || report.residualExceptionRate !== rate) failures.push('residual exception rate is inconsistent');
+          if (manifest.residualExceptionLimits?.maxCount !== 10 || report.residualExceptionLimits?.maxCount !== 10) failures.push('residual count limit has drifted');
+          if (manifest.residualExceptionLimits?.maxRate !== 0.0025 || report.residualExceptionLimits?.maxRate !== 0.0025) failures.push('residual rate limit has drifted');
+          if (!Number.isSafeInteger(failed) || failed < 0 || failed > 10 || rate > 0.0025) failures.push('residual exceptions exceed the fixed policy');
           if (failures.length) throw new Error(failures.join('; '));
           NODE
 
@@ -176,12 +191,19 @@ jobs:
             --output .data/decision-drift/nutrition-v8.json \
             --fail-on candidate_key_active_state_ambiguous
 
+      - name: Bind decision-drift evidence into the portable artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .data/decision-drift/nutrition-v8.json .data/robotoff/decision-drift.json
+          (cd .data/robotoff && sha256sum decision-drift.json >> checksums.sha256)
+
       - name: Upload review-gated label candidates
         uses: actions/upload-artifact@v7
         with:
           name: robotoff-label-candidates-${{ github.run_id }}
           compression-level: 9
-          retention-days: 30
+          retention-days: 90
           if-no-files-found: error
           path: |
             .data/robotoff/manifest.json
@@ -194,6 +216,7 @@ jobs:
             .data/robotoff/exclusions.jsonl
             .data/robotoff/outcomes.jsonl
             .data/robotoff/staged-products.jsonl
+            .data/robotoff/decision-drift.json
             .data/robotoff/responses/*.json
             .data/robotoff/checksums.sha256
 
@@ -220,4 +243,4 @@ jobs:
             .data/robotoff/label-assets.jsonl
             .data/robotoff/extraction-attempts.jsonl
             .data/robotoff/extraction-attempt-labels.jsonl
-            .data/robotoff/responses/*.error.json
+            .data/robotoff/responses/*.json

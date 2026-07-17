@@ -1,13 +1,16 @@
-name: Publish fresh evidence automatically
+name: Publish verified evidence manually
 
 on:
-  workflow_run:
-    workflows:
-      - Source sync
-      - Enrich Open Food Facts evidence
-      - Extract label evidence with Robotoff
-      - Extract ingredient label evidence
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      upstream_run_id:
+        description: Successful source or extraction workflow run ID to publish
+        required: true
+        type: string
+      confirm_production_publication:
+        description: Type PUBLISH_VERIFIED_EVIDENCE_TO_PRODUCTION exactly
+        required: true
+        type: string
 
 permissions:
   actions: read
@@ -18,20 +21,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+    steps:
+      - name: Require explicit production publication approval
+        id: gate
+        shell: bash
+        env:
+          CONFIRM_PRODUCTION_PUBLICATION: ${{ inputs.confirm_production_publication }}
+          UPSTREAM_RUN_ID: ${{ inputs.upstream_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Evidence publication must be dispatched from main."
+            exit 1
+          fi
+          if [[ "$CONFIRM_PRODUCTION_PUBLICATION" != "PUBLISH_VERIFIED_EVIDENCE_TO_PRODUCTION" ]]; then
+            echo "::error::Exact production publication confirmation was not supplied."
+            exit 1
+          fi
+          if [[ ! "$UPSTREAM_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::upstream_run_id must be a positive workflow run ID."
+            exit 1
+          fi
+          echo "approved=true" >> "$GITHUB_OUTPUT"
+
   publish:
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+    needs: authorize
+    if: needs.authorize.outputs.approved == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     environment: production
     env:
-      UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
-      UPSTREAM_WORKFLOW: ${{ github.event.workflow_run.name }}
-      UPSTREAM_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-      UPSTREAM_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-      UPSTREAM_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
+      UPSTREAM_RUN_ID: ${{ inputs.upstream_run_id }}
       LIVE_BASE_URL: https://protein-index.sarthakagrawal927.workers.dev
     steps:
       - name: Initialize durable publication evidence
@@ -49,23 +75,29 @@ jobs:
           script: |
             const fs = require('fs');
             const evidenceDir = process.env.PUBLICATION_EVIDENCE_DIR;
+            const upstreamRunId = process.env.UPSTREAM_RUN_ID;
             if (!evidenceDir) throw new Error('Publication evidence directory is not configured');
+            if (!/^[1-9][0-9]*$/.test(upstreamRunId ?? '')) throw new Error('Upstream run ID is invalid');
+            const runId = Number(upstreamRunId);
+            if (!Number.isSafeInteger(runId)) throw new Error('Upstream run ID is outside the safe integer range');
             fs.mkdirSync(evidenceDir, { recursive: true });
             fs.writeFileSync(`${evidenceDir}/trigger.json`, JSON.stringify({
-              workflow: context.payload.workflow_run?.name ?? null,
-              runId: context.payload.workflow_run?.id ?? null,
-              headSha: context.payload.workflow_run?.head_sha ?? null,
-              headBranch: context.payload.workflow_run?.head_branch ?? null,
+              runId,
               status: 'routing',
             }, null, 2));
             const routes = Object.freeze({
-              'Source sync': Object.freeze({ source: 'open_food_facts', artifactPrefix: 'open-food-facts-snapshot' }),
-              'Enrich Open Food Facts evidence': Object.freeze({ source: 'open_food_facts_api', artifactPrefix: 'open-food-facts-enrichment' }),
-              'Extract label evidence with Robotoff': Object.freeze({ source: 'open_food_facts_robotoff', artifactPrefix: 'robotoff-label-candidates' }),
-              'Extract ingredient label evidence': Object.freeze({ source: 'open_food_facts_robotoff_ingredients', artifactPrefix: 'robotoff-ingredient-candidates' }),
+              'Source sync': Object.freeze({ source: 'open_food_facts', adapterVersion: 'off-bulk-v3', artifactPrefix: 'open-food-facts-snapshot' }),
+              'Enrich Open Food Facts evidence': Object.freeze({ source: 'open_food_facts_api', adapterVersion: 'off-api-enrichment-v6', artifactPrefix: 'open-food-facts-enrichment' }),
+              'Extract label evidence with Robotoff': Object.freeze({ source: 'open_food_facts_robotoff', adapterVersion: 'robotoff-api-v8', artifactPrefix: 'robotoff-label-candidates' }),
+              'Extract ingredient label evidence': Object.freeze({ source: 'open_food_facts_robotoff_ingredients', adapterVersion: 'robotoff-ingredients-api-v3', artifactPrefix: 'robotoff-ingredient-candidates' }),
             });
-            const run = context.payload.workflow_run;
-            if (!run || run.conclusion !== 'success') throw new Error('Upstream run was not successful');
+            const response = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            });
+            const run = response.data;
+            if (run.conclusion !== 'success') throw new Error('Upstream run was not successful');
             if (run.head_branch !== context.payload.repository.default_branch) throw new Error('Upstream run is not on the default branch');
             if (run.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`) throw new Error('Upstream run is not from this repository');
             if (!/^[a-f0-9]{40}$/.test(run.head_sha ?? '')) throw new Error('Upstream run does not expose an exact lowercase head SHA');
@@ -73,13 +105,13 @@ jobs:
             const route = routes[run.name];
             if (!route) throw new Error(`Unsupported upstream workflow: ${run.name}`);
             const artifactName = `${route.artifactPrefix}-${run.id}`;
-            const response = await github.rest.actions.listWorkflowRunArtifacts({
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
               owner: context.repo.owner,
               repo: context.repo.repo,
               run_id: run.id,
               per_page: 100,
             });
-            const matches = response.data.artifacts.filter((artifact) => artifact.name === artifactName && !artifact.expired);
+            const matches = artifacts.data.artifacts.filter((artifact) => artifact.name === artifactName && !artifact.expired);
             if (matches.length !== 1) throw new Error(`Expected exactly one unexpired artifact named ${artifactName}`);
             const artifact = matches[0];
             if (artifact && new Set([8395774354, 8396363821]).has(artifact.id)) {
@@ -90,9 +122,14 @@ jobs:
             }
             core.setOutput('artifact_name', artifactName);
             core.setOutput('expected_source', route.source);
+            core.setOutput('expected_adapter_version', route.adapterVersion);
             core.setOutput('artifact_id', String(artifact.id));
             core.setOutput('artifact_digest', artifact.digest);
             core.setOutput('artifact_bytes', String(artifact.size_in_bytes));
+            core.setOutput('upstream_workflow', run.name);
+            core.setOutput('upstream_head_sha', run.head_sha);
+            core.setOutput('upstream_head_branch', run.head_branch);
+            core.setOutput('upstream_repository', run.head_repository.full_name);
             fs.writeFileSync(`${evidenceDir}/trigger.json`, JSON.stringify({
               workflow: run.name,
               runId: run.id,
@@ -103,37 +140,32 @@ jobs:
               artifactDigest: artifact.digest,
               artifactBytes: artifact.size_in_bytes,
               expectedSource: route.source,
+              expectedAdapterVersion: route.adapterVersion,
+              publisherHeadSha: context.sha,
               status: 'routed',
             }, null, 2));
 
-      - name: Check out exact upstream commit
+      - name: Check out current publication commit
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
-          clean: false
 
-      - name: Require automatic-publication contract at upstream commit
+      - name: Require current publisher and upstream ancestry
         shell: bash
+        env:
+          PUBLISHER_HEAD_SHA: ${{ github.sha }}
+          UPSTREAM_HEAD_SHA: ${{ steps.route.outputs.upstream_head_sha }}
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PUBLISHER_HEAD_SHA"
+          git merge-base --is-ancestor "$UPSTREAM_HEAD_SHA" "$PUBLISHER_HEAD_SHA"
           test -f .github/workflows/publish-automatic-evidence.yml
           test -f migrations/0009_extraction_outcome_ledger.sql
           grep -F -- "validateAutomaticPublicationSnapshot" scripts/sync.ts >/dev/null
           grep -F -- "--skip-migrations" scripts/sync.ts >/dev/null
           grep -F -- "applyEvidenceDecisions: !automatic" scripts/sync.ts >/dev/null
-
-      - name: Require protected publication credentials
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
-            echo "::error::The protected production environment is missing Cloudflare publication credentials."
-            exit 1
-          fi
 
       - uses: pnpm/action-setup@v6
 
@@ -168,27 +200,91 @@ jobs:
           ARTIFACT_DIGEST: ${{ steps.route.outputs.artifact_digest }}
           ARTIFACT_BYTES: ${{ steps.route.outputs.artifact_bytes }}
           EXPECTED_SOURCE: ${{ steps.route.outputs.expected_source }}
+          EXPECTED_ADAPTER_VERSION: ${{ steps.route.outputs.expected_adapter_version }}
+          UPSTREAM_WORKFLOW: ${{ steps.route.outputs.upstream_workflow }}
+          UPSTREAM_HEAD_SHA: ${{ steps.route.outputs.upstream_head_sha }}
+          UPSTREAM_HEAD_BRANCH: ${{ steps.route.outputs.upstream_head_branch }}
+          PUBLISHER_HEAD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           mkdir -p .data/automatic "$PUBLICATION_EVIDENCE_DIR"
-          sha256sum .automatic-publication.zip > "$PUBLICATION_EVIDENCE_DIR/artifact.zip.sha256"
+          expected_digest="${ARTIFACT_DIGEST#sha256:}"
+          actual_digest="$(sha256sum .automatic-publication.zip | awk '{print $1}')"
+          actual_bytes="$(stat --format=%s .automatic-publication.zip)"
+          if [[ "$actual_digest" != "$expected_digest" ]]; then
+            echo "::error::Downloaded artifact digest differs from the immutable GitHub artifact digest."
+            exit 1
+          fi
+          if [[ "$actual_bytes" != "$ARTIFACT_BYTES" ]]; then
+            echo "::error::Downloaded artifact size differs from the immutable GitHub artifact size."
+            exit 1
+          fi
+          printf '%s  %s\n' "$actual_digest" .automatic-publication.zip > "$PUBLICATION_EVIDENCE_DIR/artifact.zip.sha256"
           unzip -q .automatic-publication.zip -d .data/automatic
           cd .data/automatic
           sha256sum --check checksums.sha256
           cd ../..
+          manifest_source="$(jq -r '.source // empty' .data/automatic/manifest.json)"
+          adapter_version="$(jq -r '.adapterVersion // empty' .data/automatic/manifest.json)"
+          if [[ "$manifest_source" != "$EXPECTED_SOURCE" ]]; then
+            echo "::error::Artifact source differs from the selected workflow family."
+            exit 1
+          fi
+          if [[ "$adapter_version" != "$EXPECTED_ADAPTER_VERSION" ]]; then
+            echo "::error::Artifact adapter version is not supported by the current publisher."
+            exit 1
+          fi
           jq \
             --arg workflow "$UPSTREAM_WORKFLOW" \
             --arg runId "$UPSTREAM_RUN_ID" \
             --arg headSha "$UPSTREAM_HEAD_SHA" \
             --arg headBranch "$UPSTREAM_HEAD_BRANCH" \
+            --arg publisherHeadSha "$PUBLISHER_HEAD_SHA" \
             --arg artifact "$ARTIFACT_NAME" \
             --arg source "$EXPECTED_SOURCE" \
-            '. + {workflow:$workflow,runId:($runId|tonumber),headSha:$headSha,headBranch:$headBranch,artifact:$artifact,expectedSource:$source,status:"validated"}' \
+            --arg adapterVersion "$EXPECTED_ADAPTER_VERSION" \
+            '. + {workflow:$workflow,runId:($runId|tonumber),headSha:$headSha,headBranch:$headBranch,publisherHeadSha:$publisherHeadSha,artifact:$artifact,expectedSource:$source,expectedAdapterVersion:$adapterVersion,status:"validated"}' \
             "$PUBLICATION_EVIDENCE_DIR/trigger.json" > "$PUBLICATION_EVIDENCE_DIR/trigger.validated.json"
           mv "$PUBLICATION_EVIDENCE_DIR/trigger.validated.json" "$PUBLICATION_EVIDENCE_DIR/trigger.json"
           cp .data/automatic/manifest.json "$PUBLICATION_EVIDENCE_DIR/manifest.json"
           cp .data/automatic/report.json "$PUBLICATION_EVIDENCE_DIR/report.json"
           cp .data/automatic/checksums.sha256 "$PUBLICATION_EVIDENCE_DIR/checksums.sha256"
+          if [[ -f .data/automatic/decision-drift.json ]]; then
+            cp .data/automatic/decision-drift.json "$PUBLICATION_EVIDENCE_DIR/bound-decision-drift.json"
+          fi
+
+      - name: Re-audit current reviewed decisions against extraction evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_id="$(jq -r '.source // empty' .data/automatic/manifest.json)"
+          case "$source_id" in
+            open_food_facts_robotoff|open_food_facts_robotoff_ingredients)
+              pnpm data:audit-decisions -- \
+                --artifact .data/automatic \
+                --bundles review-decisions \
+                --output "$PUBLICATION_EVIDENCE_DIR/publication-decision-drift.json" \
+                --fail-on candidate_key_active_state_ambiguous
+              ;;
+            open_food_facts|open_food_facts_api)
+              ;;
+            *)
+              echo "::error::Unsupported publication source: $source_id"
+              exit 1
+              ;;
+          esac
+
+      - name: Require protected publication credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo "::error::The protected production environment is missing Cloudflare publication credentials."
+            exit 1
+          fi
 
       - name: Publish validated evidence without migrations
         shell: bash
@@ -198,6 +294,10 @@ jobs:
           ARTIFACT_NAME: ${{ steps.route.outputs.artifact_name }}
           ARTIFACT_DIGEST: ${{ steps.route.outputs.artifact_digest }}
           ARTIFACT_BYTES: ${{ steps.route.outputs.artifact_bytes }}
+          UPSTREAM_WORKFLOW: ${{ steps.route.outputs.upstream_workflow }}
+          UPSTREAM_HEAD_SHA: ${{ steps.route.outputs.upstream_head_sha }}
+          UPSTREAM_HEAD_BRANCH: ${{ steps.route.outputs.upstream_head_branch }}
+          UPSTREAM_REPOSITORY: ${{ steps.route.outputs.upstream_repository }}
         run: |
           set -euo pipefail
           pnpm data:publish -- \
@@ -230,7 +330,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: automatic-publication-evidence-${{ github.event.workflow_run.id }}-${{ github.run_id }}
+          name: manual-publication-evidence-${{ inputs.upstream_run_id }}-${{ github.run_id }}
           retention-days: 90
           if-no-files-found: error
           path: ${{ env.PUBLICATION_EVIDENCE_DIR }}/

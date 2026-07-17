@@ -140,6 +140,54 @@ async function review(input: {
     .run();
 }
 
+async function verifyIdentityFromSource(productId: string, sourceRecordId: string, evidenceUrl: string): Promise<void> {
+  const response = await worker.fetch(`http://localhost/api/products/${productId}/identity-evidence`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      sourceRecordId,
+      evidenceUrl,
+      rationale: "Exact current source confirms this product identity.",
+    }),
+  });
+  expect(response.status).toBe(201);
+}
+
+async function recordTerminalFromSource(input: {
+  productId: string;
+  sourceRecordId: string;
+  family: "nutrition" | "ingredients";
+  idempotencyKey: string;
+}): Promise<void> {
+  const options = await json<{ items: Array<{
+    evidenceId: string;
+    sourceContentHash: string;
+    labelContentSha256: string | null;
+  }> }>(await worker.fetch(
+    `http://localhost/api/products/${input.productId}/terminal-evidence?family=${input.family}`,
+  ));
+  const evidence = options.items.find(({ evidenceId }) => evidenceId === `source:${input.sourceRecordId}`);
+  expect(evidence).toBeDefined();
+  const response = await worker.fetch(
+    `http://localhost/api/products/${input.productId}/terminal-evidence`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        family: input.family,
+        outcome: "not_declared",
+        evidenceId: evidence?.evidenceId,
+        sourceContentHash: evidence?.sourceContentHash,
+        labelContentSha256: evidence?.labelContentSha256,
+        idempotencyKey: input.idempotencyKey,
+        rationale: `The complete official source contains no ${input.family} declaration.`,
+        supersedesDecisionId: null,
+      }),
+    },
+  );
+  expect(response.status).toBe(201);
+}
+
 async function currentExtraction(input: {
   id: string;
   family: "nutrition" | "ingredients";
@@ -148,6 +196,8 @@ async function currentExtraction(input: {
   derivedSourceRecordId?: string;
   outcomes: Array<"candidate" | "no_prediction" | "rejected" | "failed">;
   reasonCodes?: string[][];
+  attemptReasonCodes?: string[];
+  retainLabels?: boolean;
 }): Promise<{ attemptId: string; labelAssetIds: string[]; candidateHash: string; candidateLabelAssetId: string | null }> {
   const subject = await env.DB.prepare(`SELECT sr.source_record_id, sr.content_hash, sr.source_id,
       sr.last_seen_run_id AS parent_run_id, parent.input_hash AS parent_input_hash
@@ -193,7 +243,7 @@ async function currentExtraction(input: {
     .bind(extractionRunId, ingestionRunId, input.family, "1".repeat(64), artifactDigest,
       subject.parent_run_id, subject.parent_input_hash, "4".repeat(40), observedAt, observedAt, observedAt).run();
   const labelAssetIds: string[] = [];
-  for (const [index, outcome] of input.outcomes.entries()) {
+  for (const [index] of (input.retainLabels === false ? [] : input.outcomes).entries()) {
     const assetId = `${input.id}-asset-${index}`;
     labelAssetIds.push(assetId);
     await env.DB.prepare(`INSERT INTO label_evidence_assets
@@ -209,11 +259,12 @@ async function currentExtraction(input: {
       subject_source_content_hash, product_id, field_family, response_evidence_hash,
       status, prediction_count, candidate_count, rejection_count, failure_count,
       conflict_count, reasons_json, attempted_at, is_current)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '[]', ?, 1)`)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1)`)
     .bind(attemptId, extractionRunId, input.subjectSourceRecordId, subject.source_record_id,
       subject.content_hash, input.productId, input.family, "5".repeat(64), status,
-      predictionCount, candidateCount, rejectionCount, failureCount, observedAt).run();
-  for (const [index, outcome] of input.outcomes.entries()) {
+      predictionCount, candidateCount, rejectionCount, failureCount,
+      JSON.stringify(input.attemptReasonCodes ?? []), observedAt).run();
+  for (const [index, outcome] of (input.retainLabels === false ? [] : input.outcomes).entries()) {
     const candidate = outcome === "candidate" ? 1 : 0;
     const rejected = outcome === "rejected" ? 1 : 0;
     const failed = outcome === "failed" ? 1 : 0;
@@ -797,6 +848,164 @@ describe("completion ledger Worker API", () => {
       const response = await worker.fetch(`http://localhost/api/completion-ledger/${products.mixed}/labels?${query}`);
       expect(response.status).toBe(400);
     }
+  });
+
+  it("counts no-label failures once as residual exceptions without revoking independent evidence", async () => {
+    const sourceId = await ensureRobotoffSource("nutrition");
+    const officialSourceId = await ensureOfficialSource("nutrition");
+    const products = {
+      residual: "ledger-residual-attempt-only",
+      verified: "ledger-residual-attempt-verified",
+      terminal: "ledger-residual-attempt-terminal",
+    };
+    await env.DB.batch([
+      productStatement({
+        id: products.residual,
+        name: "Residual attempt accounting only",
+        nutritionImageUrl: "https://example.invalid/residual-only-label.jpg",
+      }),
+      productStatement({
+        id: products.verified,
+        name: "Residual attempt accounting verified",
+        nutritionImageUrl: "https://example.invalid/residual-verified-label.jpg",
+      }),
+      productStatement({
+        id: products.terminal,
+        name: "Residual attempt accounting terminal",
+        nutritionImageUrl: "https://example.invalid/residual-terminal-label.jpg",
+      }),
+      nutritionStatement(products.verified, "verified", 100),
+    ]);
+
+    await sourceRecord({
+      id: `${products.residual}-official`,
+      sourceId: officialSourceId,
+      productId: products.residual,
+      sourceUrl: "https://example.invalid/residual-only-official",
+      identityHash: "b".repeat(64),
+    });
+    await sourceRecord({
+      id: `${products.verified}-official`,
+      sourceId: officialSourceId,
+      productId: products.verified,
+      sourceUrl: "https://example.invalid/residual-verified-official",
+      identityHash: "c".repeat(64),
+    });
+    await env.DB.prepare("UPDATE nutrition_facts SET source_record_id = ? WHERE product_id = ?")
+      .bind(`${products.verified}-official`, products.verified).run();
+    await sourceRecord({
+      id: `${products.terminal}-official`,
+      sourceId: officialSourceId,
+      productId: products.terminal,
+      sourceUrl: "https://example.invalid/residual-terminal-official",
+    });
+    await verifyIdentityFromSource(
+      products.residual,
+      `${products.residual}-official`,
+      "https://example.invalid/residual-only-official",
+    );
+    await verifyIdentityFromSource(
+      products.verified,
+      `${products.verified}-official`,
+      "https://example.invalid/residual-verified-official",
+    );
+    await recordTerminalFromSource({
+      productId: products.residual,
+      sourceRecordId: `${products.residual}-official`,
+      family: "ingredients",
+      idempotencyKey: "terminal:completion:residual-only-ingredients",
+    });
+    await recordTerminalFromSource({
+      productId: products.verified,
+      sourceRecordId: `${products.verified}-official`,
+      family: "ingredients",
+      idempotencyKey: "terminal:completion:residual-verified-ingredients",
+    });
+    await recordTerminalFromSource({
+      productId: products.terminal,
+      sourceRecordId: `${products.terminal}-official`,
+      family: "nutrition",
+      idempotencyKey: "terminal:completion:residual-attempt",
+    });
+
+    for (const [key, productId] of Object.entries(products)) {
+      await sourceRecord({
+        id: `${productId}-subject`,
+        sourceId,
+        productId,
+        sourceUrl: `https://example.invalid/${key}-residual-subject`,
+      });
+      await currentExtraction({
+        id: `residual-${key}`,
+        family: "nutrition",
+        productId,
+        subjectSourceRecordId: `${productId}-subject`,
+        outcomes: ["failed"],
+        attemptReasonCodes: key === "residual"
+          ? ["label_http_error", "label_declared_size_exceeded", "label_http_error"]
+          : ["label_http_error"],
+        retainLabels: false,
+      });
+    }
+
+    const first = await ledger("family=nutrition&state=all&q=residual+attempt+accounting&pageSize=100");
+    const second = await ledger("family=nutrition&state=all&q=residual+attempt+accounting&pageSize=100");
+    expect(second.items).toEqual(first.items);
+    expect(first.items).toHaveLength(3);
+    expect(first.summary.accounted).toBe(first.summary.activeProducts);
+    expect(first.summary.invariantHolds).toBe(true);
+    const byId = new Map(first.items.map((item) => [item.product.id, item]));
+    expect(byId.get(products.residual)).toMatchObject({
+      state: "outstanding",
+      lane: "retry_extraction",
+      terminalOutcome: null,
+      extraction: { labels: 0, failed: 1, unattempted: 0 },
+      reasonCodes: ["extraction_failed", "label_declared_size_exceeded", "label_http_error"],
+      labels: [],
+      labelsTruncated: false,
+    });
+    expect(byId.get(products.verified)).toMatchObject({
+      state: "verified",
+      lane: null,
+      terminalOutcome: null,
+      extraction: { labels: 0, failed: 1, unattempted: 0 },
+      reasonCodes: [],
+    });
+    expect(byId.get(products.terminal)).toMatchObject({
+      state: "terminal_unavailable",
+      lane: null,
+      terminalOutcome: "not_declared",
+      extraction: { labels: 0, failed: 1, unattempted: 0 },
+      reasonCodes: [],
+    });
+
+    for (const [state, productId] of [
+      ["outstanding", products.residual],
+      ["verified", products.verified],
+      ["terminal_unavailable", products.terminal],
+    ] as const) {
+      const filtered = await ledger(`family=nutrition&state=${state}&q=residual+attempt+accounting&pageSize=100`);
+      expect(filtered.pagination.total).toBe(1);
+      expect(filtered.items.map(({ product }) => product.id)).toEqual([productId]);
+    }
+
+    const discovery = await json<{ products: Array<{ id: string; nutritionStatus: string }> }>(
+      await worker.fetch("http://localhost/api/products?trust=all&scope=all&q=Residual+attempt+accounting&pageSize=100"),
+    );
+    expect(discovery.products.find(({ id }) => id === products.residual)?.nutritionStatus).not.toBe("verified");
+    const [identityPrerequisites, ingredientPrerequisites] = await Promise.all([
+      ledger("family=identity&state=all&q=residual+attempt+accounting&pageSize=100"),
+      ledger("family=ingredients&state=all&q=residual+attempt+accounting&pageSize=100"),
+    ]);
+    expect(identityPrerequisites.items.find(({ product }) => product.id === products.residual))
+      .toMatchObject({ state: "verified", lane: null });
+    expect(ingredientPrerequisites.items.find(({ product }) => product.id === products.residual))
+      .toMatchObject({ state: "terminal_unavailable", lane: null, terminalOutcome: "not_declared" });
+    const trusted = await json<{ products: Array<{ id: string }> }>(await worker.fetch(
+      "http://localhost/api/products?trust=strict&scope=all&q=Residual+attempt+accounting&pageSize=100",
+    ));
+    expect(trusted.products.some(({ id }) => id === products.residual)).toBe(false);
+    expect(trusted.products.some(({ id }) => id === products.verified)).toBe(true);
   });
 
   it("removes an open candidate from review-ready when a newer retained byte revision replaces it", async () => {

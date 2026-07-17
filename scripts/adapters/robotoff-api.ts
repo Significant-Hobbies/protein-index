@@ -9,6 +9,12 @@ import { normalizeGtin, normalizeText, parseQuantity } from "../../shared/gtin";
 import { finiteNumber } from "../../shared/nutrition";
 import type { SourceManifest, StagedProduct } from "../../shared/types";
 import {
+  extractionAccountingSummary,
+  isResidualExceptionReason,
+  residualExceptionBoundsSatisfied,
+  validateDecisionDriftEvidence,
+  validateExtractionAccountingSummary,
+  validateExtractionOutcomePartition,
   validateExtractionAttempt,
   validateExtractionAttemptLabel,
   validateLabelEvidenceAsset,
@@ -25,6 +31,7 @@ import {
   createExtractionAttemptLabel,
   createLabelEvidenceAsset,
   hashHttpsLabelImage,
+  LabelImageHashError,
   labelReferenceFromUrl,
   labelAssetReuseKey,
   predictionLabelReference,
@@ -109,6 +116,37 @@ export interface RobotoffApiResult {
   checksumsPath: string;
   manifest: SourceManifest;
   outcomes: Record<OutcomeStatus, number>;
+}
+
+export interface RobotoffNutritionReport {
+  generatedAt: string;
+  sourceComplete: boolean;
+  marketComplete: false;
+  requestedBarcodes: number;
+  accountedBarcodes: number;
+  eligibleNutritionImages: number;
+  stagedRecords: number;
+  outcomes: Record<OutcomeStatus, number>;
+  issueCounts: Record<string, number>;
+  modelVersions: Record<string, number>;
+  fetchedBarcodes: number;
+  resumedBarcodes: number;
+  requests: number;
+  minimumIntervalMs: number;
+  confidenceThreshold: number;
+  requestSchema: string;
+  inputManifestHash: string | null;
+  extractionRunId: string;
+  parentSourceRunId: string;
+  labelAssets: number;
+  extractionAttempts: number;
+  extractionAttemptLabels: number;
+  outcomeAccountingComplete: boolean;
+  verificationComplete: boolean;
+  residualExceptionCount: number;
+  residualExceptionRate: number;
+  residualExceptionLimits: { maxCount: number; maxRate: number };
+  exclusions: { records: number; path: string; reconcilesIndiaSlice: boolean };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -316,6 +354,9 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
   if (contexts.length === 0) throw new Error("Robotoff extraction found no valid barcodes with nutrition label images.");
 
   await mkdir(options.outputDirectory, { recursive: true });
+  await unlink(join(options.outputDirectory, "decision-drift.json")).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
   const responsesDirectory = join(options.outputDirectory, "responses");
   await mkdir(responsesDirectory, { recursive: true });
   const cohortPath = join(options.outputDirectory, "cohort.jsonl");
@@ -487,7 +528,7 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
           conflictCount: 0,
           reasons: [reason],
           attemptedAt,
-          isCurrent: false,
+          isCurrent: true,
         });
         await writeLine(extractionAttemptOutput, failed);
         const outcome: ExtractionOutcome = { requestedCode: context.code, status: "failed", predictions: predictionRecords.length, candidates: 0, stagedRecords: 0, reasons: [reason] };
@@ -527,9 +568,9 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
           await writeLine(labelAssetOutput, asset);
           fetchedLabelAssets += 1;
         } catch (error) {
-          labelFailure = error instanceof Error && "code" in error && typeof error.code === "string"
+          labelFailure = error instanceof LabelImageHashError
             ? `label_${error.code}`
-            : "label_stream_read_failed";
+            : "label_internal_error";
           break;
         }
       }
@@ -550,7 +591,7 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
           conflictCount: 0,
           reasons: [labelFailure],
           attemptedAt,
-          isCurrent: false,
+          isCurrent: true,
         });
         await writeLine(extractionAttemptOutput, failed);
         const outcome: ExtractionOutcome = { requestedCode: context.code, status: "failed", predictions: predictionRecords.length, candidates: 0, stagedRecords: 0, reasons: [labelFailure] };
@@ -685,7 +726,12 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
     readFile(extractionAttemptsPath, "utf8").then((value) => parseJsonLines<ExtractionAttempt>(value, "extraction-attempts.jsonl")),
     readFile(extractionAttemptLabelsPath, "utf8").then((value) => parseJsonLines<ExtractionAttemptLabel>(value, "extraction-attempt-labels.jsonl")),
   ]);
-  const sourceComplete = outcomes.failed === 0;
+  const accounting = extractionAccountingSummary(contexts.length, accounted, outcomes.failed);
+  const residualFailuresAreEligible = extractionAttempts.filter(({ status }) => status === "failed").length === outcomes.failed
+    && extractionAttempts.filter(({ status }) => status === "failed").every(({ reasons }) => (
+      reasons.length === 1 && isResidualExceptionReason(reasons[0]!)
+    ));
+  const sourceComplete = residualExceptionBoundsSatisfied(accounting) && residualFailuresAreEligible;
   const manifest: SourceManifest = {
     schemaVersion: 1,
     source: "open_food_facts_robotoff",
@@ -703,6 +749,7 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
     mode: options.mode,
     terminalEvidence: sourceComplete ? "end_of_file" : "error",
     sourceComplete,
+    ...accounting,
     marketComplete: false,
     advertisedTotal: contexts.length,
     recordsRead: contexts.length,
@@ -717,7 +764,7 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
     knownExclusions: ["No nutrition-extraction prediction", "Prediction failed evidence validation"],
     disconnectedSources: ["gs1_india_datakart", "brand_owner_feeds"],
   };
-  const report = {
+  const report: RobotoffNutritionReport = {
     generatedAt: completedAt,
     sourceComplete,
     marketComplete: false,
@@ -740,6 +787,7 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
     labelAssets: labelAssets.length,
     extractionAttempts: extractionAttempts.length,
     extractionAttemptLabels: extractionAttemptLabels.length,
+    ...accounting,
     exclusions: {
       records: outcomes.no_prediction + outcomes.rejected + outcomes.failed,
       path: basename(exclusionsPath),
@@ -786,7 +834,7 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
 
 export interface RobotoffNutritionArtifact {
   manifest: SourceManifest;
-  report: Record<string, unknown>;
+  report: RobotoffNutritionReport;
   outcomes: ExtractionOutcome[];
   staged: StagedProduct[];
   labelAssets: LabelEvidenceAsset[];
@@ -794,7 +842,10 @@ export interface RobotoffNutritionArtifact {
   extractionAttemptLabels: ExtractionAttemptLabel[];
 }
 
-export async function validateRobotoffNutritionArtifact(directory: string): Promise<RobotoffNutritionArtifact> {
+export async function validateRobotoffNutritionArtifact(
+  directory: string,
+  options: { requireDecisionDrift?: boolean } = {},
+): Promise<RobotoffNutritionArtifact> {
   const files = {
     manifest: "manifest.json",
     report: "report.json",
@@ -827,7 +878,7 @@ export async function validateRobotoffNutritionArtifact(directory: string): Prom
     readFile(join(directory, files.checksums), "utf8"),
   ]);
   const manifest = JSON.parse(manifestText) as SourceManifest;
-  const report = JSON.parse(reportText) as Record<string, unknown>;
+  const report = JSON.parse(reportText) as RobotoffNutritionReport;
   const cohort = parseJsonLines<NutritionCohortRow>(cohortText, files.cohort);
   const outcomes = parseJsonLines<ExtractionOutcome>(outcomesText, files.outcomes);
   const staged = parseJsonLines<StagedProduct>(stagedText, files.staged);
@@ -850,12 +901,14 @@ export async function validateRobotoffNutritionArtifact(directory: string): Prom
     checksumByFile.set(file, match[1]);
   }
   const required = Object.values(files).filter((file) => file !== files.checksums);
+  const decisionDriftFile = await stat(join(directory, "decision-drift.json")).then(() => "decision-drift.json").catch(() => null);
+  if (options.requireDecisionDrift && !decisionDriftFile) throw new Error("Nutrition artifact is missing checksummed decision-drift evidence");
   const responseNames = (await readdir(join(directory, "responses"))).sort();
   const expectedResponseNames = cohort.map(({ code }) => `${code}.json`).sort();
   if (JSON.stringify(responseNames) !== JSON.stringify(expectedResponseNames)) {
     throw new Error("Nutrition artifact response files do not exactly match the cohort");
   }
-  const expectedFiles = new Set([...required, ...expectedResponseNames.map((name) => `responses/${name}`)]);
+  const expectedFiles = new Set([...required, ...(decisionDriftFile ? [decisionDriftFile] : []), ...expectedResponseNames.map((name) => `responses/${name}`)]);
   if (checksumByFile.size !== expectedFiles.size || [...checksumByFile.keys()].some((file) => !expectedFiles.has(file))) {
     throw new Error("Nutrition artifact checksums do not exactly match retained evidence files");
   }
@@ -868,10 +921,27 @@ export async function validateRobotoffNutritionArtifact(directory: string): Prom
   if (!manifest.sourceComplete || manifest.terminalEvidence !== "end_of_file" || report.sourceComplete !== true) {
     throw new Error("Nutrition artifact is not source complete");
   }
+  const manifestAccountingErrors = validateExtractionAccountingSummary(manifest, report.requestedBarcodes, report.accountedBarcodes, report.outcomes.failed);
+  const reportAccountingErrors = validateExtractionAccountingSummary(report, report.requestedBarcodes, report.accountedBarcodes, report.outcomes.failed);
+  if (manifestAccountingErrors.length > 0 || reportAccountingErrors.length > 0) {
+    throw new Error(`Nutrition artifact extraction accounting is invalid: ${[...manifestAccountingErrors, ...reportAccountingErrors].join("; ")}`);
+  }
   if (report.requestSchema !== ROBOTOFF_API_REQUEST_SCHEMA) throw new Error("Nutrition artifact request schema has drifted");
   if (typeof report.extractionRunId !== "string" || !/^xrun_[a-f0-9]{24}$/.test(report.extractionRunId)
     || typeof report.parentSourceRunId !== "string" || !/^run_[a-f0-9]{24}$/.test(report.parentSourceRunId)) {
     throw new Error("Nutrition artifact extraction lineage is incomplete");
+  }
+  if (decisionDriftFile) {
+    const decisionDrift = JSON.parse(await readFile(join(directory, decisionDriftFile), "utf8")) as unknown;
+    const decisionDriftErrors = validateDecisionDriftEvidence(decisionDrift, {
+      fieldFamily: "nutrition",
+      sourceId: manifest.source,
+      adapterVersion: manifest.adapterVersion,
+      inputHash: manifest.inputHash,
+      extractionRunId: report.extractionRunId,
+      parentSourceRunId: report.parentSourceRunId,
+    });
+    if (decisionDriftErrors.length > 0) throw new Error(`Nutrition decision-drift evidence is invalid: ${decisionDriftErrors.join("; ")}`);
   }
   if (report.labelAssets !== labelAssets.length || report.extractionAttempts !== extractionAttempts.length
     || report.extractionAttemptLabels !== extractionAttemptLabels.length) {
@@ -889,6 +959,14 @@ export async function validateRobotoffNutritionArtifact(directory: string): Prom
     cohortByCode.set(row.code, row);
     cohortBySourceKey.set(row.subjectSourceRecordKey, row);
   }
+  if (manifest.indiaRecords !== cohort.length
+    || manifest.recordsRead !== cohort.length
+    || manifest.advertisedTotal !== cohort.length
+    || report.requestedBarcodes !== cohort.length
+    || report.accountedBarcodes !== cohort.length
+    || report.eligibleNutritionImages !== cohort.length) {
+    throw new Error("Nutrition artifact cohort counts do not reconcile");
+  }
   const assetById = new Map<string, LabelEvidenceAsset>();
   for (const asset of labelAssets) {
     const errors = validateLabelEvidenceAsset(asset);
@@ -898,6 +976,8 @@ export async function validateRobotoffNutritionArtifact(directory: string): Prom
   }
   const attemptById = new Map<string, ExtractionAttempt>();
   const attemptByCode = new Map<string, ExtractionAttempt>();
+  const attemptBySubjectId = new Map<string, ExtractionAttempt>();
+  const allowedReferencesByAttempt = new Map<string, Map<string, LabelImageReference>>();
   for (const attempt of extractionAttempts) {
     const errors = validateExtractionAttempt(attempt);
     if (errors.length > 0) throw new Error(`Nutrition extraction attempt is invalid: ${errors.join("; ")}`);
@@ -908,10 +988,24 @@ export async function validateRobotoffNutritionArtifact(directory: string): Prom
       throw new Error("Nutrition extraction attempt does not match its accepted run or cohort subject");
     }
     if (attemptById.has(attempt.id) || attemptByCode.has(attempt.subjectSourceRecordKey)) throw new Error("Nutrition extraction attempt is duplicated");
-    const response = JSON.parse(await readFile(join(directory, "responses", `${subject.code}.json`), "utf8"));
+    const response = JSON.parse(await readFile(join(directory, "responses", `${subject.code}.json`), "utf8")) as StoredResponse;
+    if (response.requestedCode !== subject.code || response.requestSchema !== ROBOTOFF_API_REQUEST_SCHEMA
+      || !isRecord(response.response) || !Array.isArray(response.response.image_predictions)
+      || !response.response.image_predictions.every(isRecord)) {
+      throw new Error("Nutrition extraction response does not match its cohort subject or request schema");
+    }
     if (jsonHash(response) !== attempt.responseEvidenceHash) throw new Error("Nutrition extraction response evidence hash does not match");
+    const allowedReferences = new Map<string, LabelImageReference>();
+    const requestedReference = labelReferenceFromUrl(subject.nutritionImageUrl);
+    allowedReferences.set(requestedReference.url, requestedReference);
+    for (const prediction of response.response.image_predictions.filter((item) => item.type === "nutrition_extraction")) {
+      const reference = predictionLabelReference(prediction);
+      if (reference) allowedReferences.set(reference.url, reference);
+    }
     attemptById.set(attempt.id, attempt);
     attemptByCode.set(attempt.subjectSourceRecordKey, attempt);
+    attemptBySubjectId.set(attempt.subjectSourceRecordId, attempt);
+    allowedReferencesByAttempt.set(attempt.id, allowedReferences);
   }
   const labelsByAttempt = new Map<string, ExtractionAttemptLabel[]>();
   const labelIds = new Set<string>();
@@ -935,9 +1029,28 @@ export async function validateRobotoffNutritionArtifact(directory: string): Prom
     rows.push(label);
     labelsByAttempt.set(label.attemptId, rows);
   }
-  if (usedAssetIds.size !== assetById.size) throw new Error("Nutrition artifact contains an unlinked label asset");
+  for (const asset of labelAssets) {
+    const attempt = attemptBySubjectId.get(asset.subjectSourceRecordId);
+    const reference = attempt ? allowedReferencesByAttempt.get(attempt.id)?.get(asset.requestedUrl) : null;
+    if (!attempt || !reference || reference.sourceImageId !== asset.sourceImageId
+      || reference.sourceImageRevision !== asset.sourceImageRevision
+      || attempt.subjectSourceContentHash !== asset.subjectSourceContentHash
+      || attempt.productId !== asset.productId || attempt.fieldFamily !== asset.fieldFamily) {
+      throw new Error("Nutrition label asset is not an exact requested or prediction URL for its attempt subject");
+    }
+    if (!usedAssetIds.has(asset.id) && attempt.status !== "failed") {
+      throw new Error("Nutrition artifact contains an unlinked label asset outside a residual exception");
+    }
+  }
   for (const attempt of extractionAttempts) {
     const labels = labelsByAttempt.get(attempt.id) ?? [];
+    if (attempt.status === "failed") {
+      if (labels.length > 0 || attempt.candidateCount !== 0 || attempt.failureCount !== 1
+        || attempt.reasons.length !== 1 || !isResidualExceptionReason(attempt.reasons[0]!)) {
+        throw new Error("Nutrition residual exception has malformed or non-allow-listed provenance");
+      }
+      continue;
+    }
     if (!labels.some(({ role }) => role === "requested")) throw new Error("Nutrition attempt has no requested label outcome");
     for (const field of ["predictionCount", "candidateCount", "rejectionCount", "failureCount", "conflictCount"] as const) {
       if (attempt[field] !== labels.reduce((sum, label) => sum + label[field], 0)) {
@@ -945,13 +1058,35 @@ export async function validateRobotoffNutritionArtifact(directory: string): Prom
       }
     }
   }
+  const partitionErrors = validateExtractionOutcomePartition(cohort.map(({ code }) => code), outcomes.map(({ requestedCode }) => requestedCode));
+  if (partitionErrors.length > 0) throw new Error(`Nutrition outcome partition is invalid: ${partitionErrors.join("; ")}`);
   const outcomeByCode = new Map(outcomes.map((outcome) => [outcome.requestedCode, outcome]));
   if (outcomeByCode.size !== cohort.length || cohort.some((row) => attemptByCode.get(row.subjectSourceRecordKey)?.status !== outcomeByCode.get(row.code)?.status)) {
     throw new Error("Nutrition outcome ledger does not match exact attempts");
   }
+  const countedOutcomes: Record<OutcomeStatus, number> = { candidate: 0, no_prediction: 0, rejected: 0, failed: 0 };
+  for (const outcome of outcomes) {
+    if (!(outcome.status in countedOutcomes) || !cohortByCode.has(outcome.requestedCode)) throw new Error("Nutrition outcome is outside the cohort or unsupported");
+    countedOutcomes[outcome.status] += 1;
+    const attempt = attemptByCode.get(cohortByCode.get(outcome.requestedCode)!.subjectSourceRecordKey)!;
+    if (!Number.isSafeInteger(outcome.predictions) || outcome.predictions < 0
+      || !Number.isSafeInteger(outcome.candidates) || outcome.candidates < 0
+      || !Number.isSafeInteger(outcome.stagedRecords) || outcome.stagedRecords < 0
+      || outcome.predictions !== attempt.predictionCount
+      || outcome.candidates !== attempt.candidateCount
+      || (outcome.status === "failed" && (outcome.stagedRecords !== 0
+        || attempt.rejectionCount !== 0 || attempt.failureCount !== 1 || attempt.conflictCount !== 0))) {
+      throw new Error("Nutrition outcome counts do not match exact attempt provenance");
+    }
+    if (JSON.stringify(outcome.reasons) !== JSON.stringify(attempt.reasons)) throw new Error("Nutrition outcome reasons do not match exact attempt provenance");
+  }
+  if (JSON.stringify(countedOutcomes) !== JSON.stringify(report.outcomes)) throw new Error("Nutrition outcome distribution does not match its report");
   const indexByRecord = new Map(sourceIndex.map((row) => [row.sourceRecordId, row.contentHash]));
   if (sourceIndex.length !== staged.length || indexByRecord.size !== sourceIndex.length) {
     throw new Error("Nutrition source index does not exactly account for staged rows");
+  }
+  if (manifest.stagedRecords !== staged.length || report.stagedRecords !== staged.length) {
+    throw new Error("Nutrition artifact staged records do not reconcile");
   }
   const stagedCandidateHashes: string[] = [];
   for (const product of staged) {
@@ -984,6 +1119,12 @@ export async function validateRobotoffNutritionArtifact(directory: string): Prom
     throw new Error("Nutrition artifact model-version counts do not reconcile");
   }
   const expectedExclusions = outcomes.filter(({ status }) => status !== "candidate");
-  if (exclusions.length !== expectedExclusions.length) throw new Error("Nutrition exclusion accounting does not reconcile");
+  const canonicalExclusions = (rows: ExtractionOutcome[]) => [...rows]
+    .sort((left, right) => left.requestedCode.localeCompare(right.requestedCode))
+    .map((row) => JSON.stringify(row));
+  if (report.exclusions.records !== exclusions.length
+    || JSON.stringify(canonicalExclusions(exclusions)) !== JSON.stringify(canonicalExclusions(expectedExclusions))) {
+    throw new Error("Nutrition exclusion accounting does not reconcile");
+  }
   return { manifest, report, outcomes, staged, labelAssets, extractionAttempts, extractionAttemptLabels };
 }

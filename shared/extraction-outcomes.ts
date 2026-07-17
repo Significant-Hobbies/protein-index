@@ -1,10 +1,130 @@
 export const EXTRACTION_FIELD_FAMILIES = ["nutrition", "ingredients"] as const;
 export const EXTRACTION_OUTCOME_STATUSES = ["candidate", "no_prediction", "rejected", "failed"] as const;
 export const EXTRACTION_LABEL_ROLES = ["requested", "prediction"] as const;
+export const EXTRACTION_RESIDUAL_EXCEPTION_MAX_COUNT = 10;
+export const EXTRACTION_RESIDUAL_EXCEPTION_MAX_RATE = 0.0025;
+export const EXTRACTION_RESIDUAL_EXCEPTION_REASONS = [
+  "label_declared_size_exceeded",
+  "label_fetch_failed",
+  "label_http_error",
+  "label_request_timeout",
+  "label_stream_chunk_limit_exceeded",
+  "label_stream_missing",
+  "label_stream_read_failed",
+  "label_stream_size_exceeded",
+] as const;
 
 export type ExtractionFieldFamily = (typeof EXTRACTION_FIELD_FAMILIES)[number];
 export type ExtractionOutcomeStatus = (typeof EXTRACTION_OUTCOME_STATUSES)[number];
 export type ExtractionLabelRole = (typeof EXTRACTION_LABEL_ROLES)[number];
+export type ExtractionResidualExceptionReason = (typeof EXTRACTION_RESIDUAL_EXCEPTION_REASONS)[number];
+
+export interface ExtractionAccountingSummary {
+  outcomeAccountingComplete: boolean;
+  verificationComplete: boolean;
+  residualExceptionCount: number;
+  residualExceptionRate: number;
+  residualExceptionLimits: {
+    maxCount: typeof EXTRACTION_RESIDUAL_EXCEPTION_MAX_COUNT;
+    maxRate: typeof EXTRACTION_RESIDUAL_EXCEPTION_MAX_RATE;
+  };
+}
+
+export function extractionAccountingSummary(
+  requestedCount: number,
+  accountedCount: number,
+  failedCount: number,
+): ExtractionAccountingSummary {
+  if (!Number.isSafeInteger(requestedCount) || requestedCount <= 0) {
+    throw new Error("Extraction accounting requires a positive requested count");
+  }
+  if (!Number.isSafeInteger(accountedCount) || accountedCount < 0 || !Number.isSafeInteger(failedCount) || failedCount < 0) {
+    throw new Error("Extraction accounting counts must be non-negative safe integers");
+  }
+  return {
+    outcomeAccountingComplete: accountedCount === requestedCount,
+    verificationComplete: accountedCount === requestedCount && failedCount === 0,
+    residualExceptionCount: failedCount,
+    residualExceptionRate: failedCount / requestedCount,
+    residualExceptionLimits: {
+      maxCount: EXTRACTION_RESIDUAL_EXCEPTION_MAX_COUNT,
+      maxRate: EXTRACTION_RESIDUAL_EXCEPTION_MAX_RATE,
+    },
+  };
+}
+
+export function residualExceptionBoundsSatisfied(summary: ExtractionAccountingSummary): boolean {
+  return summary.outcomeAccountingComplete
+    && summary.residualExceptionCount <= EXTRACTION_RESIDUAL_EXCEPTION_MAX_COUNT
+    && summary.residualExceptionRate <= EXTRACTION_RESIDUAL_EXCEPTION_MAX_RATE;
+}
+
+export function isResidualExceptionReason(value: string): value is ExtractionResidualExceptionReason {
+  return (EXTRACTION_RESIDUAL_EXCEPTION_REASONS as readonly string[]).includes(value);
+}
+
+export function validateExtractionOutcomePartition(
+  requestedSubjects: readonly string[],
+  outcomeSubjects: readonly string[],
+): string[] {
+  const errors: string[] = [];
+  const requested = new Set(requestedSubjects);
+  const outcomes = new Set(outcomeSubjects);
+  if (requested.size !== requestedSubjects.length) errors.push("requested extraction subjects contain duplicates");
+  if (outcomes.size !== outcomeSubjects.length) errors.push("extraction outcomes contain duplicate subjects");
+  for (const subject of requested) if (!outcomes.has(subject)) errors.push(`extraction outcome is missing for ${subject}`);
+  for (const subject of outcomes) if (!requested.has(subject)) errors.push(`extraction outcome is outside the requested set: ${subject}`);
+  return errors;
+}
+
+export function validateDecisionDriftEvidence(value: unknown, expected: {
+  fieldFamily: ExtractionFieldFamily;
+  sourceId: string;
+  adapterVersion: string;
+  inputHash: string | null;
+  extractionRunId: string;
+  parentSourceRunId: string;
+}): string[] {
+  const input = record(value);
+  const artifact = record(input?.artifact);
+  const policy = record(input?.policy);
+  const failOn = Array.isArray(policy?.failOn) ? policy.failOn : [];
+  const failures = Array.isArray(policy?.failures) ? policy.failures : null;
+  const errors: string[] = [];
+  if (input?.schemaVersion !== 1) errors.push("decision-drift schema version is not supported");
+  for (const [field, expectedValue] of Object.entries(expected)) {
+    if (artifact?.[field] !== expectedValue) errors.push(`decision-drift artifact ${field} does not match`);
+  }
+  if (artifact?.sourceComplete !== true) errors.push("decision-drift artifact is not source complete");
+  if (input?.hasHardFailure !== false) errors.push("decision-drift audit has a hard failure");
+  if (!failOn.includes("candidate_key_active_state_ambiguous")) errors.push("decision-drift policy omits ambiguous active candidates");
+  if (policy?.passed !== true || failures === null || failures.length !== 0) errors.push("decision-drift policy did not pass");
+  return errors;
+}
+
+export function validateExtractionAccountingSummary(
+  value: unknown,
+  requestedCount: number,
+  accountedCount: number,
+  failedCount: number,
+): string[] {
+  const expected = extractionAccountingSummary(requestedCount, accountedCount, failedCount);
+  const input = record(value);
+  if (!input) return ["extraction accounting summary must be an object"];
+  const limits = record(input.residualExceptionLimits);
+  const errors: string[] = [];
+  if (input.outcomeAccountingComplete !== expected.outcomeAccountingComplete) errors.push("outcome accounting completeness does not match the exact partition");
+  if (input.verificationComplete !== expected.verificationComplete) errors.push("verification completeness does not match the failed outcome count");
+  if (input.residualExceptionCount !== expected.residualExceptionCount) errors.push("residual exception count does not match failed outcomes");
+  if (input.residualExceptionRate !== expected.residualExceptionRate) errors.push("residual exception rate does not match requested barcodes");
+  if (limits?.maxCount !== EXTRACTION_RESIDUAL_EXCEPTION_MAX_COUNT || limits.maxRate !== EXTRACTION_RESIDUAL_EXCEPTION_MAX_RATE) {
+    errors.push("residual exception limits differ from the fixed policy");
+  }
+  if (!expected.outcomeAccountingComplete) errors.push("requested and outcome sets do not form an exact partition");
+  if (expected.residualExceptionCount > EXTRACTION_RESIDUAL_EXCEPTION_MAX_COUNT) errors.push("residual exception count exceeds the fixed limit");
+  if (expected.residualExceptionRate > EXTRACTION_RESIDUAL_EXCEPTION_MAX_RATE) errors.push("residual exception rate exceeds the fixed limit");
+  return errors;
+}
 
 export interface ExtractionRun {
   id: string;

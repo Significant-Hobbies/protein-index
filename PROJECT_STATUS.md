@@ -194,8 +194,9 @@ the strict terminal-evidence gate above is actually satisfied.
 - 2026-07-17 — the local completion worklist now provides deliberate exact-source/label selection, complete decision lineage, stale-evidence refresh without losing rationale, typed errors, bounded exhaustive option loading, responsive keyboard-safe dialogs, and success/refresh-failure announcements. Mobile catalog cards expose separate nutrition and ingredient evidence states, and the public CSP no longer advertises unused provider-analytics endpoints. Real Chrome checks at desktop and 390 px show zero horizontal overflow and zero console warnings/errors; the full `pnpm check` passes 188 unit and 53 Worker tests plus typecheck and production build.
 - 2026-07-17 — replacement exact-label runs are terminal, exhaustively accounted diagnostics rather than publishable evidence. Nutrition run `29576061035` accounted for all 5,944 eligible barcodes as 1,584 candidate, 805 no-prediction, 3,551 rejected, and 4 explicit failures (three label HTTP errors and one declared-size violation); ingredient run `29574516752` accounted for all 5,196 as 3,351 candidate, 1,242 no-prediction, 595 rejected, and 8 explicit failures (five label HTTP errors and three declared-size violations). Both runs reproduced the failed set through three zero-fetch cached retries, passed independent structural/reason accounting for their immutable diagnostics artifacts, skipped candidate publication and automatic D1 publication with zero write steps, and left production unchanged.
 - 2026-07-17 — extraction retry caching now requires a prior terminal non-failed outcome before reusing an exact API response. Failed, missing, and incomplete outcomes refetch on the next pass, while candidate, no-prediction, and rejected outcomes retain deterministic reuse; exact-snapshot restoration carries the checksummed outcome ledger with the response cache. Regression tests cover both nutrition and ingredient adapters. Because the failed ingredient artifact did not upload successful response files, one replacement exhaustive run is still required before later retries become network-bounded to only failed items.
-- 2026-07-17 — the GitHub `production` environment currently has repository Cloudflare credentials but no required reviewer or wait-time protection, while `publish-automatic-evidence.yml` reacts to successful extraction runs. Pending migrations still make the current downstream path fail closed before import, but automatic D1 publication must be disabled or given a hard manual approval gate before those migrations are applied.
+- 2026-07-17 — fresh-evidence publication is now explicitly manual in the repository: successful source, enrichment, nutrition, and ingredient workflows trigger no credentialed publication job. A separate dispatch requires the exact successful run plus the hard confirmation phrase, runs the current publisher against an ancestor commit only, pins the supported source/adapter family, verifies the downloaded archive digest, byte size, internal checksums, source, and decision-drift evidence before credentials, and cannot apply migrations. Production data remains unchanged.
 - 2026-07-17 — strict trust and explicit exception accounting are implemented locally. `0015_strict_trust_and_terminal_authority.sql` admits source-only unavailable evidence only from current official/brand authority-100 records, keeps exact retained label bytes eligible, and limits Trusted products to exact-current identity, verified nutrition, and terminal ingredient evidence. `0016_effective_current_evidence.sql` through `0018_reviewed_fact_time_boundary.sql` make completion, Discovery, coverage, detail evidence links, and Trusted share one exact-current boundary; stale source observations and replaced label bytes downgrade visibly, while stale unavailable history can recover through newer exact verified facts. Terminal ingredient evidence is displayed explicitly rather than as a misleading missing/unverified statement. Extraction reason codes survive the API and appear in the exhaustive worklist. The local migrations, 196 unit tests, 58 Worker tests, typecheck, production build, startup profile, deploy dry-run, desktop smoke test, and 390 px no-overflow check pass.
+- 2026-07-17 — bounded residual extraction is implemented locally with an exact one-outcome-per-barcode partition, separate accounting and verification completeness, fixed limits of at most 10 and at most 0.25%, allow-listed post-response label failures only, checksummed raw-response/label/decision-drift provenance, and zero fact or unavailable-state promotion from failures. Attempt-only failures remain visible as outstanding retry work and outside Trusted without revoking independent exact-current evidence. Nutrition and ingredient 400-product parity/replay tests, 214 unit tests, 59 Worker tests, a fresh 18-migration replay, typecheck, build, Worker startup profile, deploy dry-run, and strict OpenSpec validation pass. Replacement exhaustive artifacts are still required before any production publication.
 
 ## Products
 
@@ -269,10 +270,11 @@ the strict terminal-evidence gate above is actually satisfied.
   ingredient rows and exact provenance, while source drift revokes verified trust
 - Nutrition and ingredient decisions share a checksum-validated, commit-pinned,
   idempotent publication and postcondition path
-- Successful source and label-evidence workflows route exact checksummed
-  artifacts into one credential-scoped automatic publication lock; community data stays
-  unverified, model output stays review-only, pending migrations fail closed,
-  and durable pre/post/live evidence is retained for manual recovery
+- Successful source and label-evidence workflows retain exact checksummed
+  artifacts without triggering publication; a separately confirmed manual workflow
+  runs the current publisher, pins the selected ancestor run and artifact bytes,
+  keeps community/model evidence unverified and review-only, refuses pending
+  migrations, and retains durable pre/post/live evidence
 - Dimension-safe liquid-label evidence with explicit per-100-mL extraction,
   review, provenance, idempotent publication, and basis-aware metrics
 - Exact byte-bound label evidence with immutable extraction runs, source/hash-
@@ -331,19 +333,17 @@ the strict terminal-evidence gate above is actually satisfied.
     redundant-evidence, and completion-ledger code, then prove the live family
     accounting invariants and repeat API, desktop/mobile visual, and
     accessibility verification before calling the release shipped.
-16. Blocked data refresh: protected Cloudflare credentials are now configured,
-    but pending migrations `0007_review_queue_indexes.sql`,
+16. Blocked data refresh: protected Cloudflare credentials are configured, but
+    pending migrations `0007_review_queue_indexes.sql`,
     `0008_redundant_evidence_decisions.sql`, and
     `0009_extraction_outcome_ledger.sql` through
-    `0018_reviewed_fact_time_boundary.sql` require an explicit production
-    migration before automatic publication can proceed. Automatic
-    run `29511127992` proved the current credential and artifact route, then
-    failed closed before import or write; earlier runs `29449999090`,
-    `29474290721`, and `29495130626` remain durable evidence of the prior empty
-    credential state.
-    Before applying those migrations, require manual approval for
-    `publish-automatic-evidence.yml`; the current `production` environment has
-    no platform reviewer gate.
+    `0018_reviewed_fact_time_boundary.sql` still require separate explicit
+    production authorization. The repository-level manual publication gate is
+    implemented and producer completion now causes zero publication jobs; the
+    evidence workflow cannot apply migrations. Historical run `29511127992`
+    proved the credential and artifact route before failing closed on pending
+    migrations, while runs `29449999090`, `29474290721`, and `29495130626`
+    retain evidence of the earlier empty credential state.
 17. The 13 adapter-v7 replacement bundles are committed and all 18 allowed
     bundles pass portable checksums plus semantic bundle validation: 312 unique
     decisions across 312 source records, with 23 verifications and 289
