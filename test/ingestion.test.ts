@@ -340,12 +340,6 @@ describe("Robotoff ingredient evidence", () => {
         taxonomyRecognition: { belowSixtyPercent: 1, atLeastSixtyPercent: 0 },
       },
     });
-    await writeFile(
-      join(outputDirectory, "prior-label-assets.jsonl"),
-      await readFile(first.labelAssetsPath, "utf8"),
-      "utf8",
-    );
-
     const resumed = await extractRobotoffIngredientApi({
       input: source.stagedPath,
       inputManifest: source.manifestPath,
@@ -3011,12 +3005,6 @@ describe("Robotoff label evidence", () => {
     database.exec("ROLLBACK");
     expect(database.prepare("SELECT COUNT(*) AS assets FROM label_evidence_assets").get()).toEqual({ assets: 2 });
     database.close();
-    await writeFile(
-      join(outputDirectory, "prior-label-assets.jsonl"),
-      await readFile(result.labelAssetsPath, "utf8"),
-      "utf8",
-    );
-
     const resumed = await extractRobotoffApi({
       input: source.stagedPath,
       inputManifest: source.manifestPath,

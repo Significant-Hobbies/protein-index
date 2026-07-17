@@ -91,6 +91,10 @@ documented request limit, and records every eligible barcode as candidate,
 no-prediction, rejected, or failed. Model output never becomes verified
 nutrition automatically; an operator must review the current label image, and
 verification applies that exact candidate with its provenance.
+Exact label downloads have a 30-second total deadline plus byte and chunk
+limits. A failed workflow pass reuses every validated label hash already written
+by that same run, so later passes retry only incomplete evidence instead of
+downloading the successful cohort again.
 
 Mass and liquid labels remain dimensionally separate throughout extraction and
 review. Direct liquid rows are retained as per 100 mL. A serving-only liquid row

@@ -182,6 +182,7 @@ must pass desktop/mobile verification.
 - 2026-07-17 — exact label-byte extraction evidence is implemented locally: bounded HTTPS image hashing, immutable extraction runs/assets/attempts/per-label outcomes, deterministic replay-collision guards, current-attempt supersession, exact candidate and human-decision linkage, and fail-closed completion lanes now preserve candidate, no-prediction, rejected, failed, unattempted, and stale states without promoting automated output. Nutrition adapter v8 and ingredient adapter v3 artifacts require portable byte-hash ledgers; legacy artifacts cannot be backfilled truthfully because they did not retain the fetched label bytes, and the known unsafe v5/v6 workflow runs plus artifacts are explicitly denied. Local migration `0009_extraction_outcome_ledger.sql`, the complete test/build/release dry-run, and rendered desktop/mobile coverage checks pass. Production remains unchanged at 17,628 active products, 55 verified nutrition facts, and 65 verified ingredient statements; migrations `0007`, `0008`, and `0009`, a fresh v8/v3 extraction, publication, and deployment still require explicit production approval.
 - 2026-07-17 — the default catalog comparison now presents protein per 100 calories, protein grams, and energy together on desktop and mobile instead of hiding calories in product detail. Missing energy remains explicit, rendered contract tests cover both present and absent values, and live local checks at 1,440 px and 390 px confirm zero page overflow, zero console issues, and an intact compact card/table hierarchy; the full 166-test/type/build check passes and production remains unchanged pending release approval.
 - 2026-07-17 — future nutrition-v8 and ingredient-v3 producer workflows now audit every checked-in reviewed decision against the exact checksum-validated artifact before uploading publishable candidates. Hard proof failures and ambiguous active decisions stop candidate publication, while a separate 30-day report uploads under the failure path for diagnosis; the focused 62-test ingestion contract passes and production remains unchanged.
+- 2026-07-17 — exact label hashing now aborts any response or stalled body after 30 seconds instead of allowing one image to consume the four-hour workflow timeout. Multi-pass extraction also validates and reuses successful label assets written by the immediately preceding pass, so transient failures retry only incomplete evidence rather than re-downloading thousands of images; 72 focused tests plus typecheck pass and production remains unchanged.
 
 ## Products
 
@@ -265,6 +266,8 @@ must pass desktop/mobile verification.
   bounded multi-label detail and product-specific accessible action names
 - Producer-side reviewed-decision drift audits that fail closed before candidate
   upload and retain a separate diagnostic report without production credentials
+- Bounded exact-label networking with a 30-second per-image deadline and
+  same-run validated asset reuse across transient retry passes
 
 ## Todo / Planned / Deferred / Blocked
 

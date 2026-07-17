@@ -62,6 +62,32 @@ describe("label image hashing", () => {
     });
   });
 
+  it("aborts a label request that never returns a response", async () => {
+    await expect(hashHttpsLabelImage({
+      url: "https://images.openfoodfacts.org/label.jpg",
+      timeoutMilliseconds: 5,
+      fetcher: async (_input, init) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      }),
+    })).rejects.toMatchObject({
+      code: "request_timeout",
+      message: "Label image request exceeded 5 milliseconds.",
+    });
+  });
+
+  it("aborts a response body that stops streaming", async () => {
+    await expect(hashHttpsLabelImage({
+      url: "https://images.openfoodfacts.org/label.jpg",
+      timeoutMilliseconds: 5,
+      fetcher: async (_input, init) => new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([0xff, 0xd8]));
+          init?.signal?.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")), { once: true });
+        },
+      }), { headers: { "content-type": "image/jpeg" } }),
+    })).rejects.toMatchObject({ code: "request_timeout" });
+  });
+
   it("rejects a redirect that leaves HTTPS", async () => {
     const redirected = chunkedResponse([new Uint8Array([1])]);
     Object.defineProperty(redirected, "url", { value: "http://images.openfoodfacts.org/label.jpg" });

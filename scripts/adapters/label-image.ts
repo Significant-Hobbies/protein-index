@@ -12,6 +12,7 @@ import type { StagedProduct } from "../../shared/types";
 
 export const DEFAULT_LABEL_IMAGE_MAX_BYTES = 12 * 1024 * 1024;
 export const DEFAULT_LABEL_IMAGE_MAX_CHUNKS = 65_536;
+export const DEFAULT_LABEL_IMAGE_TIMEOUT_MS = 30_000;
 
 export type LabelImageFetchLike = (
   input: string | URL | Request,
@@ -37,6 +38,7 @@ export type LabelImageHashErrorCode =
   | "invalid_url"
   | "insecure_url"
   | "fetch_failed"
+  | "request_timeout"
   | "http_error"
   | "invalid_redirect"
   | "invalid_media_type"
@@ -195,6 +197,21 @@ export async function readPriorLabelAssets(path: string): Promise<Map<string, La
   return assets;
 }
 
+export async function readReusableLabelAssets(paths: string[]): Promise<Map<string, LabelEvidenceAsset>> {
+  const merged = new Map<string, LabelEvidenceAsset>();
+  for (const path of paths) {
+    const assets = await readPriorLabelAssets(path);
+    for (const [key, asset] of assets) {
+      const existing = merged.get(key);
+      if (existing && existing.id !== asset.id) {
+        throw new Error(`Reusable label evidence conflicts for ${key}`);
+      }
+      merged.set(key, asset);
+    }
+  }
+  return merged;
+}
+
 function parseHttpsUrl(value: string, code: "invalid_url" | "invalid_redirect"): URL {
   let parsed: URL;
   try {
@@ -240,76 +257,94 @@ export async function hashHttpsLabelImage(options: {
   fetcher?: LabelImageFetchLike;
   maximumBytes?: number;
   maximumChunks?: number;
+  timeoutMilliseconds?: number;
   userAgent?: string;
   now?: () => Date;
 }): Promise<HashedLabelImage> {
   const requested = parseHttpsUrl(options.url, "invalid_url");
   const maximumBytes = options.maximumBytes ?? DEFAULT_LABEL_IMAGE_MAX_BYTES;
   const maximumChunks = options.maximumChunks ?? DEFAULT_LABEL_IMAGE_MAX_CHUNKS;
+  const timeoutMilliseconds = options.timeoutMilliseconds ?? DEFAULT_LABEL_IMAGE_TIMEOUT_MS;
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
     throw new RangeError("Label image maximumBytes must be a positive safe integer.");
   }
   if (!Number.isSafeInteger(maximumChunks) || maximumChunks < 1) {
     throw new RangeError("Label image maximumChunks must be a positive safe integer.");
   }
+  if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds < 1) {
+    throw new RangeError("Label image timeoutMilliseconds must be a positive safe integer.");
+  }
 
   const fetcher = options.fetcher ?? fetch;
-  let response: Response;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMilliseconds);
   try {
-    response = await fetcher(requested, {
-      headers: {
-        Accept: "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8",
-        ...(options.userAgent ? { "User-Agent": options.userAgent } : {}),
-      },
-      redirect: "follow",
-    });
-  } catch {
-    throw new LabelImageHashError("fetch_failed", "Label image request failed before a response was received.");
-  }
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => undefined);
-    throw new LabelImageHashError("http_error", `Label image returned HTTP ${response.status}.`);
-  }
-  const effective = parseHttpsUrl(response.url || requested.toString(), "invalid_redirect");
-  const mediaType = imageMediaType(response.headers.get("content-type"));
-  const expectedLength = declaredLength(response.headers.get("content-length"), maximumBytes);
-  if (!response.body) throw new LabelImageHashError("stream_missing", "Label image response has no readable body.");
-
-  const reader = response.body.getReader();
-  const hash = createHash("sha256");
-  let byteLength = 0;
-  let chunks = 0;
-  try {
-    for (;;) {
-      const item = await reader.read();
-      if (item.done) break;
-      if (!item.value) continue;
-      chunks += 1;
-      if (chunks > maximumChunks) {
-        throw new LabelImageHashError("stream_chunk_limit_exceeded", `Label image stream exceeds ${maximumChunks} chunks.`);
+    let response: Response;
+    try {
+      response = await fetcher(requested, {
+        headers: {
+          Accept: "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8",
+          ...(options.userAgent ? { "User-Agent": options.userAgent } : {}),
+        },
+        redirect: "follow",
+        signal: controller.signal,
+      });
+    } catch {
+      if (controller.signal.aborted) {
+        throw new LabelImageHashError("request_timeout", `Label image request exceeded ${timeoutMilliseconds} milliseconds.`);
       }
-      byteLength += item.value.byteLength;
-      if (byteLength > maximumBytes) {
-        throw new LabelImageHashError("stream_size_exceeded", `Label image stream exceeds ${maximumBytes} bytes.`);
-      }
-      hash.update(item.value);
+      throw new LabelImageHashError("fetch_failed", "Label image request failed before a response was received.");
     }
-  } catch (error) {
-    await reader.cancel().catch(() => undefined);
-    if (error instanceof LabelImageHashError) throw error;
-    throw new LabelImageHashError("stream_read_failed", "Label image stream could not be read completely.");
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new LabelImageHashError("http_error", `Label image returned HTTP ${response.status}.`);
+    }
+    const effective = parseHttpsUrl(response.url || requested.toString(), "invalid_redirect");
+    const mediaType = imageMediaType(response.headers.get("content-type"));
+    const expectedLength = declaredLength(response.headers.get("content-length"), maximumBytes);
+    if (!response.body) throw new LabelImageHashError("stream_missing", "Label image response has no readable body.");
+
+    const reader = response.body.getReader();
+    const hash = createHash("sha256");
+    let byteLength = 0;
+    let chunks = 0;
+    try {
+      for (;;) {
+        const item = await reader.read();
+        if (item.done) break;
+        if (!item.value) continue;
+        chunks += 1;
+        if (chunks > maximumChunks) {
+          throw new LabelImageHashError("stream_chunk_limit_exceeded", `Label image stream exceeds ${maximumChunks} chunks.`);
+        }
+        byteLength += item.value.byteLength;
+        if (byteLength > maximumBytes) {
+          throw new LabelImageHashError("stream_size_exceeded", `Label image stream exceeds ${maximumBytes} bytes.`);
+        }
+        hash.update(item.value);
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      if (error instanceof LabelImageHashError) throw error;
+      if (controller.signal.aborted) {
+        throw new LabelImageHashError("request_timeout", `Label image request exceeded ${timeoutMilliseconds} milliseconds.`);
+      }
+      throw new LabelImageHashError("stream_read_failed", "Label image stream could not be read completely.");
+    } finally {
+      reader.releaseLock();
+    }
+    if (expectedLength !== null && expectedLength !== byteLength) {
+      throw new LabelImageHashError("stream_read_failed", "Label image byte length does not match Content-Length.");
+    }
+    return {
+      requestedUrl: requested.toString(),
+      effectiveUrl: effective.toString(),
+      contentSha256: hash.digest("hex"),
+      byteLength,
+      mediaType,
+      fetchedAt: (options.now ?? (() => new Date()))().toISOString(),
+    };
   } finally {
-    reader.releaseLock();
+    clearTimeout(timeout);
   }
-  if (expectedLength !== null && expectedLength !== byteLength) {
-    throw new LabelImageHashError("stream_read_failed", "Label image byte length does not match Content-Length.");
-  }
-  return {
-    requestedUrl: requested.toString(),
-    effectiveUrl: effective.toString(),
-    contentSha256: hash.digest("hex"),
-    byteLength,
-    mediaType,
-    fetchedAt: (options.now ?? (() => new Date()))().toISOString(),
-  };
 }

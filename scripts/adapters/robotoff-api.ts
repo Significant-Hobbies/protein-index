@@ -26,7 +26,7 @@ import {
   labelReferenceFromUrl,
   labelAssetReuseKey,
   predictionLabelReference,
-  readPriorLabelAssets,
+  readReusableLabelAssets,
   stableExtractionId,
   stagedProductId,
   stagedSourceRecordId,
@@ -312,7 +312,6 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
   if (contexts.length === 0) throw new Error("Robotoff extraction found no valid barcodes with nutrition label images.");
 
   await mkdir(options.outputDirectory, { recursive: true });
-  const priorLabelAssets = await readPriorLabelAssets(join(options.outputDirectory, "prior-label-assets.jsonl"));
   const responsesDirectory = join(options.outputDirectory, "responses");
   await mkdir(responsesDirectory, { recursive: true });
   const cohortPath = join(options.outputDirectory, "cohort.jsonl");
@@ -326,6 +325,10 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
   const manifestPath = join(options.outputDirectory, "manifest.json");
   const reportPath = join(options.outputDirectory, "report.json");
   const checksumsPath = join(options.outputDirectory, "checksums.sha256");
+  const priorLabelAssets = await readReusableLabelAssets([
+    join(options.outputDirectory, "prior-label-assets.jsonl"),
+    labelAssetsPath,
+  ]);
   await writeFile(cohortPath, `${contexts.map((context) => JSON.stringify(cohortRow(context))).join("\n")}\n`, "utf8");
   const labelAssetOutput = createWriteStream(labelAssetsPath, { encoding: "utf8" });
   const extractionAttemptOutput = createWriteStream(extractionAttemptsPath, { encoding: "utf8" });
