@@ -6,6 +6,7 @@ import type {
   ProductCategory,
   ProductMetrics,
 } from "./types";
+import type { SelectedNutritionProjection } from "./evidence-decisions";
 
 export interface ApiErrorBody {
   error: {
@@ -104,12 +105,26 @@ export interface ReviewItem {
     category: ProductCategory;
   }>;
   evidence: unknown;
+  selectedProjection: SelectedNutritionProjection | null;
+  redundantProjectionMatches: boolean;
+  redundantEligible: boolean;
   createdAt: string;
-  decision: string | null;
+  decision: ReviewDecision | null;
   rationale: string | null;
   decisionEvidenceUrl: string | null;
   decidedBy: string | null;
 }
+
+export type ReviewDecision =
+  | "verify_nutrition"
+  | "reject_nutrition"
+  | "redundant_nutrition"
+  | "verify_ingredients"
+  | "reject_ingredients"
+  | "dismiss"
+  | "match"
+  | "create_new"
+  | "no_match";
 
 export type ReviewStatus = "open" | "resolved" | "dismissed";
 

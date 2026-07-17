@@ -176,6 +176,7 @@ must pass desktop/mobile verification.
 - 2026-07-17 — official adapter-v7 nutrition run `29554006451` on commit `b191958c3b76773fdfbf315fa20fc8e35050825b` restored the exact adapter-v6 response cohort and reconciled all 5,944 barcodes to 1,586 candidate, 806 no-prediction, 3,552 rejected, and zero failed outcomes. Artifact `8396783388` has immutable digest `7193f3845e2006bd3095fcfa093054033223c10555020649d32a5a4eababa2ff`, size 79,034,802 bytes, and all 5,950 checksums. Automatic publication run `29554063920` validated every checksum, then failed closed on pending remote D1 migration `0007_review_queue_indexes.sql` before import or live verification; production and verified coverage remain unchanged.
 - 2026-07-17 — the validated adapter-v7 decision plan rebuilds all 12 affected lineages and adds one whole-wheat-bread supplemental: `review-0793ac6010da3d71f11d` → `review-e380c0d96d4e55bc7963`, `review-9c7ac1f9e044ed7bce6e` → `review-e1c5dcaa7a70bbf66c0b`, `review-6b5e8b66259669560d75` → `review-e22b9494cc7630dddaed`, `review-faa4134c08f801a2e6b1` → `review-85eb6ae94d0b52de26e2`, `review-ca0eeaed8172acd296f7` → `review-22fa92e7ed8d92627afa`, `review-8883bc8d43df33874d89` → `review-b05156f6793aadb55c99`, `review-da7916603d7a22ce5438` → `review-6890ec21567c9cf15f00`, `review-27b91f477250983ad924` → `review-2960e3aee8761e63892c`, `review-6fff7ea5a1fd804e4dae` → `review-8b280c8db601d8c6e65b`, `review-0be1624d0d7aff83b24d` → `review-68fb6b0243dc187d0f16`, `review-ab8f46a1be339c4367c4` → `review-0e178dc60b1a55a12791`, and `review-2a0863c88dd1d8bd4b99` → `review-24d15bfc4330572bed80`; supplemental `review-5bc43cc6a4badbbd2718` rejects the bread candidate. The 13 new bundles contain 243 decisions, including 23 v7 decisions (22 rejections and one verification), with two obsolete decisions omitted. They have no internal overlap or global overlap with the five surviving bundles `review-230fca7ea00663c6c05e`, `review-35df940b2a5dff4da6b0`, `review-e9a215051b2fe4662517`, `review-174cdb19d84d9fd99525`, and `review-75a54506b4d31f98265d`. Read-only production preflight found only two intentional changed-hash same-source supersessions in the replacement for `review-0793ac6010da3d71f11d`, with no exact duplicates or decision conflicts; production remains unchanged.
 - 2026-07-17 — the next dashboard candidate completed rendered desktop, tablet, and phone verification with independent nutrition/ingredient evidence filters, deterministic review-queue traversal, public label/source links, fuller product metadata, honest retailer/allergen empty states, 44 px controls, and corrected responsive card behavior. Local desktop and mobile Lighthouse runs score 100 for performance, accessibility, best practices, and SEO; keyboard navigation, live regions, zero console errors, and zero horizontal overflow were verified. The updated build is not yet deployed, so live post-deploy verification remains pending explicit release approval.
+- 2026-07-17 — truthful redundant nutrition evidence is implemented locally for exact duplicate labels: authority-100 all-field/basis matching, atomic review-only decisions, zero fact/observation/nutrient/outcome writes, drift deactivation and re-review, immutable bundle guards, and distinct operator/history UI. Local end-to-end replay proved one review moved from open to resolved while verified nutrition stayed at one; desktop and mobile Lighthouse accessibility, best-practices, SEO, and agentic-browsing scores remain 100. Migration `0008_redundant_evidence_decisions.sql` is local-only and production remains unchanged pending explicit release approval.
 
 ## Products
 
@@ -279,25 +280,32 @@ must pass desktop/mobile verification.
 14. Continue publishing real reviewed decisions only after exact source/hash
     validation; every publication must verify the live coverage delta and retain
     workflow diagnostics.
-15. Pending explicit release approval: deploy the browser-verified dashboard
-    candidate, then repeat live API, desktop/mobile visual, and accessibility
+15. Pending explicit release approval: apply the compatible production
+    migrations, deploy the browser-verified dashboard and redundant-evidence
+    code, then repeat live API, desktop/mobile visual, and accessibility
     verification before calling the release shipped.
 16. Blocked data refresh: protected Cloudflare credentials are now configured,
-    but pending migration `0007_review_queue_indexes.sql` requires an explicit
-    production migration before automatic publication can proceed. Automatic
+    but pending migrations `0007_review_queue_indexes.sql` and
+    `0008_redundant_evidence_decisions.sql` require an explicit production
+    migration before automatic publication can proceed. Automatic
     run `29511127992` proved the current credential and artifact route, then
     failed closed before import or write; earlier runs `29449999090`,
     `29474290721`, and `29495130626` remain durable evidence of the prior empty
     credential state.
-17. Commit and source-check the 13 validated adapter-v7 decision bundles against
-    artifact `8396783388` from run `29554006451`; do not publish the superseded
+17. The 13 adapter-v7 replacement bundles are committed and all 18 allowed
+    bundles pass portable checksums plus semantic bundle validation: 312 unique
+    decisions across 312 source records, with 23 verifications and 289
+    rejections and no cross-bundle overlap. Source-check them against artifact
+    `8396783388` from run `29554006451` only after that exact artifact is live;
+    do not publish the superseded
     adapter-v5 artifact `8395774354`, adapter-v6 artifact `8396363821`, or any of
     the 12 superseded decision bundles listed in the timeline. The replacement
     set retains 220 unchanged decisions, binds 22 replacement decisions to v7,
     omits two non-candidates, and adds the separately reviewed whole-wheat-bread
     rejection for 23 v7 decisions total.
-    After pending production migration `0007_review_queue_indexes.sql` is
-    explicitly approved, source-check and publish the surviving liquid bundles,
+    After pending production migrations `0007_review_queue_indexes.sql` and
+    `0008_redundant_evidence_decisions.sql` are explicitly approved,
+    source-check and publish the allowed liquid bundle set,
     including
     `review-230fca7ea00663c6c05e`,
     `review-e1c5dcaa7a70bbf66c0b`,
@@ -325,7 +333,7 @@ must pass desktop/mobile verification.
     live; prove 17 resolved candidates, zero verified-fact promotions, unchanged
     trusted coverage, and idempotent replay before claiming any live queue
     reduction.
-20. Source-check and publish rebuilt mass-label rejection bundle
+20. Source-check and publish surviving mass-label rejection bundle
     `review-174cdb19d84d9fd99525` only after the exact adapter-v7 artifact is
     live; its MuscleBlaze and Bimbo decisions are already rebound to the
     corrected calorie candidates, so prove 14 resolved candidates, zero

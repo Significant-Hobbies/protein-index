@@ -1,12 +1,16 @@
-import type { ReviewItem, ReviewResponse, ReviewStatus, ReviewType } from "../shared/api";
+import type { ReviewDecision, ReviewItem, ReviewResponse, ReviewStatus, ReviewType } from "../shared/api";
 import {
   canonicalJson,
   nutritionCandidateFromEvidence,
   nutritionCandidateHash,
   nutritionCandidateNormalizedBasis,
   nutritionCandidateValues,
+  nutritionDecisionMatchesSelectedProjection,
+  sha256Hex,
   validateEvidenceDecision,
   type EvidenceDecisionInput,
+  type NutritionCandidate,
+  type SelectedNutritionProjection,
 } from "../shared/evidence-decisions";
 import {
   ingredientCandidateFromEvidence,
@@ -15,7 +19,7 @@ import {
   type IngredientEvidenceDecisionInput,
 } from "../shared/ingredient-evidence";
 import { parseIngredients } from "../shared/ingredients";
-import type { NormalizedIngredient } from "../shared/types";
+import type { EvidenceStatus, NormalizedIngredient, NutritionPer100g } from "../shared/types";
 
 interface ReviewRow {
   id: string;
@@ -26,6 +30,10 @@ interface ReviewRow {
   product_name: string | null;
   brand: string | null;
   source_record_id: string | null;
+  source_id: string | null;
+  source_record_key: string | null;
+  source_content_hash: string | null;
+  product_gtin: string | null;
   candidate_product_ids_json: string;
   candidates_json: string;
   evidence_json: string;
@@ -34,6 +42,17 @@ interface ReviewRow {
   decision_rationale: string | null;
   decision_evidence_url: string | null;
   decided_by: string | null;
+  nutrition_status: string | null;
+  nutrition_authority: number | null;
+  nutrition_basis: string | null;
+  calories: number | null;
+  protein_grams: number | null;
+  carbohydrate_grams: number | null;
+  sugar_grams: number | null;
+  fat_grams: number | null;
+  saturated_fat_grams: number | null;
+  fibre_grams: number | null;
+  sodium_mg: number | null;
 }
 
 interface ReviewCountRow { status: "open" | "resolved" | "dismissed"; count: number }
@@ -41,6 +60,69 @@ interface ReviewTotalRow { total: number }
 
 function parsed(value: string): unknown {
   try { return JSON.parse(value); } catch { return null; }
+}
+
+const EVIDENCE_STATUSES: EvidenceStatus[] = ["missing", "unverified", "verified", "conflict"];
+const REVIEW_DECISIONS: ReviewDecision[] = [
+  "verify_nutrition", "reject_nutrition", "redundant_nutrition",
+  "verify_ingredients", "reject_ingredients", "dismiss", "match", "create_new", "no_match",
+];
+
+function reviewDecision(value: string | null): ReviewDecision | null {
+  return REVIEW_DECISIONS.includes(value as ReviewDecision) ? value as ReviewDecision : null;
+}
+
+function selectedNutritionProjection(row: ReviewRow): SelectedNutritionProjection | null {
+  if (
+    !row.product_id
+    || !EVIDENCE_STATUSES.includes(row.nutrition_status as EvidenceStatus)
+    || (row.nutrition_basis !== "per_100g" && row.nutrition_basis !== "per_100ml")
+  ) return null;
+  const nutrition: NutritionPer100g = {
+    calories: row.calories,
+    proteinGrams: row.protein_grams,
+    carbohydrateGrams: row.carbohydrate_grams,
+    sugarGrams: row.sugar_grams,
+    fatGrams: row.fat_grams,
+    saturatedFatGrams: row.saturated_fat_grams,
+    fibreGrams: row.fibre_grams,
+    sodiumMg: row.sodium_mg,
+  };
+  if (Object.values(nutrition).some((value) => value !== null && !Number.isFinite(value))) return null;
+  return {
+    productId: row.product_id,
+    status: row.nutrition_status as EvidenceStatus,
+    authority: row.nutrition_authority ?? -1,
+    basis: row.nutrition_basis,
+    nutrition,
+  };
+}
+
+async function redundantDecision(
+  row: ReviewRow,
+  candidate: NutritionCandidate | null,
+  decidedAt = row.created_at,
+): Promise<EvidenceDecisionInput | null> {
+  if (
+    !candidate || row.source_id !== "open_food_facts_robotoff" || !row.source_record_key
+    || !row.source_record_id || !row.source_content_hash || !row.product_id
+  ) return null;
+  return {
+    id: `evd_${row.id}`,
+    sourceId: row.source_id,
+    sourceRecordKey: row.source_record_key,
+    sourceRecordId: row.source_record_id,
+    sourceContentHash: row.source_content_hash,
+    productId: row.product_id,
+    candidateHash: await nutritionCandidateHash(candidate),
+    fieldFamily: "nutrition",
+    decision: "redundant",
+    payload: candidate,
+    evidenceUrl: candidate.imageUrl,
+    rationale: row.decision_rationale ?? "Exact duplicate projection",
+    decidedBy: row.decided_by ?? "local_operator",
+    decidedAt,
+  };
 }
 
 const NUTRITION_FIELDS = [
@@ -92,8 +174,13 @@ export async function listReviews(
   const countBindings = type === "all" ? [] : [type];
   const batch = await db.batch([
     db.prepare(`SELECT r.id, r.type, r.priority, r.status, r.product_id, p.name AS product_name, p.brand,
-      r.source_record_id, r.candidate_product_ids_json, r.evidence_json, r.created_at, r.decision, r.decision_rationale,
+      r.source_record_id, s.source_id, s.source_record_id AS source_record_key,
+      s.content_hash AS source_content_hash, p.gtin AS product_gtin,
+      r.candidate_product_ids_json, r.evidence_json, r.created_at, r.decision, r.decision_rationale,
       r.decision_evidence_url, r.decided_by,
+      nf.status AS nutrition_status, nf.authority AS nutrition_authority, nf.basis AS nutrition_basis,
+      nf.calories, nf.protein_grams, nf.carbohydrate_grams, nf.sugar_grams, nf.fat_grams,
+      nf.saturated_fat_grams, nf.fibre_grams, nf.sodium_mg,
       COALESCE((SELECT json_group_array(json_object(
         'id', candidate.id,
         'gtin', candidate.gtin,
@@ -104,7 +191,10 @@ export async function listReviews(
         'category', candidate.category
       )) FROM json_each(r.candidate_product_ids_json) listed
       JOIN products candidate ON candidate.id = listed.value), '[]') AS candidates_json
-      FROM review_items r LEFT JOIN products p ON p.id = r.product_id
+      FROM review_items r
+      LEFT JOIN products p ON p.id = r.product_id
+      LEFT JOIN source_records s ON s.id = r.source_record_id
+      LEFT JOIN nutrition_facts nf ON nf.product_id = r.product_id
       WHERE r.status = ?${typeFilter}
       ORDER BY r.priority DESC, r.created_at, r.id LIMIT ? OFFSET ?`).bind(...itemBindings),
     db.prepare(`SELECT COUNT(*) AS total FROM review_items r WHERE r.status = ?${typeFilter}`).bind(...totalBindings),
@@ -115,23 +205,36 @@ export async function listReviews(
   const totalResult = batch[1];
   const countsResult = batch[2];
   if (!itemsResult || !totalResult || !countsResult) throw new Error("Review query batch returned an incomplete result");
-  const items = (itemsResult.results as ReviewRow[]).map<ReviewItem>((row) => ({
-    id: row.id,
-    type: row.type,
-    priority: row.priority,
-    status: row.status,
-    productId: row.product_id,
-    productName: row.product_name,
-    brand: row.brand,
-    sourceRecordId: row.source_record_id,
-    candidateProductIds: parsed(row.candidate_product_ids_json) as string[] ?? [],
-    candidates: parsed(row.candidates_json) as ReviewItem["candidates"] ?? [],
-    evidence: parsed(row.evidence_json),
-    createdAt: row.created_at,
-    decision: row.decision,
-    rationale: row.decision_rationale,
-    decisionEvidenceUrl: row.decision_evidence_url,
-    decidedBy: row.decided_by,
+  const items = await Promise.all((itemsResult.results as ReviewRow[]).map<Promise<ReviewItem>>(async (row) => {
+    const evidence = parsed(row.evidence_json);
+    const candidate = row.source_id === "open_food_facts_robotoff"
+      ? nutritionCandidateFromEvidence(evidence, row.product_gtin)
+      : null;
+    const selectedProjection = selectedNutritionProjection(row);
+    const duplicate = await redundantDecision(row, candidate);
+    const redundantProjectionMatches = duplicate !== null && selectedProjection !== null
+      && nutritionDecisionMatchesSelectedProjection(duplicate, selectedProjection);
+    return {
+      id: row.id,
+      type: row.type,
+      priority: row.priority,
+      status: row.status,
+      productId: row.product_id,
+      productName: row.product_name,
+      brand: row.brand,
+      sourceRecordId: row.source_record_id,
+      candidateProductIds: parsed(row.candidate_product_ids_json) as string[] ?? [],
+      candidates: parsed(row.candidates_json) as ReviewItem["candidates"] ?? [],
+      evidence,
+      selectedProjection,
+      redundantProjectionMatches,
+      redundantEligible: row.status === "open" && redundantProjectionMatches,
+      createdAt: row.created_at,
+      decision: reviewDecision(row.decision),
+      rationale: row.decision_rationale,
+      decisionEvidenceUrl: row.decision_evidence_url,
+      decidedBy: row.decided_by,
+    };
   }));
   const total = (totalResult.results[0] as ReviewTotalRow | undefined)?.total ?? 0;
   const counts = { open: 0, resolved: 0, dismissed: 0 };
@@ -142,16 +245,6 @@ export async function listReviews(
     pagination: { page, pageSize, total, pages: Math.ceil(total / pageSize) },
   };
 }
-
-export type ReviewDecision =
-  | "verify_nutrition"
-  | "reject_nutrition"
-  | "verify_ingredients"
-  | "reject_ingredients"
-  | "dismiss"
-  | "match"
-  | "create_new"
-  | "no_match";
 
 export async function resolveReview(
   db: D1Database,
@@ -165,7 +258,10 @@ export async function resolveReview(
   const review = await db.prepare(`SELECT r.id, r.status, r.product_id, r.type, r.candidate_product_ids_json,
     r.source_record_id, r.evidence_json, s.source_id, s.source_record_id AS source_record_key,
     s.content_hash AS source_content_hash, s.identity_hash,
-    p.gtin AS product_gtin, nf.product_id AS nutrition_product_id
+    p.gtin AS product_gtin, nf.product_id AS nutrition_product_id,
+    nf.status AS nutrition_status, nf.authority AS nutrition_authority, nf.basis AS nutrition_basis,
+    nf.calories, nf.protein_grams, nf.carbohydrate_grams, nf.sugar_grams, nf.fat_grams,
+    nf.saturated_fat_grams, nf.fibre_grams, nf.sodium_mg
     FROM review_items r
     LEFT JOIN source_records s ON s.id = r.source_record_id
     LEFT JOIN products p ON p.id = r.product_id
@@ -184,11 +280,22 @@ export async function resolveReview(
     identity_hash: string | null;
     product_gtin: string | null;
     nutrition_product_id: string | null;
+    nutrition_status: string | null;
+    nutrition_authority: number | null;
+    nutrition_basis: string | null;
+    calories: number | null;
+    protein_grams: number | null;
+    carbohydrate_grams: number | null;
+    sugar_grams: number | null;
+    fat_grams: number | null;
+    saturated_fat_grams: number | null;
+    fibre_grams: number | null;
+    sodium_mg: number | null;
   }>();
   if (!review) return "not_found";
   if (review.status !== "open") return "conflict";
   const nutritionReview = ["nutrition_validation", "nutrition_conflict", "coverage_gap"].includes(review.type);
-  if (["verify_nutrition", "reject_nutrition"].includes(decision) && !nutritionReview) return "invalid_decision";
+  if (["verify_nutrition", "reject_nutrition", "redundant_nutrition"].includes(decision) && !nutritionReview) return "invalid_decision";
   const ingredientReview = review.type === "ingredient_conflict"
     && review.source_id === "open_food_facts_robotoff_ingredients";
   if (["verify_ingredients", "reject_ingredients"].includes(decision) && !ingredientReview) return "invalid_decision";
@@ -216,8 +323,9 @@ export async function resolveReview(
   const ingredientCandidate = review.source_id === "open_food_facts_robotoff_ingredients"
     ? ingredientCandidateFromEvidence(parsed(review.evidence_json), review.product_gtin)
     : null;
-  if (["verify_nutrition", "reject_nutrition"].includes(decision) && review.source_id === "open_food_facts_robotoff" && !candidate) return "invalid_candidate";
+  if (["verify_nutrition", "reject_nutrition", "redundant_nutrition"].includes(decision) && review.source_id === "open_food_facts_robotoff" && !candidate) return "invalid_candidate";
   if (decision === "verify_nutrition" && !candidate && !review.nutrition_product_id) return "invalid_decision";
+  if (decision === "redundant_nutrition" && (review.source_id !== "open_food_facts_robotoff" || !candidate)) return "invalid_decision";
   if (["verify_ingredients", "reject_ingredients"].includes(decision) && !ingredientCandidate) return "invalid_candidate";
   const status = decision === "dismiss" ? "dismissed" : "resolved";
   const decidedAt = new Date().toISOString();
@@ -225,11 +333,17 @@ export async function resolveReview(
   let ingredientEvidenceDecision: IngredientEvidenceDecisionInput | null = null;
   if (
     candidate && review.source_id && review.source_record_key && review.source_record_id &&
-    review.source_content_hash && review.product_id && ["verify_nutrition", "reject_nutrition"].includes(decision)
+    review.source_content_hash && review.product_id && ["verify_nutrition", "reject_nutrition", "redundant_nutrition"].includes(decision)
   ) {
     const candidateHash = await nutritionCandidateHash(candidate);
+    const baseDecisionId = `evd_${id}`;
+    const priorBaseDecision = await db.prepare("SELECT active FROM evidence_decisions WHERE id = ?")
+      .bind(baseDecisionId).first<{ active: number }>();
+    const decisionId = priorBaseDecision?.active === 0
+      ? `${baseDecisionId}_${(await sha256Hex({ sourceContentHash: review.source_content_hash, candidateHash })).slice(0, 16)}`
+      : baseDecisionId;
     evidenceDecision = {
-      id: `evd_${id}`,
+      id: decisionId,
       sourceId: review.source_id,
       sourceRecordKey: review.source_record_key,
       sourceRecordId: review.source_record_id,
@@ -237,14 +351,39 @@ export async function resolveReview(
       productId: review.product_id,
       candidateHash,
       fieldFamily: "nutrition",
-      decision: decision === "verify_nutrition" ? "verify" : "reject",
+      decision: decision === "verify_nutrition" ? "verify" : decision === "reject_nutrition" ? "reject" : "redundant",
       payload: candidate,
-      evidenceUrl: evidenceUrl ?? candidate.imageUrl,
+      evidenceUrl: decision === "redundant_nutrition" ? candidate.imageUrl : evidenceUrl ?? candidate.imageUrl,
       rationale,
       decidedBy: "local_operator",
       decidedAt,
     };
     if ((await validateEvidenceDecision(evidenceDecision)).length > 0) return "invalid_candidate";
+    if (decision === "redundant_nutrition") {
+      const selectedProjection: SelectedNutritionProjection | null = (
+        review.product_id
+        && EVIDENCE_STATUSES.includes(review.nutrition_status as EvidenceStatus)
+        && (review.nutrition_basis === "per_100g" || review.nutrition_basis === "per_100ml")
+      ) ? {
+        productId: review.product_id,
+        status: review.nutrition_status as EvidenceStatus,
+        authority: review.nutrition_authority ?? -1,
+        basis: review.nutrition_basis,
+        nutrition: {
+          calories: review.calories,
+          proteinGrams: review.protein_grams,
+          carbohydrateGrams: review.carbohydrate_grams,
+          sugarGrams: review.sugar_grams,
+          fatGrams: review.fat_grams,
+          saturatedFatGrams: review.saturated_fat_grams,
+          fibreGrams: review.fibre_grams,
+          sodiumMg: review.sodium_mg,
+        },
+      } : null;
+      if (!selectedProjection || !nutritionDecisionMatchesSelectedProjection(evidenceDecision, selectedProjection)) {
+        return "invalid_candidate";
+      }
+    }
     const conflicting = await db.prepare(`SELECT id FROM evidence_decisions
       WHERE id = ? OR (
         source_id = ? AND source_record_key = ? AND candidate_hash = ? AND field_family = 'nutrition' AND active = 1
@@ -297,11 +436,69 @@ export async function resolveReview(
   const resolvedEvidenceUrl = ingredientEvidenceDecision?.evidenceUrl
     ?? evidenceDecision?.evidenceUrl
     ?? evidenceUrl;
-  const statements = [
-    db.prepare("UPDATE review_items SET status = ?, decision = ?, decision_rationale = ?, decision_evidence_url = ?, decided_by = 'local_operator', resolved_at = ? WHERE id = ? AND status = 'open'")
-      .bind(status, decision, rationale, resolvedEvidenceUrl, decidedAt, id),
-  ];
-  if (evidenceDecision) {
+  const redundantTransaction = decision === "redundant_nutrition" && evidenceDecision?.decision === "redundant";
+  let statements: D1PreparedStatement[];
+  if (redundantTransaction && evidenceDecision) {
+    const nutrition = nutritionCandidateValues(evidenceDecision.payload);
+    const basis = nutritionCandidateNormalizedBasis(evidenceDecision.payload);
+    const exactProjectionBindings = [
+      evidenceDecision.productId,
+      basis,
+      nutrition.calories,
+      nutrition.proteinGrams,
+      nutrition.carbohydrateGrams,
+      nutrition.sugarGrams,
+      nutrition.fatGrams,
+      nutrition.saturatedFatGrams,
+      nutrition.fibreGrams,
+      nutrition.sodiumMg,
+    ];
+    statements = [
+      db.prepare(`INSERT INTO evidence_decisions
+        (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
+          candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
+          decided_by, decided_at, active)
+        SELECT ?, ?, ?, ?, ?, ?, ?, 'nutrition', 'redundant', ?, ?, ?, ?, ?, 1
+        WHERE EXISTS (
+          SELECT 1 FROM review_items r
+          JOIN source_records s ON s.id = r.source_record_id
+          WHERE r.id = ? AND r.status = 'open' AND r.product_id = ? AND r.evidence_json = ?
+            AND s.id = ? AND s.source_id = ? AND s.source_record_id = ? AND s.content_hash = ?
+        ) AND EXISTS (
+          SELECT 1 FROM nutrition_facts nf
+          WHERE nf.product_id = ? AND nf.status = 'verified' AND nf.authority = 100 AND nf.basis = ?
+            AND nf.calories IS ? AND nf.protein_grams IS ? AND nf.carbohydrate_grams IS ?
+            AND nf.sugar_grams IS ? AND nf.fat_grams IS ? AND nf.saturated_fat_grams IS ?
+            AND nf.fibre_grams IS ? AND nf.sodium_mg IS ?
+        )`)
+        .bind(
+          evidenceDecision.id, evidenceDecision.sourceId, evidenceDecision.sourceRecordKey,
+          evidenceDecision.sourceRecordId, evidenceDecision.sourceContentHash, evidenceDecision.productId,
+          evidenceDecision.candidateHash, canonicalJson(evidenceDecision.payload), evidenceDecision.evidenceUrl,
+          evidenceDecision.rationale, evidenceDecision.decidedBy, evidenceDecision.decidedAt,
+          id, evidenceDecision.productId, review.evidence_json, evidenceDecision.sourceRecordId,
+          evidenceDecision.sourceId, evidenceDecision.sourceRecordKey, evidenceDecision.sourceContentHash,
+          ...exactProjectionBindings,
+        ),
+      db.prepare(`UPDATE review_items SET status = 'resolved', decision = 'redundant_nutrition',
+        decision_rationale = ?, decision_evidence_url = ?, decided_by = 'local_operator', resolved_at = ?
+        WHERE id = ? AND status = 'open' AND EXISTS (
+          SELECT 1 FROM evidence_decisions d
+          WHERE d.id = ? AND d.source_record_id = ? AND d.candidate_hash = ?
+            AND d.field_family = 'nutrition' AND d.decision = 'redundant' AND d.active = 1
+        )`)
+        .bind(
+          rationale, evidenceDecision.evidenceUrl, decidedAt, id,
+          evidenceDecision.id, evidenceDecision.sourceRecordId, evidenceDecision.candidateHash,
+        ),
+    ];
+  } else {
+    statements = [
+      db.prepare("UPDATE review_items SET status = ?, decision = ?, decision_rationale = ?, decision_evidence_url = ?, decided_by = 'local_operator', resolved_at = ? WHERE id = ? AND status = 'open'")
+        .bind(status, decision, rationale, resolvedEvidenceUrl, decidedAt, id),
+    ];
+  }
+  if (evidenceDecision && !redundantTransaction) {
     statements.push(db.prepare(`INSERT INTO evidence_decisions
       (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
         candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
@@ -582,7 +779,19 @@ export async function resolveReview(
     }
   }
   try {
-    await db.batch(statements);
+    const results = await db.batch(statements);
+    if (redundantTransaction) {
+      const inserted = results[0]?.meta.changes ?? 0;
+      const resolved = results[1]?.meta.changes ?? 0;
+      if (inserted === 0 && resolved === 0) {
+        const current = await db.prepare("SELECT status FROM review_items WHERE id = ?")
+          .bind(id).first<{ status: string }>();
+        return current?.status === "open" ? "invalid_candidate" : "conflict";
+      }
+      if (inserted !== 1 || resolved !== 1) {
+        throw new Error(`Redundant evidence transaction invariant failed: inserted=${inserted}, resolved=${resolved}`);
+      }
+    }
   } catch (error) {
     if (error instanceof Error && error.message.includes("UNIQUE constraint failed: evidence_decisions")) {
       return "conflict";

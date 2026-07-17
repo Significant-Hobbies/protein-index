@@ -1,8 +1,8 @@
 import { Hono } from "hono";
-import type { ReviewStatus, ReviewType } from "../shared/api";
+import type { ReviewDecision, ReviewStatus, ReviewType } from "../shared/api";
 import { getProductDetail, searchProducts, validateSearch } from "./catalog";
 import { getCoverage } from "./coverage";
-import { listReviews, resolveReview, type ReviewDecision } from "./reviews";
+import { listReviews, resolveReview } from "./reviews";
 
 export const app = new Hono<{ Bindings: Env }>();
 
@@ -90,6 +90,7 @@ app.post("/api/reviews/:id/resolve", async (c) => {
   const decisions: ReviewDecision[] = [
     "verify_nutrition",
     "reject_nutrition",
+    "redundant_nutrition",
     "verify_ingredients",
     "reject_ingredients",
     "dismiss",
@@ -116,6 +117,9 @@ app.post("/api/reviews/:id/resolve", async (c) => {
   }
   if (["verify_nutrition", "verify_ingredients"].includes(input.decision) && evidenceUrl === null) {
     return c.json(errorBody("validation_error", "Verification requires a current label or authoritative-source evidence URL"), 400);
+  }
+  if (input.decision === "redundant_nutrition" && evidenceUrl !== null) {
+    return c.json(errorBody("validation_error", "Redundant nutrition uses the source-bound candidate image"), 400);
   }
   const candidateProductId = input.candidateProductId === undefined || input.candidateProductId === null || input.candidateProductId === ""
     ? null

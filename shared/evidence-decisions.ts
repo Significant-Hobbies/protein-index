@@ -1,6 +1,6 @@
 import { normalizeGtin } from "./gtin";
 import { hasNutritionErrors, validateNutrition } from "./nutrition";
-import type { NutritionPer100g } from "./types";
+import type { EvidenceStatus, NutritionPer100g } from "./types";
 
 interface NutritionCandidateBase {
   predictionId: string;
@@ -36,12 +36,20 @@ export interface EvidenceDecisionInput {
   productId: string;
   candidateHash: string;
   fieldFamily: "nutrition";
-  decision: "verify" | "reject";
+  decision: "verify" | "reject" | "redundant";
   payload: NutritionCandidate;
   evidenceUrl: string;
   rationale: string;
   decidedBy: string;
   decidedAt: string;
+}
+
+export interface SelectedNutritionProjection {
+  productId: string;
+  status: EvidenceStatus;
+  authority: number;
+  basis: "per_100g" | "per_100ml";
+  nutrition: NutritionPer100g;
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -183,6 +191,33 @@ export async function nutritionCandidateHash(candidate: NutritionCandidate): Pro
   return sha256Hex(canonicalNutritionCandidate(candidate));
 }
 
+const NUTRITION_FIELDS = [
+  "calories",
+  "proteinGrams",
+  "carbohydrateGrams",
+  "sugarGrams",
+  "fatGrams",
+  "saturatedFatGrams",
+  "fibreGrams",
+  "sodiumMg",
+] as const satisfies readonly (keyof NutritionPer100g)[];
+
+export function nutritionDecisionMatchesSelectedProjection(
+  decision: EvidenceDecisionInput,
+  selected: SelectedNutritionProjection,
+): boolean {
+  if (
+    decision.decision !== "redundant" ||
+    decision.productId !== selected.productId ||
+    selected.status !== "verified" ||
+    selected.authority !== 100 ||
+    nutritionCandidateNormalizedBasis(decision.payload) !== selected.basis
+  ) return false;
+
+  const candidateNutrition = nutritionCandidateValues(decision.payload);
+  return NUTRITION_FIELDS.every((field) => candidateNutrition[field] === selected.nutrition[field]);
+}
+
 export async function validateEvidenceDecision(input: EvidenceDecisionInput): Promise<string[]> {
   const errors: string[] = [];
   for (const [field, value] of [
@@ -192,10 +227,13 @@ export async function validateEvidenceDecision(input: EvidenceDecisionInput): Pr
   ] as const) {
     if (!value.trim()) errors.push(`${field} is required`);
   }
-  if (!(["verify", "reject"] as string[]).includes(input.decision)) errors.push("decision is not supported");
+  if (!(["verify", "reject", "redundant"] as string[]).includes(input.decision)) errors.push("decision is not supported");
   if (input.fieldFamily !== "nutrition") errors.push("fieldFamily is not supported");
   if (!/^[a-f0-9]{64}$/.test(input.candidateHash)) errors.push("candidateHash must be a lowercase SHA-256 digest");
   if (!validHttpsUrl(input.evidenceUrl)) errors.push("evidenceUrl must use HTTPS");
+  if (input.decision === "redundant" && input.evidenceUrl !== input.payload.imageUrl) {
+    errors.push("evidenceUrl must match the candidate label image");
+  }
   if (!Number.isFinite(Date.parse(input.decidedAt))) errors.push("decidedAt must be a valid timestamp");
   if (!nutritionCandidateFromEvidence({ code: "robotoff_nutrition_candidate", details: { candidate: input.payload } }, input.payload.barcode)) {
     errors.push("payload is not a valid nutrition candidate");

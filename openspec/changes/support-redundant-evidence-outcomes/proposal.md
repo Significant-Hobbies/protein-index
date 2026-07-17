@@ -36,7 +36,10 @@ requirements remain compatible historical context.
 - Affects shared evidence-decision types and validators, Worker review input,
   review-bundle preparation/publication, reconciliation replay, review and
   coverage API semantics, operator UI, tests, and project status.
-- Reuses the append-only evidence decision and review-item tables; no production
-  dependency or database migration is expected.
+- Reuses the append-only evidence decision and review-item tables and adds a
+  forward-compatible table rebuild so the stored decision constraint admits
+  `redundant` for nutrition while retaining every existing row and index.
+- Adds no production dependency and does not apply the migration remotely as
+  part of this code change.
 - Does not publish the three remaining decisions, apply the pending migration,
   or change live verified coverage as part of implementation.

@@ -44,7 +44,10 @@ and conversion differences are meaningful evidence conflicts.
 Publication records the append-only decision and marks only the bound review
 item resolved. It MUST NOT insert nutrient facts, field observations, or replace
 the existing evidence outcome/provenance. Replay revalidates redundancy; source
-or selected-fact drift dismisses trust and reopens the evidence for review.
+or selected-fact drift marks the retained decision inactive and reopens the
+same review identity with current bindings. A later decision uses a deterministic
+source-content/candidate-bound id, so the audit history remains append-only while
+the active-candidate uniqueness constraint admits a fresh terminal result.
 
 ### Keep legacy bundles byte-compatible
 
@@ -65,15 +68,20 @@ bundle checksums cover it normally.
 
 ## Migration Plan
 
-1. Add backward-compatible types, validation, replay, and transaction behavior.
-2. Add bundle/publication and Worker+D1 regression coverage, including all
+1. Add backward-compatible types and a forward table rebuild that expands the
+   existing `verify`/`reject` check constraint only for nutrition `redundant`
+   decisions, preserving all rows and indexes.
+2. Add validation, replay, and transaction behavior.
+3. Add bundle/publication and Worker+D1 regression coverage, including all
    immutable legacy bundles.
-3. Add operator/API display and exact local replay proof.
-4. Deploy compatible code only after rendered verification; then create and
+4. Add operator/API display and exact local replay proof.
+5. Apply the migration and deploy compatible code only after explicit release
+   approval and rendered verification; then create and
    separately publish the three redundant decisions through protected gates.
 
-Rollback before redundant publication is a normal code revert. After publication,
-rollback must retain the redundant-decision parser and no-op replay behavior.
+Rollback before redundant publication is a normal code revert after confirming
+no `redundant` rows exist. After publication, rollback must retain the expanded
+constraint, redundant-decision parser, and no-op replay behavior.
 
 ## Open Questions
 

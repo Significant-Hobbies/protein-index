@@ -2,11 +2,14 @@ import { describe, expect, it } from "vitest";
 import { initialFilters, metricEvidenceLabel, nutrientDisplayName, publicEvidenceUrl, reviewIngredientCandidate, reviewNutritionCandidate } from "../src/App";
 import {
   canonicalJson,
+  nutritionDecisionMatchesSelectedProjection,
   nutritionCandidateFromEvidence,
   nutritionCandidateHash,
   nutritionCandidateNormalizedBasis,
   nutritionCandidateValues,
   validateEvidenceDecision,
+  type EvidenceDecisionInput,
+  type SelectedNutritionProjection,
 } from "../shared/evidence-decisions";
 import { identityEvidenceHash } from "../scripts/reconcile";
 import { classifyProtein } from "../shared/classification";
@@ -280,6 +283,126 @@ describe("metrics and completeness", () => {
     expect(await validateEvidenceDecision(decision)).toEqual([]);
     expect(await validateEvidenceDecision({ ...decision, candidateHash: "0".repeat(64) }))
       .toContain("candidateHash does not match payload");
+  });
+
+  it("accepts redundant evidence only when it exactly matches the selected verified projection", async () => {
+    const candidate = nutritionCandidateFromEvidence({
+      code: "robotoff_nutrition_candidate",
+      details: { candidate: {
+        predictionId: "redundant-prediction-1",
+        barcode: "8900000000012",
+        imageId: "redundant-image-1",
+        imageUrl: "https://images.openfoodfacts.org/redundant-label.jpg",
+        modelName: "nutrition_extractor",
+        modelVersion: "nutrition_extractor-2.0",
+        observedAt: "2026-07-15T00:00:00.000Z",
+        basis: "per_100g",
+        minimumConfidence: 0.96,
+        nutritionPer100g: {
+          calories: 400,
+          proteinGrams: 40,
+          carbohydrateGrams: 30,
+          sugarGrams: null,
+          fatGrams: 10,
+          saturatedFatGrams: null,
+          fibreGrams: null,
+          sodiumMg: 250,
+        },
+      } },
+    }, "08900000000012");
+    expect(candidate).not.toBeNull();
+    if (!candidate) throw new Error("Expected a redundant nutrition candidate");
+
+    const decision: EvidenceDecisionInput = {
+      id: "evd_redundant",
+      sourceId: "open_food_facts_robotoff",
+      sourceRecordKey: "08900000000012:redundant-prediction-1",
+      sourceRecordId: "src_redundant",
+      sourceContentHash: "source_hash_redundant",
+      productId: "prd_redundant",
+      candidateHash: await nutritionCandidateHash(candidate),
+      fieldFamily: "nutrition",
+      decision: "redundant",
+      payload: candidate,
+      evidenceUrl: candidate.imageUrl,
+      rationale: "Exact duplicate of the selected verified projection",
+      decidedBy: "local_operator",
+      decidedAt: "2026-07-15T01:00:00.000Z",
+    };
+    const selected: SelectedNutritionProjection = {
+      productId: decision.productId,
+      status: "verified",
+      authority: 100,
+      basis: "per_100g",
+      nutrition: nutritionCandidateValues(candidate),
+    };
+
+    expect(await validateEvidenceDecision(decision)).toEqual([]);
+    expect(nutritionDecisionMatchesSelectedProjection(decision, selected)).toBe(true);
+    expect(nutritionDecisionMatchesSelectedProjection(decision, {
+      ...selected,
+      nutrition: { ...selected.nutrition, sugarGrams: 0 },
+    })).toBe(false);
+    expect(nutritionDecisionMatchesSelectedProjection(decision, {
+      ...selected,
+      nutrition: { ...selected.nutrition, calories: 401 },
+    })).toBe(false);
+    expect(nutritionDecisionMatchesSelectedProjection(decision, { ...selected, basis: "per_100ml" })).toBe(false);
+    expect(nutritionDecisionMatchesSelectedProjection(decision, { ...selected, productId: "prd_other" })).toBe(false);
+    expect(nutritionDecisionMatchesSelectedProjection(decision, { ...selected, status: "unverified" })).toBe(false);
+    expect(nutritionDecisionMatchesSelectedProjection(decision, { ...selected, authority: 99 })).toBe(false);
+    expect(nutritionDecisionMatchesSelectedProjection({ ...decision, decision: "verify" }, selected)).toBe(false);
+  });
+
+  it("rejects malformed redundant decision bindings without changing legacy validation", async () => {
+    const candidate = nutritionCandidateFromEvidence({
+      code: "robotoff_nutrition_candidate",
+      details: { candidate: {
+        predictionId: "redundant-prediction-2",
+        barcode: "8900000000012",
+        imageId: "redundant-image-2",
+        imageUrl: "https://images.openfoodfacts.org/redundant-label-2.jpg",
+        modelName: "nutrition_extractor",
+        modelVersion: "nutrition_extractor-2.0",
+        observedAt: "2026-07-15T00:00:00.000Z",
+        basis: "per_100g",
+        minimumConfidence: 0.96,
+        nutritionPer100g: {
+          calories: 400, proteinGrams: 40, carbohydrateGrams: 30, sugarGrams: 5,
+          fatGrams: 10, saturatedFatGrams: 3, fibreGrams: 4, sodiumMg: 250,
+        },
+      } },
+    }, "08900000000012");
+    if (!candidate) throw new Error("Expected a redundant nutrition candidate");
+    const decision: EvidenceDecisionInput = {
+      id: "evd_redundant_invalid",
+      sourceId: "open_food_facts_robotoff",
+      sourceRecordKey: "08900000000012:redundant-prediction-2",
+      sourceRecordId: "src_redundant_invalid",
+      sourceContentHash: "source_hash_redundant_invalid",
+      productId: "prd_redundant",
+      candidateHash: await nutritionCandidateHash(candidate),
+      fieldFamily: "nutrition",
+      decision: "redundant",
+      payload: candidate,
+      evidenceUrl: candidate.imageUrl,
+      rationale: "Exact duplicate of the selected verified projection",
+      decidedBy: "local_operator",
+      decidedAt: "2026-07-15T01:00:00.000Z",
+    };
+
+    expect(await validateEvidenceDecision({ ...decision, decision: "approve" as never }))
+      .toContain("decision is not supported");
+    expect(await validateEvidenceDecision({ ...decision, candidateHash: "0".repeat(64) }))
+      .toContain("candidateHash does not match payload");
+    expect(await validateEvidenceDecision({ ...decision, sourceRecordKey: "", sourceContentHash: "" }))
+      .toEqual(expect.arrayContaining(["sourceRecordKey is required", "sourceContentHash is required"]));
+    expect(await validateEvidenceDecision({ ...decision, evidenceUrl: "https://example.com/other-label.jpg" }))
+      .toContain("evidenceUrl must match the candidate label image");
+    expect(await validateEvidenceDecision({ ...decision, decision: "verify", evidenceUrl: "https://example.com/legacy-label.jpg" }))
+      .toEqual([]);
+    expect(await validateEvidenceDecision({ ...decision, decision: "reject", evidenceUrl: "https://example.com/legacy-label.jpg" }))
+      .toEqual([]);
   });
 
   it("preserves volume candidates without accepting ambiguous physical bases", async () => {

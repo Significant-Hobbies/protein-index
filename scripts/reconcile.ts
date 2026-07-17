@@ -7,6 +7,7 @@ import {
   nutritionCandidateFromEvidence,
   nutritionCandidateHash,
   nutritionCandidateNormalizedBasis,
+  nutritionCandidateValues,
   type NutritionCandidate,
 } from "../shared/evidence-decisions";
 import { ingredientCandidateFromEvidence, ingredientCandidateHash, type IngredientCandidate } from "../shared/ingredient-evidence";
@@ -114,6 +115,22 @@ async function nutritionDecisionCandidate(product: StagedProduct): Promise<Nutri
   return declaredHash === undefined || computedHash === declaredHash
     ? { candidate, candidateHash: computedHash }
     : null;
+}
+
+function exactNutritionProjectionWhere(candidate: NutritionCandidate, productIdSql: string): string {
+  const basis = nutritionCandidateNormalizedBasis(candidate);
+  const nutrition = nutritionCandidateValues(candidate);
+  const columns = [
+    ["calories", nutrition.calories],
+    ["protein_grams", nutrition.proteinGrams],
+    ["carbohydrate_grams", nutrition.carbohydrateGrams],
+    ["sugar_grams", nutrition.sugarGrams],
+    ["fat_grams", nutrition.fatGrams],
+    ["saturated_fat_grams", nutrition.saturatedFatGrams],
+    ["fibre_grams", nutrition.fibreGrams],
+    ["sodium_mg", nutrition.sodiumMg],
+  ] as const;
+  return `EXISTS (SELECT 1 FROM nutrition_facts selected WHERE selected.product_id = ${productIdSql} AND selected.status = 'verified' AND selected.authority = 100 AND selected.basis = ${sql(basis)} AND ${columns.map(([column, value]) => `selected.${column} IS ${sql(value)}`).join(" AND ")})`;
 }
 
 async function ingredientDecisionCandidate(product: StagedProduct): Promise<IngredientDecisionCandidate | null> {
@@ -241,8 +258,20 @@ export async function emitImportSql(input: {
       );
     }
 
-    const nutritionDecisionWhere = nutritionCandidate
-      ? `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.source_record_id = ${sql(sourceRecordId)} AND d.source_content_hash = ${sql(product.contentHash)} AND d.product_id = ${productIdSql} AND d.candidate_hash = ${sql(nutritionCandidate.candidateHash)} AND d.field_family = 'nutrition' AND d.active = 1`
+    const redundantNutritionDecisionWhere = nutritionCandidate
+      ? `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.candidate_hash = ${sql(nutritionCandidate.candidateHash)} AND d.field_family = 'nutrition' AND d.decision = 'redundant' AND d.active = 1`
+      : null;
+    const exactNutritionProjection = nutritionCandidate
+      ? exactNutritionProjectionWhere(nutritionCandidate.candidate, productIdSql)
+      : null;
+    if (redundantNutritionDecisionWhere && exactNutritionProjection) {
+      await write(
+        output,
+        `UPDATE evidence_decisions AS d SET active = 0 WHERE ${redundantNutritionDecisionWhere} AND NOT (d.source_record_id = ${sql(sourceRecordId)} AND d.source_content_hash = ${sql(product.contentHash)} AND d.product_id = ${productIdSql} AND ${exactNutritionProjection});`,
+      );
+    }
+    const nutritionDecisionWhere = nutritionCandidate && exactNutritionProjection
+      ? `d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.source_record_id = ${sql(sourceRecordId)} AND d.source_content_hash = ${sql(product.contentHash)} AND d.product_id = ${productIdSql} AND d.candidate_hash = ${sql(nutritionCandidate.candidateHash)} AND d.field_family = 'nutrition' AND d.active = 1 AND (d.decision <> 'redundant' OR ${exactNutritionProjection})`
       : null;
     if (nutritionCandidate && nutritionDecisionWhere) {
       const reviewedNutritionBasis = nutritionCandidateNormalizedBasis(nutritionCandidate.candidate);
@@ -461,7 +490,11 @@ export async function emitImportSql(input: {
       if (issue.code === "robotoff_nutrition_candidate" && nutritionDecisionWhere) {
         await write(
           output,
-          `UPDATE review_items SET status = 'resolved', decision = CASE (SELECT d.decision FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1) WHEN 'verify' THEN 'verify_nutrition' ELSE 'reject_nutrition' END, decision_rationale = (SELECT d.rationale FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), decision_evidence_url = (SELECT d.evidence_url FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), decided_by = (SELECT d.decided_by FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), resolved_at = (SELECT d.decided_at FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1) WHERE id = ${sql(reviewId)} AND status = 'open' AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${nutritionDecisionWhere});`,
+          `UPDATE review_items SET type = ${sql(type)}, priority = ${issue.severity === "error" ? 80 : 50}, status = 'open', source_record_id = ${sql(sourceRecordId)}, product_id = ${productIdSql}, candidate_product_ids_json = '[]', evidence_json = ${json(reviewEvidence)}, decision = NULL, decision_rationale = NULL, decision_evidence_url = NULL, decided_by = NULL, resolved_at = NULL WHERE id = ${sql(reviewId)} AND status = 'resolved' AND decision = 'redundant_nutrition' AND ${matchingDecisionAbsent};`,
+        );
+        await write(
+          output,
+          `UPDATE review_items SET status = 'resolved', decision = CASE (SELECT d.decision FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1) WHEN 'verify' THEN 'verify_nutrition' WHEN 'redundant' THEN 'redundant_nutrition' ELSE 'reject_nutrition' END, decision_rationale = (SELECT d.rationale FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), decision_evidence_url = (SELECT d.evidence_url FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), decided_by = (SELECT d.decided_by FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1), resolved_at = (SELECT d.decided_at FROM evidence_decisions d WHERE ${nutritionDecisionWhere} ORDER BY d.decided_at DESC LIMIT 1) WHERE id = ${sql(reviewId)} AND status = 'open' AND EXISTS (SELECT 1 FROM evidence_decisions d WHERE ${nutritionDecisionWhere});`,
         );
       }
       if (isIngredientCandidate && ingredientDecisionWhere) {

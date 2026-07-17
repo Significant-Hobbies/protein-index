@@ -4,11 +4,13 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import {
   canonicalJson,
+  nutritionDecisionMatchesSelectedProjection,
   nutritionCandidateFromEvidence,
   nutritionCandidateNormalizedBasis,
   nutritionCandidateValues,
   validateEvidenceDecision,
   type EvidenceDecisionInput,
+  type SelectedNutritionProjection,
 } from "../shared/evidence-decisions";
 import {
   ingredientCandidateFromEvidence,
@@ -27,6 +29,7 @@ export interface ReviewDecisionManifest {
   decisionCount: number;
   verifyCount: number;
   rejectCount: number;
+  redundantCount?: number;
   sourceRecordCount: number;
   ledgerSha256: string;
 }
@@ -52,6 +55,7 @@ export interface ReviewDecisionSqlPlan {
   decisionCount: number;
   verifyCount: number;
   rejectCount: number;
+  redundantCount: number;
   expectedResolvedCandidates: number;
 }
 
@@ -65,6 +69,10 @@ export interface ReviewPublicationPostconditions {
   decisions: number;
   verifiedFacts: number;
   verifiedOutcomes: number;
+  redundantFacts: number;
+  redundantOutcomes: number;
+  redundantObservations: number;
+  redundantNutrients: number;
   unresolvedCandidates: number;
 }
 
@@ -134,7 +142,10 @@ function requiredString(value: unknown, field: string): string {
 function parseDecision(value: unknown): ReviewEvidenceDecision {
   const input = record(value);
   if (!input) throw new Error("Decision record must be an object");
-  const decision: "verify" | "reject" | null = input.decision === "verify" || input.decision === "reject" ? input.decision : null;
+  const decision: "verify" | "reject" | "redundant" | null =
+    input.decision === "verify" || input.decision === "reject" || input.decision === "redundant"
+      ? input.decision
+      : null;
   if (!decision) throw new Error("Decision value is not supported");
   const common = {
     id: requiredString(input.id, "id"),
@@ -161,6 +172,8 @@ function parseDecision(value: unknown): ReviewEvidenceDecision {
     return { ...common, fieldFamily: "nutrition", payload };
   }
   if (input.fieldFamily === "ingredients") {
+    if (decision === "redundant") throw new Error("Redundant decisions currently support nutrition only");
+    const ingredientDecision: "verify" | "reject" = decision;
     const candidateRecord = record(payloadRecord?.candidate);
     const payloadBarcode = typeof candidateRecord?.barcode === "string" ? candidateRecord.barcode : null;
     const candidate = ingredientCandidateFromEvidence(
@@ -170,6 +183,7 @@ function parseDecision(value: unknown): ReviewEvidenceDecision {
     if (!candidate) throw new Error("Decision payload is not a valid ingredient candidate");
     return {
       ...common,
+      decision: ingredientDecision,
       fieldFamily: "ingredients",
       payload: {
         candidate,
@@ -181,6 +195,20 @@ function parseDecision(value: unknown): ReviewEvidenceDecision {
     };
   }
   throw new Error("Decision fieldFamily is not supported");
+}
+
+function validateProductDecisionModes(decisions: ReviewEvidenceDecision[]): void {
+  const verifiedNutritionProducts = new Set(decisions
+    .filter((decision) => decision.fieldFamily === "nutrition" && decision.decision === "verify")
+    .map(({ productId }) => productId));
+  const redundantNutritionProducts = new Set(decisions
+    .filter((decision) => decision.fieldFamily === "nutrition" && decision.decision === "redundant")
+    .map(({ productId }) => productId));
+  for (const productId of redundantNutritionProducts) {
+    if (verifiedNutritionProducts.has(productId)) {
+      throw new Error(`Cannot mix nutrition verify and redundant decisions for product ${productId}`);
+    }
+  }
 }
 
 export function evidenceDecisionFromDatabaseRow(row: Record<string, unknown>): ReviewEvidenceDecision {
@@ -215,6 +243,7 @@ function parseManifest(value: unknown): ReviewDecisionManifest {
   if (!Number.isFinite(Date.parse(createdAt))) throw new Error("Review bundle createdAt is invalid");
   const ledgerSha256 = requiredString(manifest.ledgerSha256, "manifest ledgerSha256");
   if (!/^[a-f0-9]{64}$/.test(ledgerSha256)) throw new Error("Review bundle ledgerSha256 is invalid");
+  const redundantCount = manifest.redundantCount === undefined ? undefined : integer("redundantCount");
   return {
     schemaVersion: 1,
     bundleId: requiredString(manifest.bundleId, "manifest bundleId"),
@@ -222,6 +251,7 @@ function parseManifest(value: unknown): ReviewDecisionManifest {
     decisionCount: integer("decisionCount"),
     verifyCount: integer("verifyCount"),
     rejectCount: integer("rejectCount"),
+    ...(redundantCount === undefined ? {} : { redundantCount }),
     sourceRecordCount: integer("sourceRecordCount"),
     ledgerSha256,
   };
@@ -266,12 +296,14 @@ export async function writeReviewDecisionBundle(input: {
     }
     if (decision.decision === "verify") verifiedProducts.add(verifiedProductKey);
   }
+  validateProductDecisionModes(decisions);
   const ledger = `${decisions.map((decision) => canonicalJson(decision)).join("\n")}\n`;
   const ledgerSha256 = sha256Text(ledger);
   const bundleId = `review-${ledgerSha256.slice(0, 20)}`;
   const directory = join(input.outputRoot, bundleId);
   const createdAt = input.createdAt ?? new Date().toISOString();
   if (!Number.isFinite(Date.parse(createdAt))) throw new Error("Bundle creation timestamp is invalid");
+  const redundantCount = decisions.filter(({ decision }) => decision === "redundant").length;
   const manifest: ReviewDecisionManifest = {
     schemaVersion: 1,
     bundleId,
@@ -279,6 +311,7 @@ export async function writeReviewDecisionBundle(input: {
     decisionCount: decisions.length,
     verifyCount: decisions.filter(({ decision }) => decision === "verify").length,
     rejectCount: decisions.filter(({ decision }) => decision === "reject").length,
+    ...(redundantCount === 0 ? {} : { redundantCount }),
     sourceRecordCount: new Set(decisions.map(({ sourceRecordId }) => sourceRecordId)).size,
     ledgerSha256,
   };
@@ -334,15 +367,18 @@ export async function readReviewDecisionBundle(directory: string): Promise<Revie
     if (parsed.decision === "verify") verifiedProducts.add(verifiedProductKey);
     decisions.push(parsed);
   }
+  validateProductDecisionModes(decisions);
   const sortedIds = [...ids].sort();
   if (decisions.some((decision, index) => decision.id !== sortedIds[index])) throw new Error("Review decisions are not sorted by id");
   const ledgerSha256 = sha256Text(ledger);
   if (manifest.ledgerSha256 !== ledgerSha256) throw new Error("Review manifest ledger hash does not match decisions.jsonl");
   if (manifest.bundleId !== `review-${ledgerSha256.slice(0, 20)}`) throw new Error("Review bundle id does not match its ledger");
   const verifyCount = decisions.filter(({ decision }) => decision === "verify").length;
+  const rejectCount = decisions.filter(({ decision }) => decision === "reject").length;
+  const redundantCount = decisions.filter(({ decision }) => decision === "redundant").length;
   if (
     manifest.decisionCount !== decisions.length || manifest.verifyCount !== verifyCount ||
-    manifest.rejectCount !== decisions.length - verifyCount ||
+    manifest.rejectCount !== rejectCount || (manifest.redundantCount ?? 0) !== redundantCount ||
     manifest.sourceRecordCount !== new Set(decisions.map(({ sourceRecordId }) => sourceRecordId)).size
   ) throw new Error("Review manifest counts do not reconcile with decisions.jsonl");
   return { directory, manifest, decisions, ledger };
@@ -405,6 +441,46 @@ function flattenReviewedIngredients(
   });
 }
 
+function redundantNutritionDecisions(bundle: ReviewDecisionBundle): EvidenceDecisionInput[] {
+  return bundle.decisions.filter(
+    (decision): decision is EvidenceDecisionInput =>
+      decision.fieldFamily === "nutrition" && decision.decision === "redundant",
+  );
+}
+
+function redundantProjectionPredicate(decision: EvidenceDecisionInput, alias = "nf"): string {
+  const nutrition = nutritionCandidateValues(decision.payload);
+  const columns = [
+    ["calories", nutrition.calories],
+    ["protein_grams", nutrition.proteinGrams],
+    ["carbohydrate_grams", nutrition.carbohydrateGrams],
+    ["sugar_grams", nutrition.sugarGrams],
+    ["fat_grams", nutrition.fatGrams],
+    ["saturated_fat_grams", nutrition.saturatedFatGrams],
+    ["fibre_grams", nutrition.fibreGrams],
+    ["sodium_mg", nutrition.sodiumMg],
+  ] as const;
+  return [
+    `${alias}.product_id = ${sql(decision.productId)}`,
+    `${alias}.status = 'verified'`,
+    `${alias}.authority = 100`,
+    `${alias}.basis = ${sql(nutritionCandidateNormalizedBasis(decision.payload))}`,
+    ...columns.map(([column, value]) => `${alias}.${column} IS ${sql(value)}`),
+  ].join(" AND ");
+}
+
+function redundantProjectionExists(decision: EvidenceDecisionInput): string {
+  return `EXISTS (SELECT 1 FROM nutrition_facts nf WHERE ${redundantProjectionPredicate(decision)})`;
+}
+
+function redundantBoundReviewExists(decision: EvidenceDecisionInput): string {
+  return `(SELECT COUNT(*) FROM review_items bound_review WHERE bound_review.source_record_id = ${
+    sql(decision.sourceRecordId)
+  } AND bound_review.product_id = ${sql(decision.productId)} AND bound_review.status = 'open' AND json_extract(bound_review.evidence_json, '$.details.candidateHash') = ${
+    sql(decision.candidateHash)
+  }) = 1`;
+}
+
 export async function emitReviewDecisionSql(
   bundle: ReviewDecisionBundle,
   outputPath: string,
@@ -423,6 +499,9 @@ export async function emitReviewDecisionSql(
     ["sodiumMg", "mg"],
   ] as const;
   for (const decision of bundle.decisions) {
+    const redundantGuard = decision.fieldFamily === "nutrition" && decision.decision === "redundant"
+      ? `${redundantProjectionExists(decision)} AND ${redundantBoundReviewExists(decision)}`
+      : null;
     statements.push(`INSERT INTO evidence_decisions
       (id, source_id, source_record_key, source_record_id, source_content_hash, product_id,
         candidate_hash, field_family, decision, payload_json, evidence_url, rationale,
@@ -432,13 +511,21 @@ export async function emitReviewDecisionSql(
         ${sql(decision.candidateHash)}, ${sql(decision.fieldFamily)}, ${sql(decision.decision)},
         ${sql(canonicalJson(decision.payload))}, ${sql(decision.evidenceUrl)}, ${sql(decision.rationale)},
         ${sql(decision.decidedBy)}, ${sql(decision.decidedAt)}, 1
-      WHERE NOT EXISTS (SELECT 1 FROM evidence_decisions WHERE id = ${sql(decision.id)});`);
+      WHERE NOT EXISTS (SELECT 1 FROM evidence_decisions WHERE id = ${sql(decision.id)})${
+        redundantGuard === null ? "" : ` AND ${redundantGuard}`
+      };`);
+    const reviewDecision = `${decision.decision}_${decision.fieldFamily}`;
     statements.push(`UPDATE review_items SET status = 'resolved',
-      decision = ${sql(`${decision.decision === "verify" ? "verify" : "reject"}_${decision.fieldFamily}`)},
+      decision = ${sql(reviewDecision)},
       decision_rationale = ${sql(decision.rationale)}, decision_evidence_url = ${sql(decision.evidenceUrl)},
       decided_by = ${sql(decision.decidedBy)}, resolved_at = ${sql(decision.decidedAt)}
       WHERE source_record_id = ${sql(decision.sourceRecordId)} AND status = 'open'
-        AND json_extract(evidence_json, '$.details.candidateHash') = ${sql(decision.candidateHash)};`);
+        AND product_id = ${sql(decision.productId)}
+        AND json_extract(evidence_json, '$.details.candidateHash') = ${sql(decision.candidateHash)}${
+          redundantGuard === null
+            ? ""
+            : ` AND ${redundantGuard} AND EXISTS (SELECT 1 FROM evidence_decisions WHERE id = ${sql(decision.id)} AND active = 1)`
+        };`);
     if (decision.decision !== "verify") continue;
     if (decision.fieldFamily === "ingredients") {
       const reviewedText = decision.payload.reviewedText;
@@ -577,6 +664,7 @@ export async function emitReviewDecisionSql(
     decisionCount: bundle.manifest.decisionCount,
     verifyCount: bundle.manifest.verifyCount,
     rejectCount: bundle.manifest.rejectCount,
+    redundantCount: bundle.manifest.redundantCount ?? 0,
     expectedResolvedCandidates: bundle.manifest.decisionCount,
   };
 }
@@ -591,17 +679,24 @@ export async function emitReviewPublicationStateQuery(bundle: ReviewDecisionBund
   await writeFile(outputPath, `${statements.join("\n")}\n`, "utf8");
 }
 
-function reviewPublicationStateStatements(bundle: ReviewDecisionBundle): [string, string] {
+function selectedNutritionProjectionQuery(bundle: ReviewDecisionBundle): string {
+  const productIds = sqlList(redundantNutritionDecisions(bundle).map(({ productId }) => productId));
+  return `SELECT product_id, source_record_id, status, authority, basis, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg FROM nutrition_facts WHERE product_id IN (${productIds}) ORDER BY product_id;`;
+}
+
+function reviewPublicationStateStatements(bundle: ReviewDecisionBundle): [string, string, string] {
   const sourceRecordIds = sqlList(bundle.decisions.map(({ sourceRecordId }) => sourceRecordId));
   const decisionIds = sqlList(bundle.decisions.map(({ id }) => id));
   return [
     `SELECT s.source_id, s.source_record_id AS source_record_key, s.id AS source_record_id, s.content_hash, s.product_id, p.gtin AS product_gtin FROM source_records s LEFT JOIN products p ON p.id = s.product_id WHERE s.id IN (${sourceRecordIds}) ORDER BY s.id;`,
     `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id, candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at FROM evidence_decisions WHERE active = 1 AND (id IN (${decisionIds}) OR source_record_id IN (${sourceRecordIds})) ORDER BY id;`,
+    selectedNutritionProjectionQuery(bundle),
   ];
 }
 
 export async function emitReviewSourceStateQuery(bundle: ReviewDecisionBundle, outputPath: string): Promise<void> {
-  await writeFile(outputPath, `${reviewPublicationStateStatements(bundle)[0]}\n`, "utf8");
+  const statements = reviewPublicationStateStatements(bundle);
+  await writeFile(outputPath, `${statements[0]}\n${statements[2]}\n`, "utf8");
 }
 
 export async function emitReviewExistingDecisionQuery(bundle: ReviewDecisionBundle, outputPath: string): Promise<void> {
@@ -618,10 +713,77 @@ function d1Results(value: unknown, expected: number): Array<Array<Record<string,
 }
 
 export function validateReviewPublicationState(bundle: ReviewDecisionBundle, value: unknown): void {
-  const [sourceRows, existingRows] = d1Results(value, 2);
-  if (!sourceRows || !existingRows) throw new Error("D1 publication-state query is incomplete");
+  const [sourceRows, existingRows, projectionRows] = d1Results(value, 3);
+  if (!sourceRows || !existingRows || !projectionRows) throw new Error("D1 publication-state query is incomplete");
   validateSourceRows(bundle, sourceRows);
   validateExistingEvidenceDecisions(bundle, existingRows.map(evidenceDecisionFromDatabaseRow));
+  validateSelectedNutritionProjections(bundle, projectionRows);
+}
+
+function nullableNumber(value: unknown, field: string): number | null {
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Selected nutrition ${field} must be a finite number or null`);
+  }
+  return value;
+}
+
+function selectedNutritionProjectionFromRow(row: Record<string, unknown>): SelectedNutritionProjection {
+  const status = row.status;
+  if (status !== "missing" && status !== "unverified" && status !== "verified" && status !== "conflict") {
+    throw new Error("Selected nutrition status is invalid");
+  }
+  if (row.basis !== "per_100g" && row.basis !== "per_100ml") {
+    throw new Error("Selected nutrition basis is invalid");
+  }
+  if (typeof row.authority !== "number" || !Number.isFinite(row.authority)) {
+    throw new Error("Selected nutrition authority is invalid");
+  }
+  return {
+    productId: requiredString(row.product_id, "selected nutrition product_id"),
+    status,
+    authority: row.authority,
+    basis: row.basis,
+    nutrition: {
+      calories: nullableNumber(row.calories, "calories"),
+      proteinGrams: nullableNumber(row.protein_grams, "protein_grams"),
+      carbohydrateGrams: nullableNumber(row.carbohydrate_grams, "carbohydrate_grams"),
+      sugarGrams: nullableNumber(row.sugar_grams, "sugar_grams"),
+      fatGrams: nullableNumber(row.fat_grams, "fat_grams"),
+      saturatedFatGrams: nullableNumber(row.saturated_fat_grams, "saturated_fat_grams"),
+      fibreGrams: nullableNumber(row.fibre_grams, "fibre_grams"),
+      sodiumMg: nullableNumber(row.sodium_mg, "sodium_mg"),
+    },
+  };
+}
+
+function validateSelectedNutritionProjections(
+  bundle: ReviewDecisionBundle,
+  rows: Array<Record<string, unknown>>,
+): void {
+  const redundant = redundantNutritionDecisions(bundle);
+  const expectedProducts = new Set(redundant.map(({ productId }) => productId));
+  const redundantSources = new Set(redundant.map(({ sourceRecordId }) => sourceRecordId));
+  const selectedByProduct = new Map<string, SelectedNutritionProjection>();
+  for (const row of rows) {
+    const selected = selectedNutritionProjectionFromRow(row);
+    if (
+      !expectedProducts.has(selected.productId) || selectedByProduct.has(selected.productId) ||
+      typeof row.source_record_id !== "string" || redundantSources.has(row.source_record_id)
+    ) {
+      throw new Error(`Selected nutrition projection set is invalid for product ${selected.productId}`);
+    }
+    selectedByProduct.set(selected.productId, selected);
+  }
+  if (selectedByProduct.size !== expectedProducts.size) {
+    throw new Error("Selected nutrition projection is missing for a redundant decision");
+  }
+  for (const decision of redundant) {
+    const selected = selectedByProduct.get(decision.productId);
+    if (!selected || !nutritionDecisionMatchesSelectedProjection(decision, selected)) {
+      throw new Error(`Selected nutrition projection has drifted for redundant decision ${decision.id}`);
+    }
+  }
 }
 
 function validateSourceRows(bundle: ReviewDecisionBundle, sourceRows: Array<Record<string, unknown>>): void {
@@ -637,9 +799,10 @@ function validateSourceRows(bundle: ReviewDecisionBundle, sourceRows: Array<Reco
 }
 
 export function validateReviewSourceState(bundle: ReviewDecisionBundle, value: unknown): void {
-  const [sourceRows] = d1Results(value, 1);
-  if (!sourceRows) throw new Error("D1 source-state query is incomplete");
+  const [sourceRows, projectionRows] = d1Results(value, 2);
+  if (!sourceRows || !projectionRows) throw new Error("D1 source-state query is incomplete");
   validateSourceRows(bundle, sourceRows);
+  validateSelectedNutritionProjections(bundle, projectionRows);
 }
 
 export function validateReviewExistingDecisionState(bundle: ReviewDecisionBundle, value: unknown): void {
@@ -650,20 +813,26 @@ export function validateReviewExistingDecisionState(bundle: ReviewDecisionBundle
 
 export async function emitReviewPostconditionQuery(bundle: ReviewDecisionBundle, outputPath: string): Promise<void> {
   const decisionIds = sqlList(bundle.decisions.map(({ id }) => id));
+  const redundant = redundantNutritionDecisions(bundle);
   const nutritionVerifyProducts = sqlList(bundle.decisions
     .filter((decision) => decision.decision === "verify" && decision.fieldFamily === "nutrition")
+    .map(({ productId }) => productId));
+  const nutritionPostconditionProducts = sqlList(bundle.decisions
+    .filter((decision) => decision.fieldFamily === "nutrition" && decision.decision !== "reject")
     .map(({ productId }) => productId));
   const ingredientVerifyProducts = sqlList(bundle.decisions
     .filter((decision) => decision.decision === "verify" && decision.fieldFamily === "ingredients")
     .map(({ productId }) => productId));
   const candidateHashes = sqlList(bundle.decisions.map(({ candidateHash }) => candidateHash));
+  const redundantSourceRecordIds = sqlList(redundant.map(({ sourceRecordId }) => sourceRecordId));
   const statements = [
     `SELECT id, source_id, source_record_key, source_record_id, source_content_hash, product_id, candidate_hash, field_family, decision, payload_json, evidence_url, rationale, decided_by, decided_at FROM evidence_decisions WHERE active = 1 AND id IN (${decisionIds}) ORDER BY id;`,
-    `SELECT product_id, source_record_id, status, authority, basis, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at FROM nutrition_facts WHERE product_id IN (${nutritionVerifyProducts}) ORDER BY product_id;`,
+    `SELECT product_id, source_record_id, status, authority, basis, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams, saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at FROM nutrition_facts WHERE product_id IN (${nutritionPostconditionProducts}) ORDER BY product_id;`,
     `SELECT product_id, source_record_id, raw_text, language, status, confidence, authority, observed_at, updated_at FROM ingredient_statements WHERE product_id IN (${ingredientVerifyProducts}) ORDER BY product_id;`,
     `SELECT id, product_id, source_record_id, parent_id, position, raw_text, normalized_name, percentage, resolved FROM product_ingredients WHERE product_id IN (${ingredientVerifyProducts}) ORDER BY product_id, parent_id, position, id;`,
-    `SELECT product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by FROM evidence_outcomes WHERE (field_family = 'nutrition' AND product_id IN (${nutritionVerifyProducts})) OR (field_family = 'ingredients' AND product_id IN (${ingredientVerifyProducts})) ORDER BY field_family, product_id;`,
+    `SELECT product_id, field_family, outcome, source_record_id, evidence_url, observed_at, verified_at, decided_by FROM evidence_outcomes WHERE (field_family = 'nutrition' AND product_id IN (${nutritionPostconditionProducts})) OR (field_family = 'ingredients' AND product_id IN (${ingredientVerifyProducts})) ORDER BY field_family, product_id;`,
     `SELECT id, source_record_id, json_extract(evidence_json, '$.details.candidateHash') AS candidate_hash FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes}) ORDER BY id;`,
+    `SELECT (SELECT COUNT(*) FROM nutrition_facts WHERE source_record_id IN (${redundantSourceRecordIds})) AS redundant_facts, (SELECT COUNT(*) FROM evidence_outcomes WHERE source_record_id IN (${redundantSourceRecordIds})) AS redundant_outcomes, (SELECT COUNT(*) FROM field_observations WHERE source_record_id IN (${redundantSourceRecordIds}) AND selected = 1 AND authority = 100) AS redundant_observations, (SELECT COUNT(*) FROM nutrient_values WHERE source_record_id IN (${redundantSourceRecordIds}) AND status = 'verified') AS redundant_nutrients;`,
   ];
   await writeFile(outputPath, `${statements.join("\n")}\n`, "utf8");
 }
@@ -673,8 +842,11 @@ function sameNumber(actual: unknown, expected: number | null): boolean {
 }
 
 export function validateReviewPostconditions(bundle: ReviewDecisionBundle, value: unknown): ReviewPublicationPostconditions {
-  const [decisionRows, nutritionFactRows, ingredientFactRows, ingredientRows, outcomeRows, unresolvedRows] = d1Results(value, 6);
-  if (!decisionRows || !nutritionFactRows || !ingredientFactRows || !ingredientRows || !outcomeRows || !unresolvedRows) {
+  const [decisionRows, nutritionFactRows, ingredientFactRows, ingredientRows, outcomeRows, unresolvedRows, redundantWriteRows] = d1Results(value, 7);
+  if (
+    !decisionRows || !nutritionFactRows || !ingredientFactRows || !ingredientRows || !outcomeRows ||
+    !unresolvedRows || !redundantWriteRows
+  ) {
     throw new Error("D1 postcondition query is incomplete");
   }
   const existing = decisionRows.map(evidenceDecisionFromDatabaseRow);
@@ -739,12 +911,44 @@ export function validateReviewPostconditions(bundle: ReviewDecisionBundle, value
       outcome.verified_at !== decision.decidedAt || outcome.decided_by !== decision.decidedBy
     ) throw new Error(`Verified evidence outcome postcondition failed for ${decision.id}`);
   }
+  const redundantProductIds = new Set(redundantNutritionDecisions(bundle).map(({ productId }) => productId));
+  validateSelectedNutritionProjections(
+    bundle,
+    nutritionFactRows.filter((row) => typeof row.product_id === "string" && redundantProductIds.has(row.product_id)),
+  );
+  for (const decision of redundantNutritionDecisions(bundle)) {
+    const fact = nutritionFacts.get(decision.productId);
+    const outcome = outcomes.get(`nutrition:${decision.productId}`);
+    if (
+      !fact || !outcome || outcome.outcome !== "verified" ||
+      typeof fact.source_record_id !== "string" || outcome.source_record_id !== fact.source_record_id ||
+      outcome.source_record_id === decision.sourceRecordId
+    ) throw new Error(`Redundant evidence outcome postcondition failed for ${decision.id}`);
+  }
+  if (redundantWriteRows.length !== 1) throw new Error("Redundant write postcondition is malformed");
+  const redundantWriteRow = redundantWriteRows[0];
+  if (!redundantWriteRow) throw new Error("Redundant write postcondition is missing");
+  const redundantCounts = {
+    redundantFacts: redundantWriteRow.redundant_facts,
+    redundantOutcomes: redundantWriteRow.redundant_outcomes,
+    redundantObservations: redundantWriteRow.redundant_observations,
+    redundantNutrients: redundantWriteRow.redundant_nutrients,
+  };
+  for (const [field, count] of Object.entries(redundantCounts)) {
+    if (!Number.isInteger(count) || (count as number) !== 0) {
+      throw new Error(`Redundant publication wrote unexpected verified state: ${field}=${String(count)}`);
+    }
+  }
   if (unresolvedRows.length > 0) throw new Error(`Reviewed candidates remain unresolved: ${unresolvedRows.map((row) => row.id).join(", ")}`);
   return {
     ledgerSha256: bundle.manifest.ledgerSha256,
     decisions: existing.length,
     verifiedFacts: verified.length,
     verifiedOutcomes: verified.length,
+    redundantFacts: 0,
+    redundantOutcomes: 0,
+    redundantObservations: 0,
+    redundantNutrients: 0,
     unresolvedCandidates: 0,
   };
 }

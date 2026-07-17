@@ -26,6 +26,7 @@ import {
 import { emitImportSql } from "../scripts/reconcile";
 import {
   emitReviewDecisionSql,
+  emitReviewSourceStateQuery,
   readReviewDecisionBundle,
   validateExistingEvidenceDecisions,
   validateReviewPostconditions,
@@ -619,6 +620,12 @@ describe("Reviewed evidence bundles", () => {
         decided_by: exact.decidedBy,
       }] },
       { success: true, results: [] },
+      { success: true, results: [{
+        redundant_facts: 0,
+        redundant_outcomes: 0,
+        redundant_observations: 0,
+        redundant_nutrients: 0,
+      }] },
     ])).toMatchObject({ decisions: 1, verifiedFacts: 1, verifiedOutcomes: 1, unresolvedCandidates: 0 });
   });
 
@@ -680,6 +687,7 @@ describe("Reviewed evidence bundles", () => {
     expect(() => validateReviewPublicationState(parsed, [
       { success: true, results: sourceRows },
       { success: true, results: [] },
+      { success: true, results: [] },
     ])).not.toThrow();
     const decisionRows = parsed.decisions.map((item) => ({
       id: item.id,
@@ -730,6 +738,12 @@ describe("Reviewed evidence bundles", () => {
         decided_by: first.decidedBy,
       }] },
       { success: true, results: [] },
+      { success: true, results: [{
+        redundant_facts: 0,
+        redundant_outcomes: 0,
+        redundant_observations: 0,
+        redundant_nutrients: 0,
+      }] },
     ];
     expect(validateReviewPostconditions(parsed, postconditions)).toMatchObject({
       decisions: 2,
@@ -739,7 +753,7 @@ describe("Reviewed evidence bundles", () => {
     });
     expect(() => validateReviewPostconditions(parsed, [
       postconditions[0], postconditions[1], postconditions[2], postconditions[3], postconditions[4],
-      { success: true, results: [{ id: "rev_still_open" }] },
+      { success: true, results: [{ id: "rev_still_open" }] }, postconditions[6],
     ])).toThrow("remain unresolved");
   });
 
@@ -848,6 +862,12 @@ describe("Reviewed evidence bundles", () => {
         decided_by: exact.decidedBy,
       }] },
       { success: true, results: [] },
+      { success: true, results: [{
+        redundant_facts: 0,
+        redundant_outcomes: 0,
+        redundant_observations: 0,
+        redundant_nutrients: 0,
+      }] },
     ];
     expect(validateReviewPostconditions(parsed, postconditions)).toMatchObject({
       decisions: 1,
@@ -860,6 +880,266 @@ describe("Reviewed evidence bundles", () => {
       { success: true, results: [{ ...postconditions[1]!.results[0], basis: "per_100g" }] },
       ...postconditions.slice(2),
     ])).toThrow("Verified nutrition postcondition failed");
+  });
+
+  it("publishes exact redundant nutrition as a terminal fact no-op and fails closed on projection drift", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-review-redundant-"));
+    const decision: EvidenceDecisionInput = {
+      ...(await reviewDecision("evd_redundant")),
+      decision: "redundant",
+      rationale: "Additional label image exactly matches the selected verified projection",
+    };
+    const written = await writeReviewDecisionBundle({
+      decisions: [decision],
+      outputRoot: directory,
+      createdAt: "2026-07-15T02:00:00.000Z",
+    });
+    expect(written.manifest).toMatchObject({
+      decisionCount: 1,
+      verifyCount: 0,
+      rejectCount: 0,
+      redundantCount: 1,
+    });
+    const parsed = await readReviewDecisionBundle(written.directory);
+    expect(parsed.decisions[0]).toMatchObject({ decision: "redundant", fieldFamily: "nutrition" });
+
+    const selected = nutritionCandidateValues(decision.payload);
+    const selectedRow = {
+      product_id: decision.productId,
+      source_record_id: "src_selected_redundant",
+      status: "verified",
+      authority: 100,
+      basis: nutritionCandidateNormalizedBasis(decision.payload),
+      calories: selected.calories,
+      protein_grams: selected.proteinGrams,
+      carbohydrate_grams: selected.carbohydrateGrams,
+      sugar_grams: selected.sugarGrams,
+      fat_grams: selected.fatGrams,
+      saturated_fat_grams: selected.saturatedFatGrams,
+      fibre_grams: selected.fibreGrams,
+      sodium_mg: selected.sodiumMg,
+      label_verified_at: "2026-07-14T01:00:00.000Z",
+      observed_at: "2026-07-14T00:00:00.000Z",
+    };
+    const sourceRow = {
+      source_id: decision.sourceId,
+      source_record_key: decision.sourceRecordKey,
+      source_record_id: decision.sourceRecordId,
+      content_hash: decision.sourceContentHash,
+      product_id: decision.productId,
+      product_gtin: decision.payload.barcode,
+    };
+    expect(() => validateReviewPublicationState(parsed, [
+      { success: true, results: [sourceRow] },
+      { success: true, results: [] },
+      { success: true, results: [selectedRow] },
+    ])).not.toThrow();
+    expect(() => validateReviewPublicationState(parsed, [
+      { success: true, results: [sourceRow] },
+      { success: true, results: [] },
+      { success: true, results: [{ ...selectedRow, protein_grams: 24 }] },
+    ])).toThrow("projection has drifted");
+
+    const sourceQueryPath = join(directory, "redundant-source-state.sql");
+    await emitReviewSourceStateQuery(parsed, sourceQueryPath);
+    const sourceQuery = await readFile(sourceQueryPath, "utf8");
+    expect(sourceQuery).toContain("FROM source_records");
+    expect(sourceQuery).toContain("FROM nutrition_facts");
+    expect(sourceQuery).toContain(`'${decision.productId}'`);
+
+    const sqlPath = join(directory, "redundant-review.sql");
+    const plan = await emitReviewDecisionSql(parsed, sqlPath);
+    const sql = await readFile(sqlPath, "utf8");
+    expect(plan).toMatchObject({
+      decisionCount: 1,
+      verifyCount: 0,
+      rejectCount: 0,
+      redundantCount: 1,
+      expectedResolvedCandidates: 1,
+    });
+    expect(sql).toContain("'redundant_nutrition'");
+    expect(sql).toContain("nf.status = 'verified'");
+    expect(sql).toContain("nf.authority = 100");
+    expect(sql).not.toMatch(/INSERT INTO nutrition_facts|INSERT INTO field_observations|INSERT INTO nutrient_values|INSERT INTO evidence_outcomes|UPDATE products/);
+
+    const database = new DatabaseSync(":memory:");
+    for (const migration of (await readdir("migrations")).filter((name) => name.endsWith(".sql")).sort()) {
+      database.exec(await readFile(join("migrations", migration), "utf8"));
+    }
+    database.exec(`
+      INSERT INTO sources (id, name, kind, identity_authority, nutrition_authority, ingredient_authority,
+        license_url, retention_notes, credential_requirement, created_at)
+      VALUES ('open_food_facts_robotoff', 'Robotoff', 'open_data', 0, 20, 0, NULL, 'review only', NULL, '2026-07-15T00:00:00.000Z');
+      INSERT INTO ingestion_runs (id, source_id, adapter_version, mode, input_identifier, records_read,
+        india_records, staged_records, terminal_evidence, source_complete, market_complete, status, started_at, completed_at)
+      VALUES ('run_redundant', 'open_food_facts_robotoff', 'test', 'sample', 'fixture', 2, 2, 2,
+        'end_of_file', 1, 0, 'completed', '2026-07-15T00:00:00.000Z', '2026-07-15T00:00:00.000Z');
+      INSERT INTO products (id, gtin, brand, brand_normalized, name, name_normalized, category,
+        marketed_reasons_json, nutrition_reasons_json, classifier_version, completeness,
+        completeness_missing_json, identity_authority, created_at, updated_at)
+      VALUES ('prd_fixture', '08900000000012', 'Test', 'test', 'Protein bar', 'protein bar',
+        'protein_bar', '[]', '[]', 'protein-v1', 50, '[]', 100,
+        '2026-07-15T00:00:00.000Z', '2026-07-15T00:00:00.000Z');
+      INSERT INTO source_records (id, source_id, source_record_id, product_id, source_url, content_hash,
+        observed_at, first_seen_run_id, last_seen_run_id, raw_evidence_json, resolution_rule, identity_hash)
+      VALUES ('src_selected_redundant', 'open_food_facts_robotoff', 'selected-label', 'prd_fixture',
+        'https://robotoff.openfoodfacts.org/', 'selected-content', '2026-07-14T00:00:00.000Z',
+        'run_redundant', 'run_redundant', '{}', 'exact_gtin', 'selected-identity'),
+        ('src_evd_redundant', 'open_food_facts_robotoff', '8900000000012:prediction-evd_redundant',
+        'prd_fixture', 'https://robotoff.openfoodfacts.org/', 'source_evd_redundant',
+        '2026-07-15T00:00:00.000Z', 'run_redundant', 'run_redundant', '{}', 'exact_gtin', 'candidate-identity');
+      INSERT INTO nutrition_facts (product_id, source_record_id, status, confidence, authority, basis,
+        preparation_state, calories, protein_grams, carbohydrate_grams, sugar_grams, fat_grams,
+        saturated_fat_grams, fibre_grams, sodium_mg, label_verified_at, observed_at, updated_at)
+      VALUES ('prd_fixture', 'src_selected_redundant', 'verified', 'high', 100, 'per_100g', 'as_sold',
+        365, 24, 46.5, 4, 8.9, 2, 5, 250, '2026-07-14T01:00:00.000Z',
+        '2026-07-14T00:00:00.000Z', '2026-07-14T01:00:00.000Z');
+      INSERT INTO evidence_outcomes (product_id, field_family, outcome, source_record_id, evidence_url,
+        observed_at, verified_at, decided_by, notes)
+      VALUES ('prd_fixture', 'nutrition', 'verified', 'src_selected_redundant',
+        'https://images.openfoodfacts.org/selected.jpg', '2026-07-14T00:00:00.000Z',
+        '2026-07-14T01:00:00.000Z', 'local_operator', 'Selected verified label');
+      INSERT INTO review_items (id, type, priority, status, source_record_id, product_id,
+        candidate_product_ids_json, evidence_json, created_at)
+      VALUES ('rev_redundant', 'nutrition_validation', 50, 'open', 'src_evd_redundant', 'prd_fixture',
+        '[]', '{"details":{"candidateHash":"${decision.candidateHash}"}}', '2026-07-15T00:00:00.000Z');
+    `);
+    database.exec(sql);
+    expect(database.prepare("SELECT COUNT(*) AS decisions FROM evidence_decisions").get()).toEqual({ decisions: 0 });
+    expect(database.prepare("SELECT status FROM review_items WHERE id = 'rev_redundant'").get()).toEqual({ status: "open" });
+
+    database.exec("UPDATE nutrition_facts SET protein_grams = 25 WHERE product_id = 'prd_fixture'");
+    database.exec(sql);
+    database.exec(sql);
+    expect(database.prepare(`SELECT
+      (SELECT COUNT(*) FROM evidence_decisions WHERE decision = 'redundant') AS decisions,
+      (SELECT status FROM review_items WHERE id = 'rev_redundant') AS review_status,
+      (SELECT decision FROM review_items WHERE id = 'rev_redundant') AS review_decision,
+      (SELECT COUNT(*) FROM nutrition_facts) AS facts,
+      (SELECT source_record_id FROM nutrition_facts WHERE product_id = 'prd_fixture') AS fact_source,
+      (SELECT COUNT(*) FROM field_observations WHERE source_record_id = 'src_evd_redundant') AS observations,
+      (SELECT COUNT(*) FROM nutrient_values WHERE source_record_id = 'src_evd_redundant') AS nutrients,
+      (SELECT COUNT(*) FROM evidence_outcomes WHERE source_record_id = 'src_evd_redundant') AS outcomes
+    `).get()).toEqual({
+      decisions: 1,
+      review_status: "resolved",
+      review_decision: "redundant_nutrition",
+      facts: 1,
+      fact_source: "src_selected_redundant",
+      observations: 0,
+      nutrients: 0,
+      outcomes: 0,
+    });
+
+    const decisionRow = {
+      id: decision.id,
+      source_id: decision.sourceId,
+      source_record_key: decision.sourceRecordKey,
+      source_record_id: decision.sourceRecordId,
+      source_content_hash: decision.sourceContentHash,
+      product_id: decision.productId,
+      candidate_hash: decision.candidateHash,
+      field_family: decision.fieldFamily,
+      decision: decision.decision,
+      payload_json: canonicalJson(decision.payload),
+      evidence_url: decision.evidenceUrl,
+      rationale: decision.rationale,
+      decided_by: decision.decidedBy,
+      decided_at: decision.decidedAt,
+    };
+    const existingOutcome = {
+      product_id: decision.productId,
+      field_family: "nutrition",
+      outcome: "verified",
+      source_record_id: "src_selected_redundant",
+      evidence_url: "https://images.openfoodfacts.org/selected.jpg",
+      observed_at: "2026-07-14T00:00:00.000Z",
+      verified_at: "2026-07-14T01:00:00.000Z",
+      decided_by: "local_operator",
+    };
+    const postconditions = [
+      { success: true, results: [decisionRow] },
+      { success: true, results: [selectedRow] },
+      { success: true, results: [] },
+      { success: true, results: [] },
+      { success: true, results: [existingOutcome] },
+      { success: true, results: [] },
+      { success: true, results: [{
+        redundant_facts: 0,
+        redundant_outcomes: 0,
+        redundant_observations: 0,
+        redundant_nutrients: 0,
+      }] },
+    ];
+    expect(validateReviewPostconditions(parsed, postconditions)).toMatchObject({
+      decisions: 1,
+      verifiedFacts: 0,
+      verifiedOutcomes: 0,
+      redundantFacts: 0,
+      redundantOutcomes: 0,
+      unresolvedCandidates: 0,
+    });
+    expect(() => validateReviewPostconditions(parsed, [
+      ...postconditions.slice(0, 6),
+      { success: true, results: [{
+        redundant_facts: 0,
+        redundant_outcomes: 0,
+        redundant_observations: 1,
+        redundant_nutrients: 0,
+      }] },
+    ])).toThrow("wrote unexpected verified state");
+  });
+
+  it("rejects order-dependent verify and redundant decisions for the same nutrition product", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-index-review-mixed-modes-"));
+    const verify = await reviewDecision("evd_mixed_verify");
+    const redundant: EvidenceDecisionInput = {
+      ...(await reviewDecision("evd_mixed_redundant")),
+      decision: "redundant",
+    };
+    await expect(writeReviewDecisionBundle({
+      decisions: [verify, redundant],
+      outputRoot: join(directory, "verify-first"),
+    })).rejects.toThrow("Cannot mix nutrition verify and redundant decisions");
+    await expect(writeReviewDecisionBundle({
+      decisions: [redundant, verify],
+      outputRoot: join(directory, "redundant-first"),
+    })).rejects.toThrow("Cannot mix nutrition verify and redundant decisions");
+  });
+
+  it("keeps every checked-in legacy review bundle checksum-compatible and omits new manifest bytes", async () => {
+    const candidateDirectories = (await readdir("review-decisions", { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map(({ name }) => join("review-decisions", name))
+      .sort();
+    const directories = (await Promise.all(candidateDirectories.map(async (directory) => {
+      const files = new Set(await readdir(directory));
+      return ["manifest.json", "decisions.jsonl", "checksums.sha256"].every((file) => files.has(file))
+        ? directory
+        : null;
+    }))).filter((directory): directory is string => directory !== null);
+    expect(directories.length).toBeGreaterThan(0);
+    let legacyCount = 0;
+    for (const directory of directories) {
+      const manifestBytes = await readFile(join(directory, "manifest.json"), "utf8");
+      const manifest = JSON.parse(manifestBytes) as { redundantCount?: number };
+      if (manifest.redundantCount !== undefined) continue;
+      legacyCount += 1;
+      const ledgerBytes = await readFile(join(directory, "decisions.jsonl"), "utf8");
+      const bundle = await readReviewDecisionBundle(directory);
+      expect(bundle.ledger).toBe(ledgerBytes);
+      expect(bundle.manifest).not.toHaveProperty("redundantCount");
+      expect(await readFile(join(directory, "manifest.json"), "utf8")).toBe(manifestBytes);
+      expect(await readFile(join(directory, "decisions.jsonl"), "utf8")).toBe(ledgerBytes);
+    }
+    expect(legacyCount).toBeGreaterThan(0);
+
+    const verifyReject = await writeReviewDecisionBundle({
+      decisions: [await reviewDecision("evd_legacy_verify"), await reviewDecision("evd_legacy_reject", "reject")],
+      outputRoot: await mkdtemp(join(tmpdir(), "protein-index-review-legacy-shape-")),
+      createdAt: "2026-07-15T02:00:00.000Z",
+    });
+    expect(JSON.parse(await readFile(join(verifyReject.directory, "manifest.json"), "utf8"))).not.toHaveProperty("redundantCount");
   });
 
   it("refuses empty, invalid, tampered, and unsafe review bundles", async () => {

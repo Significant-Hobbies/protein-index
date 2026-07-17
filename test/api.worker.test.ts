@@ -645,6 +645,164 @@ describe("Worker catalog API", () => {
     expect(JSON.parse(String(decision?.payload_json))).toMatchObject({ nutritionPer100g: nutrition });
   });
 
+  it("records exact duplicate nutrition as redundant without mutating selected facts or verified coverage", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const nutrition = {
+      calories: 400,
+      proteinGrams: 40,
+      carbohydrateGrams: 30,
+      sugarGrams: 5,
+      fatGrams: 10,
+      saturatedFatGrams: 3,
+      fibreGrams: 4,
+      sodiumMg: 250,
+    };
+    const review = await insertRobotoffReview({ suffix: "redundant", evidence: robotoffEvidence(product.gtin, nutrition) });
+    await env.DB.prepare(`UPDATE nutrition_facts SET status = 'verified', confidence = 'high', authority = 100,
+      basis = 'per_100g', calories = ?, protein_grams = ?, carbohydrate_grams = ?, sugar_grams = ?,
+      fat_grams = ?, saturated_fat_grams = ?, fibre_grams = ?, sodium_mg = ? WHERE product_id = ?`)
+      .bind(
+        nutrition.calories, nutrition.proteinGrams, nutrition.carbohydrateGrams, nutrition.sugarGrams,
+        nutrition.fatGrams, nutrition.saturatedFatGrams, nutrition.fibreGrams, nutrition.sodiumMg,
+        review.productId,
+      ).run();
+
+    const evidenceState = async () => {
+      const [fact, nutrients, observations, outcomes] = await env.DB.batch([
+        env.DB.prepare("SELECT * FROM nutrition_facts WHERE product_id = ?").bind(review.productId),
+        env.DB.prepare("SELECT * FROM nutrient_values WHERE product_id = ? ORDER BY id").bind(review.productId),
+        env.DB.prepare("SELECT * FROM field_observations WHERE product_id = ? ORDER BY id").bind(review.productId),
+        env.DB.prepare("SELECT * FROM evidence_outcomes WHERE product_id = ? ORDER BY field_family").bind(review.productId),
+      ]);
+      return canonicalJson({
+        fact: fact?.results ?? [],
+        nutrients: nutrients?.results ?? [],
+        observations: observations?.results ?? [],
+        outcomes: outcomes?.results ?? [],
+      });
+    };
+
+    const openResponse = await worker.fetch("http://localhost/api/reviews?status=open&type=nutrition_validation");
+    const open = await json<ReviewResponse>(openResponse);
+    expect(open.items.find(({ id }) => id === review.reviewId)).toMatchObject({
+      redundantEligible: true,
+      selectedProjection: {
+        productId: review.productId,
+        status: "verified",
+        authority: 100,
+        basis: "per_100g",
+        nutrition,
+      },
+    });
+    const beforeState = await evidenceState();
+    const beforeCoverage = await json<CoverageResponse>(await worker.fetch("http://localhost/api/coverage"));
+    const overriddenEvidence = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "redundant_nutrition",
+        rationale: "Attempted with caller-supplied evidence",
+        evidenceUrl: "https://example.invalid/not-the-bound-image.jpg",
+      }),
+    });
+    expect(overriddenEvidence.status).toBe(400);
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "redundant_nutrition",
+        rationale: "Exact duplicate of the currently selected verified projection",
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(await evidenceState()).toBe(beforeState);
+    const afterCoverage = await json<CoverageResponse>(await worker.fetch("http://localhost/api/coverage"));
+    expect(afterCoverage.catalog.verifiedNutrition).toBe(beforeCoverage.catalog.verifiedNutrition);
+    expect(afterCoverage.catalog.structuredNutrition).toBe(beforeCoverage.catalog.structuredNutrition);
+
+    const decision = await env.DB.prepare(`SELECT source_record_id, source_content_hash, product_id,
+      field_family, decision, evidence_url, rationale, decided_by, active
+      FROM evidence_decisions WHERE id = ?`).bind(`evd_${review.reviewId}`).first<Record<string, unknown>>();
+    expect(decision).toMatchObject({
+      source_record_id: review.sourceRecordId,
+      source_content_hash: "hash_redundant",
+      product_id: review.productId,
+      field_family: "nutrition",
+      decision: "redundant",
+      evidence_url: "https://images.openfoodfacts.org/images/products/label.jpg",
+      rationale: "Exact duplicate of the currently selected verified projection",
+      decided_by: "local_operator",
+      active: 1,
+    });
+    const history = await json<ReviewResponse>(await worker.fetch("http://localhost/api/reviews?status=resolved&type=nutrition_validation"));
+    expect(history.items.find(({ id }) => id === review.reviewId)).toMatchObject({
+      decision: "redundant_nutrition",
+      redundantEligible: false,
+      redundantProjectionMatches: true,
+      decisionEvidenceUrl: "https://images.openfoodfacts.org/images/products/label.jpg",
+      decidedBy: "local_operator",
+      selectedProjection: { nutrition },
+    });
+  });
+
+  it("rejects a stale redundant action when the selected projection drifts before the atomic write", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const nutrition = {
+      calories: 400,
+      proteinGrams: 40,
+      carbohydrateGrams: 30,
+      sugarGrams: 5,
+      fatGrams: 10,
+      saturatedFatGrams: 3,
+      fibreGrams: 4,
+      sodiumMg: 250,
+    };
+    const review = await insertRobotoffReview({ suffix: "redundant-drift", evidence: robotoffEvidence(product.gtin, nutrition) });
+    await env.DB.prepare(`UPDATE nutrition_facts SET status = 'verified', authority = 100, basis = 'per_100g',
+      calories = ?, protein_grams = ?, carbohydrate_grams = ?, sugar_grams = ?, fat_grams = ?,
+      saturated_fat_grams = ?, fibre_grams = ?, sodium_mg = ? WHERE product_id = ?`)
+      .bind(
+        nutrition.calories, nutrition.proteinGrams, nutrition.carbohydrateGrams, nutrition.sugarGrams,
+        nutrition.fatGrams, nutrition.saturatedFatGrams, nutrition.fibreGrams, nutrition.sodiumMg,
+        review.productId,
+      ).run();
+    const eligible = await json<ReviewResponse>(await worker.fetch("http://localhost/api/reviews?status=open&type=nutrition_validation"));
+    expect(eligible.items.find(({ id }) => id === review.reviewId)?.redundantEligible).toBe(true);
+
+    await env.DB.prepare("UPDATE nutrition_facts SET sugar_grams = 6 WHERE product_id = ?").bind(review.productId).run();
+    const before = await env.DB.batch([
+      env.DB.prepare("SELECT * FROM nutrition_facts WHERE product_id = ?").bind(review.productId),
+      env.DB.prepare("SELECT * FROM nutrient_values WHERE product_id = ? ORDER BY id").bind(review.productId),
+      env.DB.prepare("SELECT * FROM field_observations WHERE product_id = ? ORDER BY id").bind(review.productId),
+      env.DB.prepare("SELECT * FROM evidence_outcomes WHERE product_id = ? ORDER BY field_family").bind(review.productId),
+    ]);
+    const response = await worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        decision: "redundant_nutrition",
+        rationale: "Attempt after selected nutrition changed",
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(await json<{ error: { code: string } }>(response)).toMatchObject({ error: { code: "validation_error" } });
+    const after = await env.DB.batch([
+      env.DB.prepare("SELECT * FROM nutrition_facts WHERE product_id = ?").bind(review.productId),
+      env.DB.prepare("SELECT * FROM nutrient_values WHERE product_id = ? ORDER BY id").bind(review.productId),
+      env.DB.prepare("SELECT * FROM field_observations WHERE product_id = ? ORDER BY id").bind(review.productId),
+      env.DB.prepare("SELECT * FROM evidence_outcomes WHERE product_id = ? ORDER BY field_family").bind(review.productId),
+    ]);
+    expect(canonicalJson(after.map(({ results }) => results))).toBe(canonicalJson(before.map(({ results }) => results)));
+    expect(await env.DB.prepare("SELECT status, decision FROM review_items WHERE id = ?").bind(review.reviewId).first())
+      .toEqual({ status: "open", decision: null });
+    expect(await env.DB.prepare("SELECT COUNT(*) AS count FROM evidence_decisions WHERE id = ?")
+      .bind(`evd_${review.reviewId}`).first<{ count: number }>()).toEqual({ count: 0 });
+  });
+
   it("applies exact volume nutrition with per-100-mL facts and basis-safe metrics", async () => {
     const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
       .first<{ gtin: string }>();
@@ -984,6 +1142,55 @@ describe("Worker catalog API", () => {
     const current = await env.DB.prepare("SELECT COUNT(*) AS count FROM evidence_decisions WHERE id = ?")
       .bind(`evd_${review.reviewId}`).first<{ count: number }>();
     expect(current?.count).toBe(0);
+  });
+
+  it("appends a new source-bound decision when reconciliation reopens a review with an inactive legacy decision", async () => {
+    const product = await env.DB.prepare("SELECT gtin FROM products WHERE is_active = 1 AND gtin IS NOT NULL ORDER BY id LIMIT 1")
+      .first<{ gtin: string }>();
+    if (!product) throw new Error("Expected a seeded GTIN");
+    const evidence = robotoffEvidence(product.gtin, {
+      calories: 400, proteinGrams: 40, carbohydrateGrams: 30, sugarGrams: 5,
+      fatGrams: 10, saturatedFatGrams: 3, fibreGrams: 4, sodiumMg: 250,
+    });
+    const candidate = nutritionCandidateFromEvidence(evidence, product.gtin);
+    if (!candidate) throw new Error("Expected valid candidate evidence");
+    const review = await insertRobotoffReview({ suffix: "reopened-inactive", evidence });
+    const decide = (rationale: string) => worker.fetch(`http://localhost/api/reviews/${review.reviewId}/resolve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "reject_nutrition", rationale }),
+    });
+    expect((await decide("Initial exact-image rejection")).status).toBe(200);
+    const baseDecisionId = `evd_${review.reviewId}`;
+
+    await env.DB.batch([
+      env.DB.prepare("UPDATE evidence_decisions SET active = 0 WHERE id = ?").bind(baseDecisionId),
+      env.DB.prepare("UPDATE source_records SET content_hash = ? WHERE id = ?").bind("reconciled_source_content_hash", review.sourceRecordId),
+      env.DB.prepare(`UPDATE review_items SET status = 'open', decision = NULL, decision_rationale = NULL,
+        decision_evidence_url = NULL, decided_by = NULL, resolved_at = NULL WHERE id = ?`).bind(review.reviewId),
+    ]);
+
+    const response = await decide("Re-reviewed after exact source reconciliation");
+    expect(response.status).toBe(200);
+    const decisions = await env.DB.prepare(`SELECT id, source_content_hash, candidate_hash, decision, active
+      FROM evidence_decisions WHERE source_record_id = ? ORDER BY decided_at, id`)
+      .bind(review.sourceRecordId).all<{
+        id: string;
+        source_content_hash: string;
+        candidate_hash: string;
+        decision: string;
+        active: number;
+      }>();
+    expect(decisions.results).toHaveLength(2);
+    expect(decisions.results[0]).toMatchObject({ id: baseDecisionId, active: 0 });
+    expect(decisions.results[1]).toMatchObject({
+      source_content_hash: "reconciled_source_content_hash",
+      candidate_hash: await nutritionCandidateHash(candidate),
+      decision: "reject",
+      active: 1,
+    });
+    expect(decisions.results[1]?.id).toMatch(new RegExp(`^${baseDecisionId}_[a-f0-9]{16}$`));
+    expect(decisions.results.filter(({ active }) => active === 1)).toHaveLength(1);
   });
 
   it("replays unchanged verify/reject decisions and reopens changed candidate evidence", async () => {

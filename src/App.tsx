@@ -5,10 +5,13 @@ import type {
   CoverageResponse,
   HealthResponse,
   ProductDetailResponse,
+  ReviewDecision,
   ReviewItem,
   ReviewResponse,
+  ReviewStatus,
   ReviewType,
 } from "../shared/api";
+import type { SelectedNutritionProjection } from "../shared/evidence-decisions";
 import type { EvidenceStatus, MetricResult, NormalizedIngredient } from "../shared/types";
 import { api } from "./api";
 
@@ -619,15 +622,42 @@ const REVIEW_TYPE_OPTIONS: Array<{ value: ReviewTypeFilter; label: string }> = [
   { value: "invalid_gtin", label: "Invalid GTIN" },
 ];
 
-function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, page, onType, onPage, readOnly = false }: {
+const REVIEW_STATUS_OPTIONS: Array<{ value: ReviewStatus; label: string }> = [
+  { value: "open", label: "Open evidence" },
+  { value: "resolved", label: "Decision history" },
+  { value: "dismissed", label: "Dismissed evidence" },
+];
+
+function SelectedProjection({ projection }: { projection: SelectedNutritionProjection }) {
+  const rows: Array<[string, number | null, string]> = [
+    ["Energy", projection.nutrition.calories, "kcal"],
+    ["Protein", projection.nutrition.proteinGrams, "g"],
+    ["Carbohydrate", projection.nutrition.carbohydrateGrams, "g"],
+    ["Sugar", projection.nutrition.sugarGrams, "g"],
+    ["Fat", projection.nutrition.fatGrams, "g"],
+    ["Saturated fat", projection.nutrition.saturatedFatGrams, "g"],
+    ["Fibre", projection.nutrition.fibreGrams, "g"],
+    ["Sodium", projection.nutrition.sodiumMg, "mg"],
+  ];
+  return (
+    <div className="selected-projection" aria-label="Currently selected nutrition projection">
+      <div className="selected-projection-head"><strong>Current selected projection</strong><span>{projection.basis === "per_100ml" ? "per 100 mL" : "per 100 g"} · {projection.status} · authority {projection.authority}</span></div>
+      <div className="selected-projection-values">{rows.map(([label, value, unit]) => <span key={label}><small>{label}</small><b>{formatNumber(value)} {unit}</b></span>)}</div>
+    </div>
+  );
+}
+
+function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, statusFilter, page, onType, onStatus, onPage, readOnly = false }: {
   data: ReviewResponse | null;
   loading: boolean;
   error: string | null;
-  onResolve: (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) => Promise<void>;
+  onResolve: (item: ReviewItem, decision: ReviewDecision, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) => Promise<void>;
   onOpenProduct: (id: string) => void;
   typeFilter: ReviewTypeFilter;
+  statusFilter: ReviewStatus;
   page: number;
   onType: (type: ReviewTypeFilter) => void;
+  onStatus: (status: ReviewStatus) => void;
   onPage: (page: number) => void;
   readOnly?: boolean;
 }) {
@@ -635,6 +665,7 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, p
   const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
   const [reviewedTexts, setReviewedTexts] = useState<Record<string, string>>({});
   const [working, setWorking] = useState<string | null>(null);
+  const [confirmingRedundant, setConfirmingRedundant] = useState<string | null>(null);
   if (loading && !data) return <div className="loading" role="status">Loading review queue…</div>;
   if (error) return <div className="error-state" role="alert">{error}</div>;
   if (!data) return null;
@@ -642,10 +673,12 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, p
     <div className="review-layout" aria-busy={loading}>
       {readOnly && <div className="read-only-notice"><strong>Public read-only view</strong><span>Evidence can be inspected here. Decisions stay disabled until operator authentication is configured.</span></div>}
       <div className="queue-tools">
-        <label htmlFor="review-type">Evidence type</label>
-        <select id="review-type" name="reviewType" value={typeFilter} onChange={(event) => onType(event.target.value as ReviewTypeFilter)}>
+        <label htmlFor="review-status">Queue state<select id="review-status" name="reviewStatus" value={statusFilter} onChange={(event) => onStatus(event.target.value as ReviewStatus)}>
+          {REVIEW_STATUS_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+        </select></label>
+        <label htmlFor="review-type">Evidence type<select id="review-type" name="reviewType" value={typeFilter} onChange={(event) => onType(event.target.value as ReviewTypeFilter)}>
           {REVIEW_TYPE_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
-        </select>
+        </select></label>
         <span>{data.pagination.total.toLocaleString("en-IN")} matching item{data.pagination.total === 1 ? "" : "s"}</span>
       </div>
       <div className="queue-summary"><strong>{data.counts.open}</strong><span>open</span><strong>{data.counts.resolved}</strong><span>resolved</span></div>
@@ -653,11 +686,17 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, p
         const candidate = reviewNutritionCandidate(item.evidence);
         const ingredientCandidate = reviewIngredientCandidate(item.evidence);
         const evidenceUrl = evidenceUrls[item.id] ?? candidate?.imageUrl ?? ingredientCandidate?.imageUrl ?? "";
+        const rationale = rationales[item.id] ?? "";
+        const redundantRationaleReady = rationale.trim().length >= 3;
         const reviewedText = reviewedTexts[item.id] ?? ingredientCandidate?.entityText ?? "";
         return (
-        <article className={`review-card${candidate || ingredientCandidate ? " review-card-candidate" : ""}`} key={item.id}>
+        <article className={`review-card${candidate || ingredientCandidate ? " review-card-candidate" : ""}${item.decision === "redundant_nutrition" ? " review-card-redundant" : ""}`} key={item.id}>
           <header><span className="priority">P{item.priority}</span><div><h3>{item.productName ?? "Unmatched source record"}</h3><p>{item.brand ?? item.sourceRecordId} · {item.type.replaceAll("_", " ")}</p></div></header>
           {candidate && <NutritionCandidateEvidence candidate={candidate} productName={item.productName} />}
+          {(item.redundantEligible || item.decision === "redundant_nutrition") && item.selectedProjection && <section className="redundant-match" aria-label={item.decision === "redundant_nutrition" ? "Recorded redundant nutrition evidence" : "Exact duplicate nutrition evidence available"}>
+            <div><span className="redundant-badge">{item.decision === "redundant_nutrition" ? "Redundant evidence" : "Exact duplicate"}</span><h4>{item.decision === "redundant_nutrition" ? (item.redundantProjectionMatches ? "Recorded without changing verified nutrition" : "Recorded projection no longer matches") : "This label matches the selected projection"}</h4><p>{item.decision === "redundant_nutrition" ? (item.redundantProjectionMatches ? "The source-bound label was retained as terminal corroborating evidence. It did not create, replace, or re-verify a nutrition fact." : "The current selected projection has drifted. This historical decision must not be treated as current corroboration and reconciliation should return it to review.") : "All eight supported values and the physical basis match exactly. Recording redundancy will resolve only this evidence item."}</p></div>
+            <SelectedProjection projection={item.selectedProjection} />
+          </section>}
           {ingredientCandidate && <IngredientCandidateEvidence
             candidate={ingredientCandidate}
             productName={item.productName}
@@ -666,6 +705,11 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, p
             readOnly={readOnly}
           />}
           <details className="raw-evidence"><summary>Inspect raw evidence</summary><pre>{JSON.stringify(item.evidence, null, 2)}</pre></details>
+          {item.decision && <section className={`decision-history${item.decision === "redundant_nutrition" ? " decision-history-redundant" : ""}`} aria-label="Recorded review decision">
+            <div><span>Recorded decision</span><strong>{item.decision === "redundant_nutrition" ? "Redundant evidence" : item.decision.replaceAll("_", " ")}</strong></div>
+            <p>{item.rationale ?? "No rationale recorded."}</p>
+            <small>By {item.decidedBy ?? "unknown operator"}{item.decisionEvidenceUrl ? <> · <a href={item.decisionEvidenceUrl} target="_blank" rel="noreferrer">open evidence ↗</a></> : null}</small>
+          </section>}
           {item.type === "identity" && (
             <div className="identity-review">
               <div className="section-title"><h4>Candidate products</h4>{item.productId && <button className="text-button" onClick={() => onOpenProduct(item.productId!)}>Inspect incoming record</button>}</div>
@@ -681,14 +725,20 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, p
               ))}
             </div>
           )}
-          {!readOnly && <><label htmlFor={`review-rationale-${item.id}`}>Decision rationale<textarea id={`review-rationale-${item.id}`} name={`rationale-${item.id}`} value={rationales[item.id] ?? ""} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="What evidence supports this decision?" /></label>
+          {!readOnly && item.status === "open" && <><label htmlFor={`review-rationale-${item.id}`}>Decision rationale<textarea id={`review-rationale-${item.id}`} name={`rationale-${item.id}`} value={rationales[item.id] ?? ""} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="What evidence supports this decision?" /></label>
           {item.type !== "identity" && <label htmlFor={`review-evidence-${item.id}`}>Label or authoritative evidence URL<input id={`review-evidence-${item.id}`} name={`evidenceUrl-${item.id}`} type="url" value={evidenceUrl} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>}
           <div className="review-actions">
             {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>{candidate ? "Verify exact label values" : "Verify nutrition"}</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>Reject candidate</button></> : null}
+            {item.status === "open" && item.redundantEligible && confirmingRedundant !== item.id && <button className="redundant" disabled={working === item.id} onClick={() => setConfirmingRedundant(item.id)} aria-haspopup="dialog">Record redundant evidence</button>}
             {ingredientCandidate && <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_ingredients", rationales[item.id] ?? "", evidenceUrl || null, null, reviewedText).finally(() => setWorking(null)); }}>Verify reviewed label text</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_ingredients", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>Reject this candidate</button></>}
             {item.type === "identity" && <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "create_new", rationales[item.id] ?? "", null, null, null).finally(() => setWorking(null)); }}>Create distinct product</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "no_match", rationales[item.id] ?? "", null, null, null).finally(() => setWorking(null)); }}>Keep unmatched</button></>}
             <button className="ghost" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "dismiss", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>Dismiss</button>
-          </div></>}
+          </div>
+          {item.status === "open" && item.redundantEligible && confirmingRedundant === item.id && <div className="redundant-confirmation" role="alertdialog" aria-labelledby={`redundant-confirm-${item.id}`} aria-describedby={`redundant-description-${item.id}`}>
+            <strong id={`redundant-confirm-${item.id}`}>Confirm redundant evidence</strong>
+            <p id={`redundant-description-${item.id}`}>This will resolve only this source image. The currently verified nutrition and verification counts will not change.{!redundantRationaleReady ? " Add a rationale of at least 3 characters before confirming." : ""}</p>
+            <div><button autoFocus className="redundant" disabled={working === item.id || !redundantRationaleReady} onClick={async () => { setWorking(item.id); await onResolve(item, "redundant_nutrition", rationale, null, null, null).then(() => setConfirmingRedundant(null)).finally(() => setWorking(null)); }}>Confirm as redundant</button><button className="ghost" disabled={working === item.id} onClick={() => setConfirmingRedundant(null)}>Cancel</button></div>
+          </div>}</>}
         </article>
       )})}
       {data.pagination.pages > 1 && <nav className="pagination review-pagination" aria-label="Evidence queue pages"><button disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>← Previous</button><span>Page <strong>{page}</strong> of {data.pagination.pages.toLocaleString("en-IN")}</span><button disabled={page >= data.pagination.pages || loading} onClick={() => onPage(page + 1)}>Next →</button></nav>}
@@ -736,6 +786,7 @@ export function App() {
   const [reviews, setReviews] = useState<ReviewResponse | null>(null);
   const [reviewState, setReviewState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
   const [reviewType, setReviewType] = useState<ReviewTypeFilter>("all");
+  const [reviewStatus, setReviewStatus] = useState<ReviewStatus>("open");
   const [reviewPage, setReviewPage] = useState(1);
   const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
   const [coverageState, setCoverageState] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
@@ -747,11 +798,11 @@ export function App() {
   }, [filters, deferredQuery, page]);
 
   const reviewParams = useMemo(() => new URLSearchParams({
-    status: "open",
+    status: reviewStatus,
     type: reviewType,
     page: String(reviewPage),
     pageSize: "50",
-  }), [reviewType, reviewPage]);
+  }), [reviewStatus, reviewType, reviewPage]);
 
   const updateFilters = (next: Partial<typeof initialFilters>) => {
     setPage(1);
@@ -808,7 +859,7 @@ export function App() {
     return () => controller.abort();
   }, [tab, reviewParams]);
 
-  const resolve = async (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) => {
+  const resolve = async (item: ReviewItem, decision: ReviewDecision, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) => {
     if (rationale.trim().length < 3) { setReviewState((state) => ({ ...state, error: "Add a rationale of at least 3 characters." })); return; }
     if (["verify_nutrition", "verify_ingredients"].includes(decision) && !evidenceUrl) { setReviewState((state) => ({ ...state, error: "Verification requires a current label or authoritative-source URL." })); return; }
     if (decision === "verify_ingredients" && !reviewedText?.trim()) { setReviewState((state) => ({ ...state, error: "Ingredient verification requires the reviewer-confirmed visible label text." })); return; }
@@ -862,7 +913,7 @@ export function App() {
             {catalog && !catalogState.loading && !catalogState.error && <CatalogTable data={catalog} onOpen={setSelectedId} onExplore={showDiscovery} page={page} onPage={setPage} />}
           </>
         )}
-        {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h1>Evidence review queue</h1><p>{isPublic ? "Inspect unresolved evidence. Production decisions remain read-only until operator authentication is in place." : "Resolve conflicts without discarding the original source record."}</p></section><Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} typeFilter={reviewType} page={reviewPage} onType={(type) => { setReviewPage(1); setReviewType(type); }} onPage={setReviewPage} readOnly={isPublic} /></>}
+        {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h1>Evidence review queue</h1><p>{isPublic ? "Inspect unresolved evidence and decision history. Production decisions remain read-only until operator authentication is in place." : "Resolve conflicts without discarding the original source record."}</p></section><Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} typeFilter={reviewType} statusFilter={reviewStatus} page={reviewPage} onType={(type) => { setReviewPage(1); setReviewType(type); }} onStatus={(status) => { setReviewPage(1); setReviewStatus(status); }} onPage={setReviewPage} readOnly={isPublic} /></>}
         {tab === "coverage" && <><section className="page-head"><p className="eyebrow">No fake completeness claims</p><h1>Coverage ledger</h1><p>Exhaustion is proved per configured source, with disconnected sources left visible.</p></section><Coverage data={coverage} loading={coverageState.loading} error={coverageState.error} /></>}
       </main>
       <footer><span>Protein Index</span><p>Evidence before rankings. Configured-source coverage, never a claim of the whole Indian market.</p><button onClick={() => setTab("coverage")}>Read the coverage ledger</button></footer>
