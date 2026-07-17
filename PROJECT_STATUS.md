@@ -183,6 +183,7 @@ must pass desktop/mobile verification.
 - 2026-07-17 — the default catalog comparison now presents protein per 100 calories, protein grams, and energy together on desktop and mobile instead of hiding calories in product detail. Missing energy remains explicit, rendered contract tests cover both present and absent values, and live local checks at 1,440 px and 390 px confirm zero page overflow, zero console issues, and an intact compact card/table hierarchy; the full 166-test/type/build check passes and production remains unchanged pending release approval.
 - 2026-07-17 — future nutrition-v8 and ingredient-v3 producer workflows now audit every checked-in reviewed decision against the exact checksum-validated artifact before uploading publishable candidates. Hard proof failures and ambiguous active decisions stop candidate publication, while a separate 30-day report uploads under the failure path for diagnosis; the focused 62-test ingestion contract passes and production remains unchanged.
 - 2026-07-17 — exact label hashing now aborts any response or stalled body after 30 seconds instead of allowing one image to consume the four-hour workflow timeout. Multi-pass extraction also validates and reuses successful label assets written by the immediately preceding pass, so transient failures retry only incomplete evidence rather than re-downloading thousands of images; 72 focused tests plus typecheck pass and production remains unchanged.
+- 2026-07-17 — source-bound corrected nutrition transcription is implemented locally: operators can replace an incorrect model projection with explicit per-100-g or per-100-mL values while retaining the original candidate, exact source/product/label binding, and field-level audit history. Worker publication and drift replay fail closed, the editor is verified at desktop and 390 px without horizontal overflow, all 81 complete immutable review bundles validate, the corrected publication replay is idempotent, and the full 146-unit/45-Worker test, typecheck, and production build pass. No corrected production coverage is claimed before an exact reviewed decision is published.
 
 ## Products
 
@@ -236,6 +237,9 @@ must pass desktop/mobile verification.
   validated values and leaves rejected candidates isolated from existing facts
 - Side-by-side operator review of the label image, exact normalized candidate,
   model metadata, confidence, basis, and human-verification warning
+- Basis-aware corrected nutrition transcription that preserves the original
+  model candidate, records an explicit reviewed mass or volume projection, and
+  exposes exact field changes through the review and product-detail APIs
 - Append-only evidence decisions bound to exact source content and canonical
   candidate hashes, with verified/rejected replay and stale-evidence invalidation
 - Deterministic, checksummed review-decision bundles with fail-closed path,

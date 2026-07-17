@@ -57,6 +57,8 @@ interface ReviewRow {
   saturated_fat_grams: number | null;
   fibre_grams: number | null;
   sodium_mg: number | null;
+  nutrition_decision_candidate_hash: string | null;
+  nutrition_decision_payload_json: string | null;
 }
 
 interface ReviewCountRow { status: "open" | "resolved" | "dismissed"; count: number }
@@ -186,6 +188,38 @@ function reviewedIngredientRows(
   });
 }
 
+async function correctedNutritionHistory(
+  row: ReviewRow,
+  candidate: NutritionCandidate | null,
+): Promise<Pick<ReviewItem, "reviewedProjection" | "nutritionChanges"> | null> {
+  if (
+    !candidate
+    || row.decision !== "verify_nutrition"
+    || !row.nutrition_decision_candidate_hash
+    || !row.nutrition_decision_payload_json
+  ) return null;
+  const payload = parseNutritionDecisionPayload(
+    parsed(row.nutrition_decision_payload_json),
+    row.product_gtin,
+  );
+  if (!payload || !isCorrectedNutritionDecisionPayload(payload)) return null;
+  const candidateHash = await nutritionCandidateHash(candidate);
+  if (
+    candidateHash !== row.nutrition_decision_candidate_hash
+    || canonicalJson(payload.candidate) !== canonicalJson(candidate)
+  ) return null;
+  const original = effectiveNutritionProjection(candidate).nutrition;
+  const reviewed = effectiveNutritionProjection(payload).nutrition;
+  return {
+    reviewedProjection: payload.reviewedProjection,
+    nutritionChanges: NUTRITION_FIELDS.flatMap(([field]) => (
+      original[field] === reviewed[field]
+        ? []
+        : [{ field, originalValue: original[field], reviewedValue: reviewed[field] }]
+    )),
+  };
+}
+
 export async function listReviews(
   db: D1Database,
   status: ReviewStatus,
@@ -212,6 +246,8 @@ export async function listReviews(
       nf.status AS nutrition_status, nf.authority AS nutrition_authority, nf.basis AS nutrition_basis,
       nf.calories, nf.protein_grams, nf.carbohydrate_grams, nf.sugar_grams, nf.fat_grams,
       nf.saturated_fat_grams, nf.fibre_grams, nf.sodium_mg,
+      nutrition_decision.candidate_hash AS nutrition_decision_candidate_hash,
+      nutrition_decision.payload_json AS nutrition_decision_payload_json,
       COALESCE((SELECT json_group_array(json_object(
         'id', candidate.id,
         'gtin', candidate.gtin,
@@ -226,6 +262,25 @@ export async function listReviews(
       LEFT JOIN products p ON p.id = r.product_id
       LEFT JOIN source_records s ON s.id = r.source_record_id
       LEFT JOIN nutrition_facts nf ON nf.product_id = r.product_id
+      LEFT JOIN evidence_decisions nutrition_decision
+        ON nutrition_decision.source_id = s.source_id
+        AND nutrition_decision.source_record_key = s.source_record_id
+        AND nutrition_decision.source_record_id = s.id
+        AND nutrition_decision.source_content_hash = s.content_hash
+        AND nutrition_decision.product_id = r.product_id
+        AND (
+          nutrition_decision.candidate_hash = json_extract(r.evidence_json, '$.details.candidateHash')
+          OR (
+            json_extract(r.evidence_json, '$.details.candidateHash') IS NULL
+            AND (
+              nutrition_decision.id = 'evd_' || r.id
+              OR instr(nutrition_decision.id, 'evd_' || r.id || '_') = 1
+            )
+          )
+        )
+        AND nutrition_decision.field_family = 'nutrition'
+        AND nutrition_decision.decision = 'verify'
+        AND nutrition_decision.active = 1
       WHERE r.status = ?${typeFilter}${idFilter}
       ORDER BY r.priority DESC, r.created_at, r.id LIMIT ? OFFSET ?`).bind(...itemBindings),
     db.prepare(`SELECT COUNT(*) AS total FROM review_items r WHERE r.status = ?${typeFilter}${idFilter}`).bind(...totalBindings),
@@ -245,6 +300,7 @@ export async function listReviews(
     const duplicate = await redundantDecision(row, candidate);
     const redundantProjectionMatches = duplicate !== null && selectedProjection !== null
       && nutritionDecisionMatchesSelectedProjection(duplicate, selectedProjection);
+    const correctedHistory = await correctedNutritionHistory(row, candidate);
     return {
       id: row.id,
       type: row.type,
@@ -258,6 +314,7 @@ export async function listReviews(
       candidates: parsed(row.candidates_json) as ReviewItem["candidates"] ?? [],
       evidence,
       selectedProjection,
+      ...(correctedHistory ?? {}),
       redundantProjectionMatches,
       redundantEligible: row.status === "open" && redundantProjectionMatches,
       createdAt: row.created_at,

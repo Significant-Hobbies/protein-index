@@ -13,13 +13,13 @@
 
 ## 3. Operator experience and API
 
-- [ ] 3.1 Extend API types and review responses with the optional reviewed projection and field-level change summary.
-- [ ] 3.2 Add a basis-aware editor pre-filled from the model candidate with explicit null handling, validation, and changed-field highlighting beside the exact image.
-- [ ] 3.3 Keep exact-candidate verify and reject actions unchanged, and add a distinct confirmation path for corrected verification.
-- [ ] 3.4 Add responsive UI/API tests covering corrected mass and volume candidates, basis changes, errors, and published product detail.
+- [x] 3.1 Extend API types and review responses with the optional reviewed projection and field-level change summary.
+- [x] 3.2 Add a basis-aware editor pre-filled from the model candidate with explicit null handling, validation, and changed-field highlighting beside the exact image.
+- [x] 3.3 Keep exact-candidate verify and reject actions unchanged, and add a distinct confirmation path for corrected verification.
+- [x] 3.4 Add responsive UI/API tests covering corrected mass and volume candidates, basis changes, errors, and published product detail.
 
 ## 4. Verification and delivery
 
-- [ ] 4.1 Run focused domain, Worker, publication, and UI tests after each slice, then run `pnpm check`, every immutable review-bundle validation, and a local idempotent replay proof.
-- [ ] 4.2 Complete sanctioned desktop/mobile rendered verification before deploying the review UI; do not migrate or publish production evidence as part of this change.
+- [x] 4.1 Run focused domain, Worker, publication, and UI tests after each slice, then run `pnpm check`, every immutable review-bundle validation, and a local idempotent replay proof.
+- [x] 4.2 Complete sanctioned desktop/mobile rendered verification before deploying the review UI; do not migrate or publish production evidence as part of this change.
 - [ ] 4.3 Validate and archive the OpenSpec change, update `PROJECT_STATUS.md`, and publish the green repository change without claiming corrected coverage before live evidence publication.

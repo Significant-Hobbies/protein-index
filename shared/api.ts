@@ -3,10 +3,11 @@ import type {
   EvidenceStatus,
   MetricResult,
   NormalizedIngredient,
+  NutritionPer100g,
   ProductCategory,
   ProductMetrics,
 } from "./types";
-import type { SelectedNutritionProjection } from "./evidence-decisions";
+import type { ReviewedNutritionProjection, SelectedNutritionProjection } from "./evidence-decisions";
 
 export interface ApiErrorBody {
   error: {
@@ -106,6 +107,10 @@ export interface ReviewItem {
   }>;
   evidence: unknown;
   selectedProjection: SelectedNutritionProjection | null;
+  /** Present for reviewer-corrected nutrition decisions. Older responses omit it. */
+  reviewedProjection?: ReviewedNutritionProjection | null;
+  /** Field-level audit summary supplied by the review API for corrected decisions. */
+  nutritionChanges?: NutritionReviewChange[];
   redundantProjectionMatches: boolean;
   redundantEligible: boolean;
   createdAt: string;
@@ -113,6 +118,12 @@ export interface ReviewItem {
   rationale: string | null;
   decisionEvidenceUrl: string | null;
   decidedBy: string | null;
+}
+
+export interface NutritionReviewChange {
+  field: keyof NutritionPer100g;
+  originalValue: number | null;
+  reviewedValue: number | null;
 }
 
 export type ReviewDecision =

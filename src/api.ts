@@ -6,6 +6,7 @@ import type {
   ProductDetailResponse,
   ReviewResponse,
 } from "../shared/api";
+import type { ReviewedNutritionProjection } from "../shared/evidence-decisions";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -34,9 +35,16 @@ export const api = {
   coverage: () => request<CoverageResponse>("/api/coverage"),
   completionLedger: (params: URLSearchParams, signal?: AbortSignal) =>
     request<CompletionLedgerResponse>(`/api/completion-ledger?${params}`, { signal }),
-  resolveReview: (id: string, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) =>
+  resolveReview: (id: string, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null, reviewedProjection: ReviewedNutritionProjection | null = null) =>
     request<{ status: string }>(`/api/reviews/${encodeURIComponent(id)}/resolve`, {
       method: "POST",
-      body: JSON.stringify({ decision, rationale, evidenceUrl, candidateProductId, reviewedText }),
+      body: JSON.stringify({
+        decision,
+        rationale,
+        evidenceUrl,
+        candidateProductId,
+        reviewedText,
+        ...(reviewedProjection ? { reviewedProjection } : {}),
+      }),
     }),
 };

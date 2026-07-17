@@ -257,6 +257,51 @@ td > small, .product-link span, .source-row span, .mini-table small { display: b
 .candidate-meta dt { color: var(--muted); }
 .candidate-meta dd { margin: 0; overflow-wrap: anywhere; }
 .candidate-warning { margin: 14px 0 0; padding: 10px 12px; border-left: 3px solid var(--amber); background: var(--amber-soft); color: var(--amber); font-size: 10px; line-height: 1.5; }
+.nutrition-correction { margin-top: 14px; padding: 16px; border: 1px solid #b8cbbf; border-radius: 12px; background: linear-gradient(135deg, #f2f7f2, #f8f6ee); }
+.nutrition-correction-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.nutrition-correction-head h4 { margin: 4px 0 0; font-family: var(--display); font-size: 21px; font-weight: 500; }
+.nutrition-correction-head > span { flex: 0 0 auto; padding: 5px 8px; border-radius: 999px; background: white; color: var(--muted); font-size: 9px; font-weight: 850; }
+.nutrition-correction > p { max-width: 760px; margin: 8px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.review-card .nutrition-correction > label { max-width: 280px; margin: 14px 0 0; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: white; }
+.nutrition-correction > label small { float: right; color: var(--amber); font-size: 8px; font-weight: 850; text-transform: uppercase; }
+.nutrition-correction select { margin-top: 6px; }
+.nutrition-editor-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.review-card .nutrition-editor-grid label { min-width: 0; margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: white; transition: border-color .15s ease, box-shadow .15s ease; }
+.nutrition-editor-grid label > span { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; color: var(--ink); font-size: 9px; font-weight: 850; }
+.nutrition-editor-grid label > span small { color: var(--muted); font-size: 7px; letter-spacing: .04em; text-transform: uppercase; }
+.nutrition-editor-grid input { margin-top: 7px; font-size: 14px; font-weight: 750; }
+.nutrition-editor-grid em { display: block; min-height: 24px; margin-top: 5px; color: var(--muted); font-size: 8px; font-style: normal; line-height: 1.35; }
+.review-card .nutrition-edit-changed { border-color: #d89b32; box-shadow: inset 3px 0 0 var(--amber); }
+.nutrition-editor-grid .nutrition-edit-changed > span small { color: var(--amber); }
+.nutrition-editor-grid input[aria-invalid="true"] { border-color: var(--red); background: var(--red-soft); }
+.nutrition-editor-grid em[role="alert"], .nutrition-form-error { color: var(--red); font-weight: 750; }
+.nutrition-form-error { margin-top: 8px; padding: 9px 10px; border-radius: 7px; background: var(--red-soft); font-size: 9px; }
+.nutrition-correction button.corrected-verification { min-height: 44px; margin-top: 12px; padding: 9px 13px; border: 0; border-radius: 8px; background: var(--green); color: white; font-size: 11px; font-weight: 800; }
+.nutrition-correction button.corrected-verification:disabled { opacity: .45; }
+.nutrition-correction-help { display: block; margin-top: 7px; color: var(--muted); font-size: 9px; }
+.nutrition-correction-confirmation { margin-top: 12px; padding: 14px; border: 2px solid var(--green); border-radius: 10px; background: white; box-shadow: 0 12px 30px rgba(22, 50, 35, .12); }
+.nutrition-correction-confirmation > strong { font-family: var(--display); font-size: 18px; }
+.nutrition-correction-confirmation > p { margin: 6px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.nutrition-correction-confirmation p.basis-change { padding: 8px 10px; border-radius: 7px; background: var(--amber-soft); color: var(--amber); }
+.nutrition-correction-confirmation ul { display: grid; gap: 1px; margin: 10px 0 0; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--line); list-style: none; }
+.nutrition-correction-confirmation li { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr); gap: 8px; padding: 8px 10px; background: var(--paper); font-size: 10px; }
+.nutrition-correction-confirmation li span { color: var(--muted); }
+.nutrition-correction-confirmation li del { color: var(--red); }
+.nutrition-correction-confirmation li strong { color: var(--green); }
+.nutrition-correction-confirmation > div { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 11px; }
+.nutrition-correction-confirmation button { min-height: 44px; padding: 9px 12px; border: 0; border-radius: 8px; background: var(--green); color: white; font-size: 11px; font-weight: 800; }
+.nutrition-correction-confirmation button.ghost { background: #e8e7df; color: var(--ink); }
+.review-action-error { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; padding: 10px 12px; border-left: 3px solid var(--red); background: var(--red-soft); color: var(--red); font-size: 10px; line-height: 1.45; }
+.review-action-error strong { flex: 0 0 auto; }
+.reviewed-nutrition-history { margin-top: 10px; padding: 13px; border: 1px solid #b8cbbf; border-radius: 9px; background: #f2f7f2; }
+.reviewed-nutrition-history > div:first-child { display: flex; justify-content: space-between; gap: 12px; }
+.reviewed-nutrition-history > div:first-child strong { font-size: 11px; }
+.reviewed-nutrition-history > p { margin: 6px 0 0; color: var(--muted); font-size: 10px; }
+.reviewed-nutrition-history > div:last-child { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin-top: 9px; }
+.reviewed-nutrition-history > div:last-child span { min-width: 0; padding: 7px; border-radius: 6px; background: white; }
+.reviewed-nutrition-history small, .reviewed-nutrition-history b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reviewed-nutrition-history small { color: var(--muted); font-size: 7px; text-transform: uppercase; }
+.reviewed-nutrition-history b { margin-top: 3px; font-size: 10px; }
 .redundant-match { display: grid; grid-template-columns: minmax(220px, .65fr) minmax(0, 1.35fr); align-items: center; gap: 18px; margin-top: 14px; padding: 15px; border: 1px solid #afc5d5; border-radius: 10px; background: var(--blue-soft); }
 .redundant-match h4 { margin: 7px 0 5px; font-size: 15px; }
 .redundant-match p { margin: 0; color: #3d5873; font-size: 11px; line-height: 1.5; }
@@ -508,6 +553,13 @@ footer button { min-height: 44px; padding: 0 10px; border: 0; background: transp
   .candidate-label { min-height: 260px; }
   .ingredient-label { min-height: 340px; }
   .candidate-nutrition-grid { grid-template-columns: repeat(2, 1fr); }
+  .nutrition-editor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .nutrition-correction { padding: 11px; }
+  .nutrition-correction-head { flex-direction: column; gap: 8px; }
+  .review-card .nutrition-correction > label { max-width: none; }
+  .nutrition-correction-confirmation li { grid-template-columns: 1fr; gap: 3px; }
+  .review-action-error { flex-direction: column; }
+  .reviewed-nutrition-history > div:last-child { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .redundant-match { grid-template-columns: 1fr; }
   .selected-projection-values { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .decision-history { grid-template-columns: 1fr; }

@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   CatalogProduct,
   CatalogResponse,
@@ -19,8 +19,10 @@ import type {
   ReviewStatus,
   ReviewType,
 } from "../shared/api";
-import type { SelectedNutritionProjection } from "../shared/evidence-decisions";
-import type { EvidenceStatus, MetricResult, NormalizedIngredient } from "../shared/types";
+import { NUTRITION_FIELDS } from "../shared/evidence-decisions";
+import type { ReviewedNutritionProjection, SelectedNutritionProjection } from "../shared/evidence-decisions";
+import { validateNutrition } from "../shared/nutrition";
+import type { EvidenceStatus, MetricResult, NormalizedIngredient, NutritionPer100g } from "../shared/types";
 import { api } from "./api";
 
 type Tab = "catalog" | "reviews" | "coverage";
@@ -541,7 +543,7 @@ function ProductDrawer({ detail, loading, error, onClose }: {
   );
 }
 
-function NutritionCandidateEvidence({ candidate, productName }: { candidate: ReviewNutritionCandidate; productName: string | null }) {
+function NutritionCandidateEvidence({ candidate, productName, editor = null }: { candidate: ReviewNutritionCandidate; productName: string | null; editor?: ReactNode }) {
   const rows: Array<[string, number | null, string]> = [
     ["Energy", candidate.nutrition.calories, "kcal"],
     ["Protein", candidate.nutrition.proteinGrams, "g"],
@@ -573,7 +575,202 @@ function NutritionCandidateEvidence({ candidate, productName }: { candidate: Rev
           <div><dt>Model evidence</dt><dd>{candidate.modelVersion} · prediction {candidate.predictionId} · image {candidate.imageId}</dd></div>
         </dl>
         <p className="candidate-warning"><strong>Human check required.</strong> Confirm this is the current package and every displayed value matches the label before verification.</p>
+        {editor}
       </div>
+    </section>
+  );
+}
+
+type NutritionField = (typeof NUTRITION_FIELDS)[number];
+type NutritionDraftValues = Record<NutritionField, string>;
+
+export interface NutritionReviewDraft {
+  basis: "per_100g" | "per_100ml";
+  values: NutritionDraftValues;
+}
+
+export interface NutritionDraftResult {
+  projection: ReviewedNutritionProjection | null;
+  errors: Partial<Record<NutritionField | "form", string>>;
+}
+
+export interface NutritionFieldChange {
+  field: NutritionField;
+  originalValue: number | null;
+  reviewedValue: number | null;
+}
+
+const NUTRITION_EDITOR_FIELDS: Array<{ field: NutritionField; label: string; unit: string; required: boolean }> = [
+  { field: "calories", label: "Energy", unit: "kcal", required: true },
+  { field: "proteinGrams", label: "Protein", unit: "g", required: true },
+  { field: "carbohydrateGrams", label: "Carbohydrate", unit: "g", required: false },
+  { field: "sugarGrams", label: "Sugar", unit: "g", required: false },
+  { field: "fatGrams", label: "Fat", unit: "g", required: false },
+  { field: "saturatedFatGrams", label: "Saturated fat", unit: "g", required: false },
+  { field: "fibreGrams", label: "Fibre", unit: "g", required: false },
+  { field: "sodiumMg", label: "Sodium", unit: "mg", required: false },
+];
+
+export function nutritionDraftFromCandidate(candidate: ReviewNutritionCandidate): NutritionReviewDraft {
+  return {
+    basis: candidate.normalizedBasis,
+    values: Object.fromEntries(NUTRITION_FIELDS.map((field) => [
+      field,
+      candidate.nutrition[field] === null ? "" : String(candidate.nutrition[field]),
+    ])) as NutritionDraftValues,
+  };
+}
+
+export function reviewedProjectionFromDraft(draft: NutritionReviewDraft): NutritionDraftResult {
+  const errors: NutritionDraftResult["errors"] = {};
+  const nutrition = {} as NutritionPer100g;
+
+  for (const { field, required } of NUTRITION_EDITOR_FIELDS) {
+    const raw = draft.values[field].trim();
+    if (!raw) {
+      nutrition[field] = null;
+      if (required) errors[field] = "Required for verified nutrition.";
+      continue;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value) || value < 0) {
+      nutrition[field] = null;
+      errors[field] = "Enter a finite, non-negative number.";
+      continue;
+    }
+    nutrition[field] = value;
+  }
+
+  if (Object.keys(errors).length === 0) {
+    for (const issue of validateNutrition(nutrition, draft.basis)) {
+      if (issue.severity !== "error") continue;
+      const field = NUTRITION_FIELDS.includes(issue.field as NutritionField)
+        ? issue.field as NutritionField
+        : "form";
+      errors[field] = issue.message;
+    }
+  }
+
+  if (Object.keys(errors).length > 0) return { projection: null, errors };
+  return {
+    projection: draft.basis === "per_100g"
+      ? { basis: "per_100g", nutritionPer100g: nutrition }
+      : { basis: "per_100ml", nutritionPer100ml: nutrition },
+    errors,
+  };
+}
+
+function reviewedProjectionValues(projection: ReviewedNutritionProjection): NutritionPer100g {
+  return projection.basis === "per_100g" ? projection.nutritionPer100g : projection.nutritionPer100ml;
+}
+
+export function nutritionFieldChanges(candidate: ReviewNutritionCandidate, projection: ReviewedNutritionProjection): NutritionFieldChange[] {
+  const reviewed = reviewedProjectionValues(projection);
+  return NUTRITION_FIELDS.flatMap((field) => candidate.nutrition[field] === reviewed[field]
+    ? []
+    : [{ field, originalValue: candidate.nutrition[field], reviewedValue: reviewed[field] }]);
+}
+
+function nutritionFieldLabel(field: NutritionField): string {
+  return NUTRITION_EDITOR_FIELDS.find((entry) => entry.field === field)?.label ?? field;
+}
+
+function nutritionFieldValue(value: number | null, field: NutritionField): string {
+  if (value === null) return "Not declared";
+  return `${formatNumber(value)} ${field === "calories" ? "kcal" : field === "sodiumMg" ? "mg" : "g"}`;
+}
+
+export function NutritionCorrectionConfirmation({
+  reviewId,
+  candidate,
+  projection,
+  changes,
+  working,
+  onConfirm,
+  onCancel,
+}: {
+  reviewId: string;
+  candidate: ReviewNutritionCandidate;
+  projection: ReviewedNutritionProjection;
+  changes: NutritionFieldChange[];
+  working: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const basisChanged = candidate.normalizedBasis !== projection.basis;
+  return (
+    <div className="nutrition-correction-confirmation" role="alertdialog" aria-modal="true" aria-labelledby={`nutrition-confirm-${reviewId}`} aria-describedby={`nutrition-confirm-description-${reviewId}`}>
+      <strong id={`nutrition-confirm-${reviewId}`}>Confirm corrected label values</strong>
+      <p id={`nutrition-confirm-description-${reviewId}`}>This creates verified nutrition from the reviewer-entered values and retains the model output in the audit trail.</p>
+      {basisChanged && <p className="basis-change"><b>Basis changed:</b> {candidate.normalizedBasis === "per_100g" ? "per 100 g" : "per 100 mL"} → {projection.basis === "per_100g" ? "per 100 g" : "per 100 mL"}</p>}
+      <ul>{changes.map((change) => <li key={change.field}><span>{nutritionFieldLabel(change.field)}</span><del>{nutritionFieldValue(change.originalValue, change.field)}</del><strong>{nutritionFieldValue(change.reviewedValue, change.field)}</strong></li>)}</ul>
+      <div><button autoFocus disabled={working} onClick={onConfirm}>Confirm corrected values</button><button className="ghost" disabled={working} onClick={onCancel}>Cancel</button></div>
+    </div>
+  );
+}
+
+export function NutritionCorrectionEditor({
+  reviewId,
+  candidate,
+  rationale,
+  working,
+  onSubmit,
+}: {
+  reviewId: string;
+  candidate: ReviewNutritionCandidate;
+  rationale: string;
+  working: boolean;
+  onSubmit: (projection: ReviewedNutritionProjection) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState<NutritionReviewDraft>(() => nutritionDraftFromCandidate(candidate));
+  const [confirming, setConfirming] = useState(false);
+  const result = reviewedProjectionFromDraft(draft);
+  const changes = result.projection ? nutritionFieldChanges(candidate, result.projection) : [];
+  const basisChanged = draft.basis !== candidate.normalizedBasis;
+  const hasChanges = basisChanged || changes.length > 0;
+
+  const openConfirmation = () => {
+    if (!result.projection || !hasChanges || rationale.trim().length < 3) return;
+    setConfirming(true);
+  };
+  const confirm = async () => {
+    if (!result.projection) return;
+    if (await onSubmit(result.projection)) setConfirming(false);
+  };
+
+  return (
+    <section className="nutrition-correction" aria-labelledby={`nutrition-correction-${reviewId}`}>
+      <div className="nutrition-correction-head"><div><span className="eyebrow">Correction path</span><h4 id={`nutrition-correction-${reviewId}`}>Transcribe what the label actually says</h4></div><span>{hasChanges ? `${changes.length + (basisChanged ? 1 : 0)} change${changes.length + (basisChanged ? 1 : 0) === 1 ? "" : "s"}` : "No changes"}</span></div>
+      <p>Only use this when the model output is wrong. Blank optional fields are stored explicitly as not declared.</p>
+      <label className={basisChanged ? "nutrition-edit-changed" : ""} htmlFor={`nutrition-basis-${reviewId}`}>Nutrition basis {basisChanged && <small>Changed</small>}<select id={`nutrition-basis-${reviewId}`} value={draft.basis} onChange={(event) => setDraft((current) => ({ ...current, basis: event.target.value as NutritionReviewDraft["basis"] }))}><option value="per_100g">Per 100 g</option><option value="per_100ml">Per 100 mL</option></select></label>
+      <div className="nutrition-editor-grid">
+        {NUTRITION_EDITOR_FIELDS.map(({ field, label, unit, required }) => {
+          const original = candidate.nutrition[field];
+          const raw = draft.values[field].trim();
+          const parsed = raw === "" ? null : Number(raw);
+          const changed = Number.isFinite(parsed) ? parsed !== original : raw === "" && original !== null;
+          const error = result.errors[field];
+          const describedBy = `${reviewId}-${field}-${error ? "error" : raw === "" && !required ? "null" : "hint"}`;
+          return <label className={changed ? "nutrition-edit-changed" : ""} htmlFor={`${reviewId}-${field}`} key={field}><span>{label}{required ? " *" : ""}<small>{changed ? "Changed" : unit}</small></span><input id={`${reviewId}-${field}`} type="number" inputMode="decimal" min="0" step="any" value={draft.values[field]} aria-invalid={Boolean(error)} aria-describedby={describedBy} onChange={(event) => setDraft((current) => ({ ...current, values: { ...current.values, [field]: event.target.value } }))} />{error ? <em id={describedBy} role="alert">{error}</em> : raw === "" && !required ? <em id={describedBy}>Not declared (explicit null)</em> : <em id={describedBy}>Original: {nutritionFieldValue(original, field)}</em>}</label>;
+        })}
+      </div>
+      {result.errors.form && <div className="nutrition-form-error" role="alert">{result.errors.form}</div>}
+      <button className="corrected-verification" disabled={working || !result.projection || !hasChanges || rationale.trim().length < 3} onClick={openConfirmation} aria-haspopup="dialog">Review corrected verification</button>
+      {rationale.trim().length < 3 && <small className="nutrition-correction-help">Add a rationale of at least 3 characters before reviewing the correction.</small>}
+      {confirming && result.projection && <NutritionCorrectionConfirmation reviewId={reviewId} candidate={candidate} projection={result.projection} changes={changes} working={working} onConfirm={confirm} onCancel={() => setConfirming(false)} />}
+    </section>
+  );
+}
+
+export function ReviewedNutritionHistory({ item }: { item: ReviewItem }) {
+  if (!item.reviewedProjection) return null;
+  const changes = item.nutritionChanges ?? [];
+  const values = reviewedProjectionValues(item.reviewedProjection);
+  return (
+    <section className="reviewed-nutrition-history" aria-label="Published reviewer-corrected nutrition">
+      <div><span className="eyebrow">Published correction</span><strong>{item.reviewedProjection.basis === "per_100g" ? "Per 100 g" : "Per 100 mL"}</strong></div>
+      <p>{changes.length > 0 ? `${changes.length} nutrition field${changes.length === 1 ? "" : "s"} changed from the model extraction.` : "Reviewer-corrected values were published from this label."}</p>
+      <div>{NUTRITION_EDITOR_FIELDS.map(({ field, label }) => <span key={field}><small>{label}</small><b>{nutritionFieldValue(values[field], field)}</b></span>)}</div>
     </section>
   );
 }
@@ -694,7 +891,7 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, s
   data: ReviewResponse | null;
   loading: boolean;
   error: string | null;
-  onResolve: (item: ReviewItem, decision: ReviewDecision, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) => Promise<void>;
+  onResolve: (item: ReviewItem, decision: ReviewDecision, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null, reviewedProjection: ReviewedNutritionProjection | null) => Promise<void>;
   onOpenProduct: (id: string) => void;
   typeFilter: ReviewTypeFilter;
   statusFilter: ReviewStatus;
@@ -707,8 +904,22 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, s
   const [rationales, setRationales] = useState<Record<string, string>>({});
   const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
   const [reviewedTexts, setReviewedTexts] = useState<Record<string, string>>({});
+  const [actionErrors, setActionErrors] = useState<Record<string, string>>({});
   const [working, setWorking] = useState<string | null>(null);
   const [confirmingRedundant, setConfirmingRedundant] = useState<string | null>(null);
+  const runAction = async (itemId: string, action: () => Promise<void>): Promise<boolean> => {
+    setWorking(itemId);
+    setActionErrors((current) => ({ ...current, [itemId]: "" }));
+    try {
+      await action();
+      return true;
+    } catch (actionError) {
+      setActionErrors((current) => ({ ...current, [itemId]: actionError instanceof Error ? actionError.message : String(actionError) }));
+      return false;
+    } finally {
+      setWorking(null);
+    }
+  };
   if (loading && !data) return <div className="loading" role="status">Loading review queue…</div>;
   if (error) return <div className="error-state" role="alert">{error}</div>;
   if (!data) return null;
@@ -735,7 +946,7 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, s
         return (
         <article className={`review-card${candidate || ingredientCandidate ? " review-card-candidate" : ""}${item.decision === "redundant_nutrition" ? " review-card-redundant" : ""}`} key={item.id}>
           <header><span className="priority">P{item.priority}</span><div><h3>{item.productName ?? "Unmatched source record"}</h3><p>{item.brand ?? item.sourceRecordId} · {item.type.replaceAll("_", " ")}</p></div></header>
-          {candidate && <NutritionCandidateEvidence candidate={candidate} productName={item.productName} />}
+          {candidate && <NutritionCandidateEvidence candidate={candidate} productName={item.productName} editor={!readOnly && item.status === "open" ? <NutritionCorrectionEditor reviewId={item.id} candidate={candidate} rationale={rationale} working={working === item.id} onSubmit={(projection) => runAction(item.id, () => onResolve(item, "verify_nutrition", rationale, candidate.imageUrl, null, null, projection))} /> : null} />}
           {(item.redundantEligible || item.decision === "redundant_nutrition") && item.selectedProjection && <section className="redundant-match" aria-label={item.decision === "redundant_nutrition" ? "Recorded redundant nutrition evidence" : "Exact duplicate nutrition evidence available"}>
             <div><span className="redundant-badge">{item.decision === "redundant_nutrition" ? "Redundant evidence" : "Exact duplicate"}</span><h4>{item.decision === "redundant_nutrition" ? (item.redundantProjectionMatches ? "Recorded without changing verified nutrition" : "Recorded projection no longer matches") : "This label matches the selected projection"}</h4><p>{item.decision === "redundant_nutrition" ? (item.redundantProjectionMatches ? "The source-bound label was retained as terminal corroborating evidence. It did not create, replace, or re-verify a nutrition fact." : "The current selected projection has drifted. This historical decision must not be treated as current corroboration and reconciliation should return it to review.") : "All eight supported values and the physical basis match exactly. Recording redundancy will resolve only this evidence item."}</p></div>
             <SelectedProjection projection={item.selectedProjection} />
@@ -753,6 +964,7 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, s
             <p>{item.rationale ?? "No rationale recorded."}</p>
             <small>By {item.decidedBy ?? "unknown operator"}{item.decisionEvidenceUrl ? <> · <a href={item.decisionEvidenceUrl} target="_blank" rel="noreferrer">open evidence ↗</a></> : null}</small>
           </section>}
+          <ReviewedNutritionHistory item={item} />
           {item.type === "identity" && (
             <div className="identity-review">
               <div className="section-title"><h4>Candidate products</h4>{item.productId && <button className="text-button" onClick={() => onOpenProduct(item.productId!)}>Inspect incoming record</button>}</div>
@@ -763,24 +975,25 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, s
                     <span>{candidate.brand}{candidate.flavour ? ` · ${candidate.flavour}` : ""}</span>
                     <small>GTIN {candidate.gtin ?? "missing"} · {candidate.netQuantityGrams ? `${formatNumber(candidate.netQuantityGrams, 0)} g` : "pack missing"}</small>
                   </button>
-                  {!readOnly && <button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "match", rationales[item.id] ?? "", null, candidate.id, null).finally(() => setWorking(null)); }}>Match</button>}
+                  {!readOnly && <button disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "match", rationales[item.id] ?? "", null, candidate.id, null, null))}>Match</button>}
                 </div>
               ))}
             </div>
           )}
           {!readOnly && item.status === "open" && <><label htmlFor={`review-rationale-${item.id}`}>Decision rationale<textarea id={`review-rationale-${item.id}`} name={`rationale-${item.id}`} value={rationales[item.id] ?? ""} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="What evidence supports this decision?" /></label>
           {item.type !== "identity" && <label htmlFor={`review-evidence-${item.id}`}>Label or authoritative evidence URL<input id={`review-evidence-${item.id}`} name={`evidenceUrl-${item.id}`} type="url" value={evidenceUrl} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>}
+          {actionErrors[item.id] && <div className="review-action-error" role="alert"><strong>Decision was not saved.</strong><span>{actionErrors[item.id]}</span></div>}
           <div className="review-actions">
-            {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>{candidate ? "Verify exact label values" : "Verify nutrition"}</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>Reject candidate</button></> : null}
+            {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "verify_nutrition", rationale, evidenceUrl || null, null, null, null))}>{candidate ? "Verify exact label values" : "Verify nutrition"}</button><button className="secondary" disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "reject_nutrition", rationale, evidenceUrl || null, null, null, null))}>Reject candidate</button></> : null}
             {item.status === "open" && item.redundantEligible && confirmingRedundant !== item.id && <button className="redundant" disabled={working === item.id} onClick={() => setConfirmingRedundant(item.id)} aria-haspopup="dialog">Record redundant evidence</button>}
-            {ingredientCandidate && <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_ingredients", rationales[item.id] ?? "", evidenceUrl || null, null, reviewedText).finally(() => setWorking(null)); }}>Verify reviewed label text</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_ingredients", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>Reject this candidate</button></>}
-            {item.type === "identity" && <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "create_new", rationales[item.id] ?? "", null, null, null).finally(() => setWorking(null)); }}>Create distinct product</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "no_match", rationales[item.id] ?? "", null, null, null).finally(() => setWorking(null)); }}>Keep unmatched</button></>}
-            <button className="ghost" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "dismiss", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>Dismiss</button>
+            {ingredientCandidate && <><button disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "verify_ingredients", rationale, evidenceUrl || null, null, reviewedText, null))}>Verify reviewed label text</button><button className="secondary" disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "reject_ingredients", rationale, evidenceUrl || null, null, null, null))}>Reject this candidate</button></>}
+            {item.type === "identity" && <><button disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "create_new", rationale, null, null, null, null))}>Create distinct product</button><button className="secondary" disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "no_match", rationale, null, null, null, null))}>Keep unmatched</button></>}
+            <button className="ghost" disabled={working === item.id} onClick={() => void runAction(item.id, () => onResolve(item, "dismiss", rationale, evidenceUrl || null, null, null, null))}>Dismiss</button>
           </div>
           {item.status === "open" && item.redundantEligible && confirmingRedundant === item.id && <div className="redundant-confirmation" role="alertdialog" aria-labelledby={`redundant-confirm-${item.id}`} aria-describedby={`redundant-description-${item.id}`}>
             <strong id={`redundant-confirm-${item.id}`}>Confirm redundant evidence</strong>
             <p id={`redundant-description-${item.id}`}>This will resolve only this source image. The currently verified nutrition and verification counts will not change.{!redundantRationaleReady ? " Add a rationale of at least 3 characters before confirming." : ""}</p>
-            <div><button autoFocus className="redundant" disabled={working === item.id || !redundantRationaleReady} onClick={async () => { setWorking(item.id); await onResolve(item, "redundant_nutrition", rationale, null, null, null).then(() => setConfirmingRedundant(null)).finally(() => setWorking(null)); }}>Confirm as redundant</button><button className="ghost" disabled={working === item.id} onClick={() => setConfirmingRedundant(null)}>Cancel</button></div>
+            <div><button autoFocus className="redundant" disabled={working === item.id || !redundantRationaleReady} onClick={() => void runAction(item.id, () => onResolve(item, "redundant_nutrition", rationale, null, null, null, null)).then((saved) => { if (saved) setConfirmingRedundant(null); })}>Confirm as redundant</button><button className="ghost" disabled={working === item.id} onClick={() => setConfirmingRedundant(null)}>Cancel</button></div>
           </div>}</>}
         </article>
       )})}
@@ -1168,11 +1381,11 @@ export function App() {
     return () => controller.abort();
   }, [tab, reviewParams]);
 
-  const resolve = async (item: ReviewItem, decision: ReviewDecision, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) => {
-    if (rationale.trim().length < 3) { setReviewState((state) => ({ ...state, error: "Add a rationale of at least 3 characters." })); return; }
-    if (["verify_nutrition", "verify_ingredients"].includes(decision) && !evidenceUrl) { setReviewState((state) => ({ ...state, error: "Verification requires a current label or authoritative-source URL." })); return; }
-    if (decision === "verify_ingredients" && !reviewedText?.trim()) { setReviewState((state) => ({ ...state, error: "Ingredient verification requires the reviewer-confirmed visible label text." })); return; }
-    await api.resolveReview(item.id, decision, rationale, evidenceUrl, candidateProductId, reviewedText);
+  const resolve = async (item: ReviewItem, decision: ReviewDecision, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null, reviewedProjection: ReviewedNutritionProjection | null) => {
+    if (rationale.trim().length < 3) throw new Error("Add a rationale of at least 3 characters.");
+    if (["verify_nutrition", "verify_ingredients"].includes(decision) && !evidenceUrl) throw new Error("Verification requires a current label or authoritative-source URL.");
+    if (decision === "verify_ingredients" && !reviewedText?.trim()) throw new Error("Ingredient verification requires the reviewer-confirmed visible label text.");
+    await api.resolveReview(item.id, decision, rationale, evidenceUrl, candidateProductId, reviewedText, reviewedProjection);
     loadReviews();
     loadCatalog();
     loadCoverage();

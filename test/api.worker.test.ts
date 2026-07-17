@@ -787,6 +787,12 @@ describe("Worker catalog API", () => {
     });
     expect(decision?.candidate_hash).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.parse(String(decision?.payload_json))).toMatchObject({ nutritionPer100g: nutrition });
+    const history = await json<ReviewResponse>(await worker.fetch(
+      `http://localhost/api/reviews?status=resolved&id=${review.reviewId}`,
+    ));
+    expect(history.items).toHaveLength(1);
+    expect(history.items[0]).not.toHaveProperty("reviewedProjection");
+    expect(history.items[0]).not.toHaveProperty("nutritionChanges");
   });
 
   it("publishes a corrected reviewed projection while preserving the immutable model candidate", async () => {
@@ -845,6 +851,42 @@ describe("Worker catalog API", () => {
       WHERE id = ?`).bind(`evd_${review.reviewId}`).first<{ candidate_hash: string; payload_json: string }>();
     expect(persisted?.candidate_hash).toBe(await nutritionCandidateHash(candidate));
     expect(JSON.parse(persisted?.payload_json ?? "null")).toEqual({ candidate, reviewedProjection });
+    const history = await json<ReviewResponse>(await worker.fetch(
+      `http://localhost/api/reviews?status=resolved&id=${review.reviewId}`,
+    ));
+    expect(history.items).toHaveLength(1);
+    expect(history.items[0]?.reviewedProjection).toEqual(reviewedProjection);
+    expect(history.items[0]?.nutritionChanges).toHaveLength(8);
+    expect(history.items[0]?.nutritionChanges).toContainEqual({
+      field: "sodiumMg",
+      originalValue: 250,
+      reviewedValue: 35,
+    });
+    const detail = await json<ProductDetailResponse>(await worker.fetch(
+      `http://localhost/api/products/${review.productId}`,
+    ));
+    expect(detail.nutrition).toMatchObject({
+      basis: "per_100ml",
+      calories: 64,
+      proteinGrams: 12,
+      carbohydrateGrams: 2,
+      sugarGrams: null,
+      fatGrams: 0.8,
+      saturatedFatGrams: 0.2,
+      fibreGrams: null,
+      sodiumMg: 35,
+    });
+    expect(detail.metrics.proteinPer100Calories).toEqual({ value: 18.75, reason: null });
+    expect(detail.metrics.proteinCaloriePercentage).toEqual({ value: 75, reason: null });
+    expect(detail.metrics.totalProteinInPack).toEqual({
+      value: null,
+      reason: "nutrition_basis_not_mass_normalized",
+    });
+    expect(detail.metrics.costPer25gProtein.value).toBeNull();
+    expect(detail.metrics.pricePerServing).toEqual({
+      value: null,
+      reason: "nutrition_basis_not_mass_normalized",
+    });
     const artifacts = await env.DB.prepare(`SELECT
       (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND source_record_id = ? AND basis = 'per_100ml') AS nutrients,
       (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND nutrient_code = 'sugarGrams') AS stale_core,
@@ -858,6 +900,14 @@ describe("Worker catalog API", () => {
     expect(artifacts).toEqual({
       nutrients: 6, stale_core: 0, micronutrients: 1, observations: 6, outcomes: 1, resolved: 1,
     });
+
+    await env.DB.prepare("UPDATE evidence_decisions SET active = 0 WHERE id = ?")
+      .bind(`evd_${review.reviewId}`).run();
+    const inactiveHistory = await json<ReviewResponse>(await worker.fetch(
+      `http://localhost/api/reviews?status=resolved&id=${review.reviewId}`,
+    ));
+    expect(inactiveHistory.items[0]).not.toHaveProperty("reviewedProjection");
+    expect(inactiveHistory.items[0]).not.toHaveProperty("nutritionChanges");
   });
 
   it("rejects malformed reviewed nutrition atomically and rejects corrections on non-verify decisions", async () => {
