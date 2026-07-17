@@ -26,7 +26,7 @@
 ## 5. Exhaustive Evidence Run
 
 - [x] 5.1 Run the full local check, migration replay, release startup profile, deploy dry-run, and strict OpenSpec validation.
-- [ ] 5.2 Run replacement exhaustive nutrition and ingredient workflows from the pinned source snapshot using the corrected retry cache.
-- [ ] 5.3 Independently verify artifact checksums, requested/outcome equality, decision drift, exception bounds, and the complete per-barcode exception list.
+- [x] 5.2 Run replacement exhaustive nutrition and ingredient workflows from the pinned source snapshot using the corrected retry cache.
+- [x] 5.3 Independently verify artifact checksums, requested/outcome equality, decision drift, exception bounds, and the complete per-barcode exception list.
 - [ ] 5.4 After separate production approval, apply pending D1 migrations, explicitly dispatch publication for the approved artifacts, deploy, and verify live API, accounting, Trusted, desktop, and mobile invariants.
 - [ ] 5.5 Sync and archive the OpenSpec change, update `PROJECT_STATUS.md`, and commit/push the final verified release state.
