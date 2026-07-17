@@ -427,6 +427,10 @@ export async function emitImportSql(input: {
     );
     await write(
       output,
+      `DELETE FROM product_ingredients WHERE source_record_id = ${sql(sourceRecordId)} AND NOT EXISTS (SELECT 1 FROM ingredient_statements statement WHERE statement.product_id = ${productIdSql} AND statement.source_record_id = ${sql(sourceRecordId)} AND statement.authority >= 100);`,
+    );
+    await write(
+      output,
       `UPDATE products SET is_active = 1 WHERE id = ${sql(productId)} AND NOT EXISTS (SELECT 1 FROM identity_decisions d WHERE d.source_id = ${sql(product.source)} AND d.source_record_key = ${sql(product.sourceRecordId)} AND d.identity_hash = ${sql(identityHash)} AND d.active = 1 AND (d.decision = 'no_match' OR d.target_product_id <> ${sql(productId)}));`,
     );
     await write(

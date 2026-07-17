@@ -138,6 +138,57 @@ async function replaySql(product: StagedProduct, options: ReplayOptions): Promis
   return { sql: await readFile(outputPath, "utf8"), manifest, runId: ingestionRunIdForManifest(manifest) };
 }
 
+describe("source ingredient replay", () => {
+  it("replaces stale unverified nested ingredient nodes before inserting a revised source record", async () => {
+    const database = await databaseWithMigrations();
+    const product = await baseProduct();
+    const first: StagedProduct = {
+      ...product,
+      contentHash: hash("a"),
+      sourceAuthority: { ...product.sourceAuthority, ingredients: 20 },
+      ingredients: {
+        ...product.ingredients,
+        raw: "Blend (A)",
+        normalized: [{
+          raw: "Blend",
+          normalizedName: "blend",
+          percentage: null,
+          position: 0,
+          children: [{ raw: "A", normalizedName: "a", percentage: null, position: 0, children: [] }],
+        }],
+        status: "unverified",
+        confidence: "medium",
+      },
+    };
+    const second: StagedProduct = {
+      ...first,
+      contentHash: hash("b"),
+      ingredients: {
+        ...first.ingredients,
+        raw: "Blend (B)",
+        normalized: [{
+          raw: "Blend",
+          normalizedName: "blend",
+          percentage: null,
+          position: 0,
+          children: [{ raw: "B", normalizedName: "b", percentage: null, position: 0, children: [] }],
+        }],
+      },
+    };
+    const firstReplay = await replaySql(first, { at: firstAt, inputHash: hash("1") });
+    const secondReplay = await replaySql(second, { at: "2026-07-17T11:00:00.000Z", inputHash: hash("2") });
+
+    database.exec(firstReplay.sql);
+    database.exec(secondReplay.sql);
+
+    expect(database.prepare(`SELECT raw_text, normalized_name, position FROM product_ingredients
+      ORDER BY parent_id IS NOT NULL, position, raw_text`).all()).toEqual([
+      { raw_text: "Blend", normalized_name: "blend", position: 0 },
+      { raw_text: "B", normalized_name: "b", position: 0 },
+    ]);
+  });
+});
+
 interface SourceBinding {
   id: string;
   source_id: string;
