@@ -29,5 +29,5 @@
 ## 5. Verification and handoff
 
 - [x] 5.1 Run focused migration, ingestion, Worker, API, component, and accessibility tests, then the full project check and strict OpenSpec validation
-- [ ] 5.2 Run local release preflight and browser verification, update `PROJECT_STATUS.md` with exact legacy/backfill limitations, and commit/push the checked change
+- [x] 5.2 Run local release preflight and browser verification, update `PROJECT_STATUS.md` with exact legacy/backfill limitations, and commit/push the checked change
 - [ ] 5.3 After fresh production approval, apply pending migrations in order, generate and publish a new byte-hash-complete extraction artifact, verify exact production coverage, and deploy the Worker
