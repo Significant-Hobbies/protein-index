@@ -1,6 +1,6 @@
 # Protein Index
 
-Live dashboard: <https://protein-index.sarthakagrawal927.workers.dev>
+Live dashboard: <https://protein.significanthobbies.com>
 
 A normalized Indian food-product intelligence database with protein discovery,
 source-aware nutrition and ingredients, and evidence-first comparisons.
