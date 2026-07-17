@@ -1969,7 +1969,7 @@ describe("Robotoff label evidence", () => {
       })] }), { status: 200 }),
     });
     expect(result.outcomes).toEqual({ candidate: 1, no_prediction: 0, rejected: 0, failed: 0 });
-    expect(result.manifest.adapterVersion).toBe("robotoff-api-v4");
+    expect(result.manifest.adapterVersion).toBe("robotoff-api-v5");
     const staged = JSON.parse((await readFile(result.stagedPath, "utf8")).trim()) as {
       validationIssues: Array<{ code: string }>;
       rawEvidence: { candidate: Record<string, unknown> };
@@ -2067,6 +2067,43 @@ describe("Robotoff label evidence", () => {
       },
     });
     expect(result.issues).toContainEqual(expect.objectContaining({ code: "robotoff_ambiguous_total_sugar_basis" }));
+  });
+
+  it("corrects a kcal value mislabeled as per-100-g kJ only when the macro floor proves conversion impossible", () => {
+    const corrected = parseRobotoffNutritionEvidence({ image_predictions: [prediction(26, "24", {
+      "energy-kj_100g": nutrient(385.05, "kJ"),
+      proteins_100g: nutrient(21.91, "g"),
+      carbohydrates_100g: nutrient(56.06, "g"),
+      sugars_100g: nutrient(10.22, "g"),
+      "saturated-fat_100g": nutrient(3.43, "g"),
+      "energy-kcal_serving": nutrient(154, "kcal"),
+      proteins_serving: nutrient(8.76, "g"),
+    })] }, context);
+    expect(corrected.candidates).toHaveLength(1);
+    expect(corrected.candidates[0]).toMatchObject({
+      basis: "per_100g",
+      nutritionPer100g: {
+        calories: 385.05,
+        proteinGrams: 21.91,
+        carbohydrateGrams: 56.06,
+      },
+    });
+    expect(corrected.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_energy_kj_entity_corrected_to_kcal",
+      field: "energy-kj_100g",
+    }));
+
+    const legitimateKj = parseRobotoffNutritionEvidence({ image_predictions: [prediction(27, "25", {
+      "energy-kj_100g": nutrient(1_612, "kJ"),
+      proteins_100g: nutrient(21.91, "g"),
+      carbohydrates_100g: nutrient(56.06, "g"),
+    })] }, context);
+    expect(legitimateKj.candidates[0]).toMatchObject({
+      nutritionPer100g: { calories: expect.closeTo(385.277, 3) },
+    });
+    expect(legitimateKj.issues).not.toContainEqual(expect.objectContaining({
+      code: "robotoff_energy_kj_entity_corrected_to_kcal",
+    }));
   });
 
   it("rejects serving conversion when raw values match a per-100-g source anchor", () => {

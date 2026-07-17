@@ -163,6 +163,7 @@ must pass desktop/mobile verification.
 - 2026-07-17 — protein-priority mass-label review checked 12 exact images from the current adapter-v4 artifact: Epigamia Everyday Mango Yogurt reproduces every supported 75 g serving value after exact per-100-g conversion, while ten candidates are rejected for omitted declarations, rounded serving conversions overriding direct rows, wrong nutrient mapping, doubled values, or unconverted serving data. One damaged Optimum Nutrition image was excluded rather than guessed. Checksummed bundle `review-0793ac6010da3d71f11d` contains one pending verification and ten rejections across eleven products; live coverage is unchanged before protected publication.
 - 2026-07-17 — a second protein-priority mass-label pass checked 17 exact, readable images from the same adapter-v4 artifact; all 17 candidates are rejected in checksummed bundle `review-e9a215051b2fe4662517` for omitted sodium, sugar, fibre, carbohydrate, or saturated-fat declarations, invented fibre, serving-derived values overriding direct rows, or severe decimal loss. The damaged Optimum Nutrition image remains deliberately undecided. Exact reviewed nutrition hashes increase from 389 to 406 and the remaining mass-candidate queue falls from 1,160 to 1,143, while live coverage remains unchanged before protected source and decision publication.
 - 2026-07-17 — a third protein-priority mass-label pass checked 14 exact images across bars, oats, paneer, tofu, bread, eggs, yogurt, and snacks; all 14 candidates are rejected in checksummed bundle `review-79103ffdc86b8c7127a6` for omitted label declarations or concrete parsing errors, including corrupted calorie values for MuscleBlaze oats and Bimbo high-protein bread. Exact reviewed nutrition hashes increase from 406 to 420 and the remaining mass-candidate queue falls from 1,143 to 1,129, with zero fact promotions and no live coverage change before protected publication.
+- 2026-07-17 — Robotoff adapter v5 detects a narrow upstream entity error where a plausible kcal value is labeled as per-100-g kJ but converting it would violate the declared protein-and-carbohydrate calorie floor; a source-complete offline replay corrects 273 image records across 253 GTINs, recovers 170 barcodes from rejected to reviewable (1,524 candidate, 806 no-prediction, 3,614 rejected, zero failed), and never promotes model output. Of 68 corrected records with official-source calories, 64 agree within 2%; exact original-image review confirms all four disagreements use the corrected label values (Milkmaid 303, Maggi 389, Sundrop 642, and iD chapati 270.37 kcal per 100 g), finding no false positive in the source-comparable cohort. Live data and verified coverage remain unchanged until an official v5 artifact is published and all affected decisions are drift-audited.
 
 ## Products
 
@@ -271,9 +272,12 @@ must pass desktop/mobile verification.
     failed closed before import or write; earlier runs `29449999090`,
     `29474290721`, and `29495130626` remain durable evidence of the prior empty
     credential state.
-17. Publish the exact adapter-v4 nutrition artifact only after the pending
-    production migration is explicitly approved, then source-check and publish
-    liquid bundles `review-230fca7ea00663c6c05e`,
+17. Produce and validate an official adapter-v5 nutrition artifact from the
+    current exact source snapshot, but publish it only after pending production
+    migration `0007_review_queue_indexes.sql` is explicitly approved. Drift-audit
+    every reviewed nutrition decision against the v5 source envelopes and
+    candidate hashes before source-checking any surviving liquid bundles,
+    including `review-230fca7ea00663c6c05e`,
     `review-9c7ac1f9e044ed7bce6e`,
     `review-6b5e8b66259669560d75`,
     `review-faa4134c08f801a2e6b1`,
@@ -289,18 +293,19 @@ must pass desktop/mobile verification.
     Coca-Cola images and one Local soda image; do not reject valid duplicates or
     verify the same canonical product twice in one publication. Do not claim the
     sixteen verified per-100-mL candidates until live publication proves them.
-18. Source-check and publish mass-label bundle
-    `review-0793ac6010da3d71f11d` only after the exact adapter-v4 artifact is
-    live, then prove one verified-product increase, ten resolved rejections,
-    exact selected Epigamia values, and unchanged replay counts before claiming
-    any coverage change.
-19. Source-check and publish mass-label rejection bundle
-    `review-e9a215051b2fe4662517` only after the exact adapter-v4 artifact is
-    live, then prove 17 resolved candidates, zero verified-fact promotions,
-    unchanged trusted coverage, and idempotent replay before claiming any live
-    queue reduction.
-20. Source-check and publish mass-label rejection bundle
-    `review-79103ffdc86b8c7127a6` only after the exact adapter-v4 artifact is
-    live, then prove 14 resolved candidates, zero verified-fact promotions,
-    unchanged trusted coverage, and idempotent replay before claiming any live
-    queue reduction.
+18. Drift-audit, source-check, and publish mass-label bundle
+    `review-0793ac6010da3d71f11d` only after the exact adapter-v5 artifact is
+    live; rebuild any changed decisions from their exact images, then prove one
+    verified-product increase, ten resolved rejections, exact selected Epigamia
+    values, and unchanged replay counts before claiming any coverage change.
+19. Drift-audit, source-check, and publish mass-label rejection bundle
+    `review-e9a215051b2fe4662517` only after the exact adapter-v5 artifact is
+    live; rebuild any changed decisions from their exact images, then prove 17
+    resolved candidates, zero verified-fact promotions, unchanged trusted
+    coverage, and idempotent replay before claiming any live queue reduction.
+20. Drift-audit, source-check, and publish mass-label rejection bundle
+    `review-79103ffdc86b8c7127a6` only after the exact adapter-v5 artifact is
+    live; rebuild changed decisions such as the corrected MuscleBlaze and Bimbo
+    calorie candidates from their exact images, then prove the actual resolved
+    count, zero verified-fact promotions, unchanged trusted coverage, and
+    idempotent replay before claiming any live queue reduction.

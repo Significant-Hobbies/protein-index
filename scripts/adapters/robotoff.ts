@@ -102,6 +102,33 @@ function setNutritionValue(nutrition: NutritionPer100g, nutrient: string, value:
   return false;
 }
 
+function correctMisclassifiedPer100gKj(
+  rawNutrients: RawRecord,
+  nutrition: NutritionPer100g,
+  confidenceThreshold: number,
+): { rawValue: number; convertedCalories: number; macroCalorieFloor: number; score: number } | null {
+  if ("energy-kcal_100g" in rawNutrients) return null;
+  const raw = rawNutrients["energy-kj_100g"];
+  if (!isRecord(raw)) return null;
+  const rawValue = number(raw.value);
+  const score = number(raw.score);
+  const unit = text(raw.unit)?.toLowerCase() ?? null;
+  if (rawValue === null || score === null || score < confidenceThreshold || unit !== "kj") return null;
+  if (nutrition.proteinGrams === null || nutrition.carbohydrateGrams === null) return null;
+
+  const macroCalorieFloor = (nutrition.proteinGrams + nutrition.carbohydrateGrams) * 4
+    + (nutrition.fatGrams ?? 0) * 9;
+  const convertedCalories = rawValue / 4.184;
+  const convertedIsImpossible = convertedCalories < macroCalorieFloor * 0.85;
+  const rawValueIsPlausibleKcal = rawValue <= 1_000
+    && rawValue >= macroCalorieFloor * 0.85
+    && rawValue <= macroCalorieFloor * 1.5;
+  if (!convertedIsImpossible || !rawValueIsPlausibleKcal) return null;
+
+  nutrition.calories = rawValue;
+  return { rawValue, convertedCalories, macroCalorieFloor, score };
+}
+
 function completeCore(nutrition: NutritionPer100g): boolean {
   return nutrition.proteinGrams !== null && nutrition.calories !== null && nutrition.calories > 0;
 }
@@ -189,6 +216,16 @@ function parsePrediction(
       });
     }
   }
+  const correctedEnergy = correctMisclassifiedPer100gKj(rawNutrients, per100g, confidenceThreshold);
+  if (correctedEnergy) {
+    issues.push({
+      code: "robotoff_energy_kj_entity_corrected_to_kcal",
+      message: "Robotoff labeled a physically plausible kcal value as kJ; the converted value conflicts with the declared protein and carbohydrate floor.",
+      severity: "warning",
+      field: "energy-kj_100g",
+      details: { predictionId, ...correctedEnergy },
+    });
+  }
 
   const volumeBased = context.nutritionBasis === "per_100ml";
   const normalizedBasis = volumeBased ? "per_100ml" as const : "per_100g" as const;
@@ -237,7 +274,7 @@ function parsePrediction(
         });
       }
       normalized = mergeSupplementaryServingNutrition(normalized, converted);
-      if (!("energy-kcal_100g" in rawNutrients) && "energy-kcal_serving" in rawNutrients && converted.calories !== null) {
+      if (!correctedEnergy && !("energy-kcal_100g" in rawNutrients) && "energy-kcal_serving" in rawNutrients && converted.calories !== null) {
         normalized.calories = converted.calories;
       }
     } else if (!normalized) {
@@ -270,7 +307,7 @@ function parsePrediction(
         });
       }
       normalized = mergeSupplementaryServingNutrition(normalized, converted);
-      if (!("energy-kcal_100g" in rawNutrients) && "energy-kcal_serving" in rawNutrients && converted.calories !== null) {
+      if (!correctedEnergy && !("energy-kcal_100g" in rawNutrients) && "energy-kcal_serving" in rawNutrients && converted.calories !== null) {
         normalized.calories = converted.calories;
       }
     }
