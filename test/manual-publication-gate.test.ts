@@ -186,6 +186,8 @@ describe("manual evidence publication workflow", () => {
     expect(workflow).toContain("environment: production");
     expect(workflow).toContain("pnpm data:guarded-release:prepare");
     expect(workflow).toContain("pnpm exec wrangler d1 execute protein-index --remote --yes --file .data/guarded-release/guarded.sql");
+    expect(workflow).toContain("Apply pending D1 migrations atomically");
+    expect(workflow).toContain("INSERT INTO d1_migrations (name) VALUES");
     expect(workflow).toContain("Exact ${family} postcondition failed");
     expect(workflow).toContain('[[ "$DECISIONS" == 365 && "$VERIFIES" == 76 ]]');
     expect(workflow).toContain('[[ "$DECISIONS" == 66 && "$VERIFIES" == 65 ]]');

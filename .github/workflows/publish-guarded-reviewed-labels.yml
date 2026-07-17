@@ -132,8 +132,21 @@ jobs:
           test "$(jq -r '.inputHash' .data/guarded-release/artifact/manifest.json)" = "$INPUT_HASH"
           test "$(jq -r '.ledgerSha256' "$BUNDLE/manifest.json")" = "$LEDGER"
           pnpm data:audit-decisions -- --artifact .data/guarded-release/artifact --bundles review-decisions --bundle-set review-decisions/active-bundles.json --output .data/guarded-release/decision-drift.json --fail-on candidate_key_active_state_ambiguous
-      - name: Apply pending D1 migrations
-        run: pnpm exec wrangler d1 migrations apply protein-index --remote
+      - name: Apply pending D1 migrations atomically
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json --command "SELECT name FROM d1_migrations ORDER BY id;" > .data/guarded-release/applied-migrations.json
+          mkdir -p .data/guarded-release/migrations
+          for migration in migrations/*.sql; do
+            name="$(basename "$migration")"
+            if jq -e --arg name "$name" '.[0].results[] | select(.name == $name)' .data/guarded-release/applied-migrations.json > /dev/null; then
+              continue
+            fi
+            import_file=".data/guarded-release/migrations/$name"
+            cp "$migration" "$import_file"
+            printf "\nINSERT INTO d1_migrations (name) VALUES ('%s');\n" "$name" >> "$import_file"
+            pnpm exec wrangler d1 execute protein-index --remote --yes --file "$import_file"
+          done
       - name: Read exact live states and derive final states
         run: |
           set -euo pipefail
