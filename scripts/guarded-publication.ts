@@ -111,9 +111,7 @@ function assertState(state: VerifiedProductState, fieldFamily: ExtractionFieldFa
 }
 
 function productSetQuery(productIds: readonly string[]): string {
-  return productIds.map((productId, index) => (
-    index === 0 ? `SELECT ${sql(productId)} AS product_id` : `UNION ALL SELECT ${sql(productId)}`
-  )).join(" ");
+  return `SELECT value AS product_id FROM json_each(${sql(JSON.stringify(productIds))})`;
 }
 
 function exactProductSetPredicate(state: VerifiedProductState): string {
