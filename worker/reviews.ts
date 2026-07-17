@@ -1,4 +1,4 @@
-import type { ReviewItem, ReviewResponse } from "../shared/api";
+import type { ReviewItem, ReviewResponse, ReviewStatus, ReviewType } from "../shared/api";
 import {
   canonicalJson,
   nutritionCandidateFromEvidence,
@@ -37,6 +37,7 @@ interface ReviewRow {
 }
 
 interface ReviewCountRow { status: "open" | "resolved" | "dismissed"; count: number }
+interface ReviewTotalRow { total: number }
 
 function parsed(value: string): unknown {
   try { return JSON.parse(value); } catch { return null; }
@@ -75,7 +76,20 @@ function reviewedIngredientRows(
   });
 }
 
-export async function listReviews(db: D1Database, status: string, limit: number): Promise<ReviewResponse> {
+export async function listReviews(
+  db: D1Database,
+  status: ReviewStatus,
+  type: ReviewType | "all",
+  page: number,
+  pageSize: number,
+): Promise<ReviewResponse> {
+  const typeFilter = type === "all" ? "" : " AND r.type = ?";
+  const offset = (page - 1) * pageSize;
+  const itemBindings = type === "all"
+    ? [status, pageSize, offset]
+    : [status, type, pageSize, offset];
+  const totalBindings = type === "all" ? [status] : [status, type];
+  const countBindings = type === "all" ? [] : [type];
   const batch = await db.batch([
     db.prepare(`SELECT r.id, r.type, r.priority, r.status, r.product_id, p.name AS product_name, p.brand,
       r.source_record_id, r.candidate_product_ids_json, r.evidence_json, r.created_at, r.decision, r.decision_rationale,
@@ -91,12 +105,16 @@ export async function listReviews(db: D1Database, status: string, limit: number)
       )) FROM json_each(r.candidate_product_ids_json) listed
       JOIN products candidate ON candidate.id = listed.value), '[]') AS candidates_json
       FROM review_items r LEFT JOIN products p ON p.id = r.product_id
-      WHERE r.status = ? ORDER BY r.priority DESC, r.created_at LIMIT ?`).bind(status, limit),
-    db.prepare("SELECT status, COUNT(*) AS count FROM review_items GROUP BY status"),
+      WHERE r.status = ?${typeFilter}
+      ORDER BY r.priority DESC, r.created_at, r.id LIMIT ? OFFSET ?`).bind(...itemBindings),
+    db.prepare(`SELECT COUNT(*) AS total FROM review_items r WHERE r.status = ?${typeFilter}`).bind(...totalBindings),
+    db.prepare(`SELECT status, COUNT(*) AS count FROM review_items${type === "all" ? "" : " WHERE type = ?"} GROUP BY status`)
+      .bind(...countBindings),
   ]);
   const itemsResult = batch[0];
-  const countsResult = batch[1];
-  if (!itemsResult || !countsResult) throw new Error("Review query batch returned an incomplete result");
+  const totalResult = batch[1];
+  const countsResult = batch[2];
+  if (!itemsResult || !totalResult || !countsResult) throw new Error("Review query batch returned an incomplete result");
   const items = (itemsResult.results as ReviewRow[]).map<ReviewItem>((row) => ({
     id: row.id,
     type: row.type,
@@ -115,9 +133,14 @@ export async function listReviews(db: D1Database, status: string, limit: number)
     decisionEvidenceUrl: row.decision_evidence_url,
     decidedBy: row.decided_by,
   }));
+  const total = (totalResult.results[0] as ReviewTotalRow | undefined)?.total ?? 0;
   const counts = { open: 0, resolved: 0, dismissed: 0 };
   for (const row of countsResult.results as ReviewCountRow[]) counts[row.status] = row.count;
-  return { items, counts };
+  return {
+    items,
+    counts,
+    pagination: { page, pageSize, total, pages: Math.ceil(total / pageSize) },
+  };
 }
 
 export type ReviewDecision =

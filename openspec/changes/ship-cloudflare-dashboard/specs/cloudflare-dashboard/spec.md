@@ -44,6 +44,39 @@ dates, and completeness gaps before secondary retailer information.
 - **WHEN** a discovery record has community nutrition and ingredients
 - **THEN** detail identifies the source and unverified state without presenting the values as label-verified facts
 
+#### Scenario: User inspects supporting evidence
+- **WHEN** product detail includes a public label image or evidence URL
+- **THEN** the detail surface provides an explicit link to that evidence and exposes pack, serving, and additional nutrient values already present in the canonical response
+
+#### Scenario: Retailer information is absent
+- **WHEN** a product has no current offer or retailer rating
+- **THEN** product detail states that the data is unavailable instead of rendering an unexplained blank section
+
+### Requirement: Public evidence queue is fully traversable
+The read-only evidence queue SHALL expose deterministic pagination and evidence
+type filtering so every unresolved item can be reached without enabling public
+review mutations.
+
+#### Scenario: Queue contains more than one page
+- **WHEN** the number of matching review items exceeds the page size
+- **THEN** the response includes total and page metadata and the dashboard provides previous and next controls
+
+#### Scenario: User narrows the queue
+- **WHEN** the user selects an evidence type
+- **THEN** the Worker returns only matching items and preserves deterministic priority ordering within the selected page
+
+### Requirement: Catalog exposes both evidence dimensions
+The catalog SHALL let users filter nutrition and ingredient verification states
+independently so a verified nutrition claim does not imply verified ingredients.
+
+#### Scenario: User requests fully verified records
+- **WHEN** the user selects verified nutrition and verified ingredients
+- **THEN** the Worker returns only products with both evidence states verified
+
+#### Scenario: User audits missing ingredients
+- **WHEN** the user selects missing ingredient evidence
+- **THEN** products without an ingredient statement remain discoverable without changing the nutrition filter
+
 ### Requirement: Public deployment is read-only without authentication
 The production Worker SHALL serve catalog, detail, coverage, and health reads
 but SHALL reject review resolution or other operator mutations until an

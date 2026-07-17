@@ -329,6 +329,64 @@ describe("Worker catalog API", () => {
     expect(await json<{ error: { code: string } }>(mutation)).toMatchObject({ error: { code: "mutations_disabled" } });
   });
 
+  it("filters and deterministically paginates the read-only review queue", async () => {
+    const insert = env.DB.prepare(`INSERT INTO review_items
+      (id, type, priority, status, candidate_product_ids_json, evidence_json, created_at)
+      VALUES (?, ?, ?, ?, '[]', '{}', ?)`);
+    await env.DB.batch([
+      insert.bind("review-c", "invalid_gtin", 80, "open", "2026-07-15T00:00:00.000Z"),
+      insert.bind("review-b", "invalid_gtin", 80, "open", "2026-07-15T00:00:00.000Z"),
+      insert.bind("review-a", "invalid_gtin", 90, "open", "2026-07-15T00:01:00.000Z"),
+      insert.bind("review-d", "invalid_gtin", 70, "open", "2026-07-15T00:02:00.000Z"),
+      insert.bind("review-e", "invalid_gtin", 60, "resolved", "2026-07-15T00:03:00.000Z"),
+      insert.bind("review-identity", "identity", 100, "open", "2026-07-15T00:04:00.000Z"),
+    ]);
+
+    const firstResponse = await worker.fetch(
+      "http://localhost/api/reviews?status=open&type=invalid_gtin&page=1&pageSize=2",
+    );
+    expect(firstResponse.status).toBe(200);
+    const first = await json<ReviewResponse>(firstResponse);
+    expect(first.items.map(({ id }) => id)).toEqual(["review-a", "review-b"]);
+    expect(first.pagination).toEqual({ page: 1, pageSize: 2, total: 4, pages: 2 });
+    expect(first.counts).toEqual({ open: 4, resolved: 1, dismissed: 0 });
+
+    const secondResponse = await worker.fetch(
+      "http://localhost/api/reviews?status=open&type=invalid_gtin&page=2&pageSize=2",
+    );
+    const second = await json<ReviewResponse>(secondResponse);
+    expect(second.items.map(({ id }) => id)).toEqual(["review-c", "review-d"]);
+    expect(second.pagination).toEqual({ page: 2, pageSize: 2, total: 4, pages: 2 });
+
+    const identityResponse = await worker.fetch(
+      "http://localhost/api/reviews?status=open&type=identity&page=1&pageSize=10",
+    );
+    const identity = await json<ReviewResponse>(identityResponse);
+    expect(identity.items.every(({ type }) => type === "identity")).toBe(true);
+    expect(identity.items.some(({ id }) => id === "review-identity")).toBe(true);
+    expect(identity.pagination.total).toBe(identity.items.length);
+
+    for (const query of [
+      "status=unknown",
+      "type=unknown",
+      "page=0",
+      "page=1.5",
+      "pageSize=0",
+      "pageSize=101",
+    ]) {
+      const invalid = await worker.fetch(`http://localhost/api/reviews?${query}`);
+      expect(invalid.status).toBe(400);
+      expect(await json<{ error: { code: string } }>(invalid)).toMatchObject({ error: { code: "validation_error" } });
+    }
+
+    const publicMutation = await worker.fetch("https://protein-index.example/api/reviews/review-a/resolve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "dismiss", rationale: "must remain read only" }),
+    });
+    expect(publicMutation.status).toBe(403);
+  });
+
   it("uses evidence-aware protein-density defaults and returns evidence-rich detail", async () => {
     const catalogResponse = await worker.fetch("http://localhost/api/products");
     expect(catalogResponse.status).toBe(200);
@@ -385,6 +443,29 @@ describe("Worker catalog API", () => {
     expect(roundedConflictCatalog.products[0]?.id).not.toBe(first.id);
     await env.DB.prepare("UPDATE nutrition_facts SET status = 'verified', calories = ?, protein_grams = ?, carbohydrate_grams = ?, fat_grams = ? WHERE product_id = ?")
       .bind(first.nutrition.calories, first.nutrition.proteinGrams, first.nutrition.carbohydrateGrams, first.nutrition.fatGrams, first.id).run();
+  });
+
+  it("filters for products with both verified nutrition and verified ingredients", async () => {
+    const response = await worker.fetch(
+      "http://localhost/api/products?verification=verified&ingredientVerification=verified&scope=all&sort=name&pageSize=100",
+    );
+    expect(response.status).toBe(200);
+    const catalog = await json<CatalogResponse>(response);
+    expect(catalog.products.length).toBeGreaterThan(0);
+    expect(catalog.products.every((product) => (
+      product.nutritionStatus === "verified" && product.ingredientStatus === "verified"
+    ))).toBe(true);
+    expect(catalog.pagination.total).toBe(catalog.products.length);
+    expect(catalog.filters).toMatchObject({
+      verification: "verified",
+      ingredientVerification: "verified",
+    });
+
+    const invalid = await worker.fetch("http://localhost/api/products?ingredientVerification=reviewed");
+    expect(invalid.status).toBe(400);
+    expect(await json<{ error: { message: string } }>(invalid)).toMatchObject({
+      error: { message: "Invalid ingredient verification filter" },
+    });
   });
 
   it("deduplicates logical detail values while retaining source-specific evidence", async () => {
@@ -607,6 +688,28 @@ describe("Worker catalog API", () => {
     expect(detail.metrics.totalProteinInPack).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });
     expect(detail.metrics.costPer25gProtein.value).toBeNull();
     expect(detail.metrics.pricePerServing).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });
+  });
+
+  it("does not sort non-mass nutrition by a fabricated cost per protein", async () => {
+    const product = await env.DB.prepare(`SELECT p.id
+      FROM products p JOIN nutrition_facts n ON n.product_id = p.id
+      JOIN offers o ON o.product_id = p.id AND o.available = 1
+      WHERE n.status = 'verified' AND p.net_quantity_grams > 0 AND n.protein_grams > 0
+      ORDER BY p.id LIMIT 1`).first<{ id: string }>();
+    if (!product) throw new Error("Expected a seeded product with mass nutrition and an offer");
+
+    await env.DB.batch([
+      env.DB.prepare("UPDATE nutrition_facts SET basis = 'per_100ml' WHERE product_id = ?").bind(product.id),
+      env.DB.prepare("UPDATE offers SET selling_price = 1 WHERE product_id = ?").bind(product.id),
+    ]);
+
+    const response = await worker.fetch("http://localhost/api/products?sort=cost&pageSize=100");
+    expect(response.status).toBe(200);
+    const catalog = await json<CatalogResponse>(response);
+    const productIndex = catalog.products.findIndex(({ id }) => id === product.id);
+    expect(productIndex).toBeGreaterThan(0);
+    expect(catalog.products[productIndex]?.metrics.costPer25gProtein.value).toBeNull();
+    expect(catalog.products.slice(0, productIndex).every(({ metrics }) => metrics.costPer25gProtein.value !== null)).toBe(true);
   });
 
   it("rejects a Robotoff candidate without clearing independently sourced nutrition", async () => {

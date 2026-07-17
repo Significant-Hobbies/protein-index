@@ -135,6 +135,7 @@ export interface SearchInput {
   marketed: string;
   dense: string;
   verification: string;
+  ingredientVerification: string;
   scope: string;
   minCompleteness: number;
   sort: string;
@@ -153,6 +154,7 @@ export function validateSearch(input: URLSearchParams): { value?: SearchInput; e
     marketed: input.get("marketed") ?? "all",
     dense: input.get("dense") ?? "all",
     verification: input.get("verification") ?? "all",
+    ingredientVerification: input.get("ingredientVerification") ?? "all",
     scope: input.get("scope") ?? "all",
     minCompleteness: number("minCompleteness", 0),
     sort: input.get("sort") ?? "protein_density",
@@ -165,6 +167,9 @@ export function validateSearch(input: URLSearchParams): { value?: SearchInput; e
   if (!["all", "true", "false"].includes(value.marketed)) return { error: "Invalid marketed filter" };
   if (!["all", "true", "false", "unknown"].includes(value.dense)) return { error: "Invalid dense filter" };
   if (!["all", "missing", "unverified", "verified", "conflict"].includes(value.verification)) return { error: "Invalid verification filter" };
+  if (!["all", "missing", "unverified", "verified", "conflict"].includes(value.ingredientVerification)) {
+    return { error: "Invalid ingredient verification filter" };
+  }
   if (!["all", "protein"].includes(value.scope)) return { error: "Invalid scope" };
   if (!["protein_density", "cost", "completeness", "name"].includes(value.sort)) return { error: "Invalid sort" };
   if (!Number.isInteger(value.page) || value.page < 1) return { error: "Page must be a positive integer" };
@@ -210,6 +215,10 @@ function filtersFor(input: SearchInput): { sql: string; bindings: Array<string |
     if (input.dense !== "unknown") bindings.push(input.dense === "true" ? 1 : 0);
   }
   if (input.verification !== "all") { clauses.push("COALESCE(n.status, 'missing') = ?"); bindings.push(input.verification); }
+  if (input.ingredientVerification !== "all") {
+    clauses.push("COALESCE(i.status, 'missing') = ?");
+    bindings.push(input.ingredientVerification);
+  }
   if (input.scope === "protein") clauses.push("(p.marketed_protein = 1 OR p.nutritionally_protein_dense = 1)");
   clauses.push("p.completeness >= ?");
   bindings.push(input.minCompleteness);
@@ -220,13 +229,15 @@ export async function searchProducts(db: D1Database, input: SearchInput): Promis
   const filters = filtersFor(input);
   const order = {
     protein_density: "CASE WHEN n.status IN ('verified', 'unverified') AND n.calories > 0 AND n.protein_grams >= 0 AND n.protein_grams * 4.0 <= n.calories AND (n.carbohydrate_grams IS NULL OR n.fat_grams IS NULL OR ABS((n.protein_grams * 4.0 + n.carbohydrate_grams * 4.0 + n.fat_grams * 9.0) - n.calories) <= n.calories * 0.5) THEN n.protein_grams * 100.0 / n.calories END DESC, p.name_normalized",
-    cost: "CASE WHEN n.status IN ('verified', 'unverified') AND n.protein_grams > 0 AND p.net_quantity_grams > 0 THEN o.selling_price * 2500.0 / (p.net_quantity_grams * n.protein_grams) END ASC NULLS LAST, p.name_normalized",
+    cost: "CASE WHEN n.status IN ('verified', 'unverified') AND n.basis = 'per_100g' AND n.protein_grams > 0 AND p.net_quantity_grams > 0 THEN o.selling_price * 2500.0 / (p.net_quantity_grams * n.protein_grams) END ASC NULLS LAST, p.name_normalized",
     completeness: "p.completeness DESC, p.name_normalized",
     name: "p.name_normalized, p.brand_normalized",
   }[input.sort] ?? "p.name_normalized";
   const offset = (input.page - 1) * input.pageSize;
   const list = db.prepare(`${SELECT_PRODUCT}${filters.sql} ORDER BY ${order} LIMIT ? OFFSET ?`).bind(...filters.bindings, input.pageSize, offset);
-  const count = db.prepare(`SELECT COUNT(*) AS total FROM products p LEFT JOIN nutrition_facts n ON n.product_id = p.id${filters.sql}`).bind(...filters.bindings);
+  const count = db.prepare(`SELECT COUNT(*) AS total FROM products p
+    LEFT JOIN nutrition_facts n ON n.product_id = p.id
+    LEFT JOIN ingredient_statements i ON i.product_id = p.id${filters.sql}`).bind(...filters.bindings);
   const batch = await db.batch<ProductRow | CountRow>([list, count]);
   const listResult = batch[0];
   const countResult = batch[1];

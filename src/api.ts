@@ -28,7 +28,8 @@ export const api = {
     request<CatalogResponse>(`/api/products?${params}`, { signal }),
   product: (id: string, signal?: AbortSignal) =>
     request<ProductDetailResponse>(`/api/products/${encodeURIComponent(id)}`, { signal }),
-  reviews: () => request<ReviewResponse>("/api/reviews?status=open&limit=100"),
+  reviews: (params = new URLSearchParams({ status: "open", type: "all", page: "1", pageSize: "50" }), signal?: AbortSignal) =>
+    request<ReviewResponse>(`/api/reviews?${params}`, { signal }),
   coverage: () => request<CoverageResponse>("/api/coverage"),
   resolveReview: (id: string, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) =>
     request<{ status: string }>(`/api/reviews/${encodeURIComponent(id)}/resolve`, {

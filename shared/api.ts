@@ -111,9 +111,20 @@ export interface ReviewItem {
   decidedBy: string | null;
 }
 
+export type ReviewStatus = "open" | "resolved" | "dismissed";
+
+export type ReviewType =
+  | "identity"
+  | "invalid_gtin"
+  | "nutrition_validation"
+  | "nutrition_conflict"
+  | "ingredient_conflict"
+  | "coverage_gap";
+
 export interface ReviewResponse {
   items: ReviewItem[];
   counts: { open: number; resolved: number; dismissed: number };
+  pagination: { page: number; pageSize: number; total: number; pages: number };
 }
 
 export interface CoverageResponse {

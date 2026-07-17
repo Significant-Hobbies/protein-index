@@ -1,0 +1,9 @@
+# Protein Index
+
+Protein Index is a source-aware catalog of Indian food products. It separates
+verified label evidence from broader discovery data and does not claim complete
+coverage of the Indian market.
+
+- [Browse the catalog](/)
+- [Read the coverage API](/api/coverage)
+- [Check catalog health](/api/health)

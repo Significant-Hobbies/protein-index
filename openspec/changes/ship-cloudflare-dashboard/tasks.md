@@ -10,7 +10,11 @@
 - [x] 2.2 Refine catalog search, trust controls, desktop comparison table, mobile product cards, empty/error/loading states, and pagination behavior.
 - [x] 2.3 Refine product detail so identity, evidence, nutrition, ingredients, metric inputs, provenance, and missing data are scannable and honest.
 - [x] 2.4 Keep coverage and review views useful but secondary, with production read-only state clearly communicated.
-- [ ] 2.5 Verify keyboard behavior, semantic labels, focus management, contrast, reduced motion, and phone/desktop layout behavior.
+- [x] 2.5 Verify keyboard behavior, semantic labels, focus management, contrast, reduced motion, and phone/desktop layout behavior.
+- [x] 2.6 Add tested review-queue pagination and evidence-type filtering while keeping the public surface read-only.
+- [x] 2.7 Expose product label/evidence links, pack and serving metadata, additional nutrients, and explicit retailer empty states.
+- [x] 2.8 Fix tablet overflow, small control targets, missing display-font token, and live-region semantics found in the browser/code audit.
+- [x] 2.9 Add independent tested nutrition and ingredient evidence filters so fully verified records are queryable without conflating the two states.
 
 ## 3. Snapshot publication
 

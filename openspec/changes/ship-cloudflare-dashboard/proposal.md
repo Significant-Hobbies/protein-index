@@ -24,6 +24,11 @@ evidence quality and is deployed safely on Cloudflare.
   or materially incomplete snapshot.
 - Verify the deployed dashboard at desktop and mobile widths, including its
   loading, empty, error, unverified, and product-detail states.
+- Make the public evidence queue traversable instead of exposing only its first
+  page, and expose the label/source links already returned by product detail so
+  users can inspect the evidence behind a verified value.
+- Keep nutrition and ingredient trust independently filterable so users can ask
+  for fully verified records without treating one verified field as the other.
 
 ## Capabilities
 
@@ -44,7 +49,7 @@ evidence quality and is deployed safely on Cloudflare.
 ## Impact
 
 - Changes the React application layout and presentation, Worker health metadata,
-  catalog defaults, and production empty/error messaging.
+  catalog defaults, review-list pagination, and production empty/error messaging.
 - Adds production-oriented scripts and documentation but no new production
   dependencies.
 - Creates Cloudflare Worker, D1, and R2 resources in the authorized account and

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialFilters, metricEvidenceLabel, reviewIngredientCandidate, reviewNutritionCandidate } from "../src/App";
+import { initialFilters, metricEvidenceLabel, nutrientDisplayName, publicEvidenceUrl, reviewIngredientCandidate, reviewNutritionCandidate } from "../src/App";
 import {
   canonicalJson,
   nutritionCandidateFromEvidence,
@@ -130,9 +130,19 @@ describe("nutrition accuracy and classification", () => {
 
 describe("metrics and completeness", () => {
   it("defaults the dashboard to evidence-aware protein density", () => {
-    expect(initialFilters).toEqual({ q: "", category: "all", verification: "all", scope: "all", sort: "protein_density" });
+    expect(initialFilters).toEqual({ q: "", category: "all", verification: "all", ingredientVerification: "all", scope: "all", sort: "protein_density" });
     expect(metricEvidenceLabel("unverified")).toBe("unverified nutrition");
     expect(metricEvidenceLabel("verified")).toBe("verified nutrition");
+  });
+
+  it("exposes only browser-safe public evidence links and readable nutrient labels", () => {
+    expect(publicEvidenceUrl("https://images.openfoodfacts.org/label.jpg")).toBe("https://images.openfoodfacts.org/label.jpg");
+    expect(publicEvidenceUrl("http://example.com/source")).toBe("http://example.com/source");
+    expect(publicEvidenceUrl("javascript:alert(1)")).toBeNull();
+    expect(publicEvidenceUrl("/relative/source")).toBeNull();
+    expect(publicEvidenceUrl(null)).toBeNull();
+    expect(nutrientDisplayName("vitamin_b12")).toBe("Vitamin b12");
+    expect(nutrientDisplayName("omega-3-fatty-acids")).toBe("Omega 3 fatty acids");
   });
 
   it("parses only complete Robotoff nutrition review evidence for the operator UI", () => {

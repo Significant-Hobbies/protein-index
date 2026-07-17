@@ -63,6 +63,14 @@ health strip, useful catalog KPIs, a clear trust switch, and product rows/cards
 that prioritize brand, name, evidence, and the next useful action. Operator
 coverage and review information remains available but secondary to browsing.
 
+The public evidence queue remains read-only, but it must expose deterministic
+pagination and evidence-type filtering so every unresolved record is reachable.
+Product detail must link to the stored label image and evidence URLs when they
+exist, show pack/serving and additional nutrient data already present in the API,
+and provide explicit empty states for absent retailer information.
+Catalog filtering keeps nutrition and ingredient evidence as separate axes; a
+verified nutrition record never silently implies a verified ingredient statement.
+
 ### Publish reviewed snapshots through a dedicated CLI command
 
 Add an idempotent `publish` path that accepts a manifest/staged snapshot pair,
@@ -113,7 +121,8 @@ performs a Wrangler dry run before remote mutation.
   evidence, checksum validation, count reconciliation, and material-reduction
   guards before publication.
 - **A public review surface can reveal operator evidence** → make the deployed
-  app catalog-first and read-only; do not expose raw source payloads or enable
+  app catalog-first and read-only; expose only already-public evidence URLs and
+  normalized review metadata, and do not expose raw source payloads or enable
   review mutations without authentication.
 - **Visual verification tooling may be unavailable** → run semantic/unit/build
   checks and retry the sanctioned in-app browser; do not substitute an

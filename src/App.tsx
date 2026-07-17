@@ -7,6 +7,7 @@ import type {
   ProductDetailResponse,
   ReviewItem,
   ReviewResponse,
+  ReviewType,
 } from "../shared/api";
 import type { EvidenceStatus, MetricResult, NormalizedIngredient } from "../shared/types";
 import { api } from "./api";
@@ -17,6 +18,7 @@ export const initialFilters = {
   q: "",
   category: "all",
   verification: "all",
+  ingredientVerification: "all",
   scope: "all",
   sort: "protein_density",
 };
@@ -213,6 +215,21 @@ function nutritionBasisLabel(basis: CatalogProduct["nutrition"]["basis"]): strin
   return basis === "per_100ml" ? "per 100 ml" : basis === "per_serving" ? "per serving" : basis === "per_100g" ? "per 100 g" : "normalized basis";
 }
 
+export function publicEvidenceUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+export function nutrientDisplayName(code: string): string {
+  const label = code.replaceAll("_", " ").replaceAll("-", " ").trim();
+  return label ? `${label[0]?.toUpperCase() ?? ""}${label.slice(1)}` : "Nutrient";
+}
+
 function MetricValue({ result, prefix = "", suffix = "" }: { result: MetricResult; prefix?: string; suffix?: string }) {
   if (result.value === null) {
     return <span className="metric-unavailable">Unavailable<small>{(result.reason ?? "missing inputs").replaceAll("_", " ")}</small></span>;
@@ -276,7 +293,7 @@ function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
             <th scope="col">Protein calories</th>
             <th scope="col">Cost / 25 g</th>
             <th scope="col">Current offer</th>
-            <th scope="col">Complete</th>
+            <th scope="col">Field coverage</th>
           </tr>
         </thead>
         <tbody>
@@ -306,7 +323,7 @@ function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
               <span className="card-arrow" aria-hidden="true">↗</span>
             </button>
             <div className="product-card-metric"><strong>{metric(product.metrics.proteinPer100Calories, " g")}</strong><span>protein / 100 kcal</span><small>{metricEvidenceLabel(product.nutritionStatus)}</small></div>
-            <div className="product-card-meta"><StatusBadge status={product.nutritionStatus} /><span>{product.nutrition.proteinGrams === null ? "Protein missing" : `${formatNumber(product.nutrition.proteinGrams)} g protein · ${nutritionBasisLabel(product.nutrition.basis)}`}</span><span>{product.completeness}% complete</span></div>
+            <div className="product-card-meta"><StatusBadge status={product.nutritionStatus} /><span>{product.nutrition.proteinGrams === null ? "Protein missing" : `${formatNumber(product.nutrition.proteinGrams)} g protein · ${nutritionBasisLabel(product.nutrition.basis)}`}</span><span>{product.completeness}% fields present</span></div>
             <ClassificationBadges product={product} />
           </article>
         ))}
@@ -362,17 +379,19 @@ function ProductDrawer({ detail, loading, error, onClose }: {
     };
   }, [onClose]);
 
+  const nutritionImageUrl = publicEvidenceUrl(detail?.nutritionImageUrl ?? null);
+
   return (
     <div className="drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside ref={drawerRef} className="drawer" role="dialog" aria-modal="true" aria-label="Product evidence detail">
         <button ref={closeRef} className="close" onClick={onClose} aria-label="Close product detail">×</button>
-        {loading && <div className="loading">Loading product evidence…</div>}
-        {error && <div className="error-state">{error}</div>}
+        {loading && <div className="loading" role="status">Loading product evidence…</div>}
+        {error && <div className="error-state" role="alert">{error}</div>}
         {detail && (
           <>
             <header className="detail-head">
               <ProductVisual product={detail} size="large" />
-              <div><p className="eyebrow">{detail.brand} · {detail.category.replaceAll("_", " ")}</p><h2>{detail.name}</h2><p>{detail.flavour ?? "No flavour declared"} · GTIN {detail.gtin ?? "not recorded"}</p><ClassificationBadges product={detail} /></div>
+              <div><p className="eyebrow">{detail.brand} · {detail.category.replaceAll("_", " ")}</p><h2>{detail.name}</h2><p>{detail.flavour ?? "No flavour declared"} · GTIN {detail.gtin ?? "not recorded"}</p><div className="product-pack-meta"><span><small>Pack size</small><strong>{detail.netQuantityGrams === null ? "Not recorded" : `${formatNumber(detail.netQuantityGrams, 0)} g`}</strong></span><span><small>Serving size</small><strong>{detail.servingSizeGrams === null ? "Not recorded" : `${formatNumber(detail.servingSizeGrams, 1)} g`}</strong></span></div><ClassificationBadges product={detail} /></div>
             </header>
 
             {detail.nutritionStatus !== "verified" && <div className={`evidence-notice evidence-notice-${detail.nutritionStatus}`}><strong>{detail.nutritionStatus === "missing" ? "Nutrition is missing" : detail.nutritionStatus === "conflict" ? "Nutrition sources conflict" : "Community evidence—not label verified"}</strong><span>{detail.nutritionStatus === "unverified" ? "Validation-passing metrics are shown for discovery, but this product remains excluded from Trusted comparisons until a current label or authoritative source is verified." : "This product is excluded from trusted comparisons until the evidence gap is resolved."}</span></div>}
@@ -380,12 +399,12 @@ function ProductDrawer({ detail, loading, error, onClose }: {
             <section className="trust-panel">
               <div><span>Nutrition</span><StatusBadge status={detail.nutritionStatus} /></div>
               <div><span>Ingredients</span><StatusBadge status={detail.ingredientStatus} /></div>
-              <div><span>Completeness</span><strong>{detail.completeness}%</strong></div>
+              <div><span>Field coverage</span><strong>{detail.completeness}%</strong></div>
               <div><span>Open reviews</span><strong>{detail.openReviewCount}</strong></div>
             </section>
 
             <section>
-              <div className="section-title"><h3>Nutrition · {nutritionBasisLabel(detail.nutrition.basis)}</h3><small>{detail.nutrition.labelVerifiedAt ? `label verified ${new Date(detail.nutrition.labelVerifiedAt).toLocaleDateString("en-IN")}` : "not label verified"}</small></div>
+              <div className="section-title"><div><h3>Nutrition · {nutritionBasisLabel(detail.nutrition.basis)}</h3><small>{detail.nutrition.labelVerifiedAt ? `label verified ${new Date(detail.nutrition.labelVerifiedAt).toLocaleDateString("en-IN")}` : "not label verified"}</small></div>{nutritionImageUrl && <a className="evidence-link" href={nutritionImageUrl} target="_blank" rel="noreferrer">View label evidence ↗</a>}</div>
               <div className="nutrition-grid">
                 {[
                   ["Energy", detail.nutrition.calories, "kcal"],
@@ -398,6 +417,19 @@ function ProductDrawer({ detail, loading, error, onClose }: {
                   ["Sodium", detail.nutrition.sodiumMg, "mg"],
                 ].map(([label, value, unit]) => <div key={String(label)}><span>{label}</span><strong>{formatNumber(value as number | null)} {unit}</strong></div>)}
               </div>
+            </section>
+
+            <section>
+              <h3>Additional nutrients</h3>
+              {detail.nutrients.length > 0 ? <div className="nutrient-list">
+                {detail.nutrients.map((nutrient, index) => (
+                  <div key={`${nutrient.code}-${nutrient.basis}-${nutrient.observedAt}-${index}`}>
+                    <span><strong>{nutrientDisplayName(nutrient.code)}</strong><small>{nutrient.basis.replaceAll("_", " ")} · observed {new Date(nutrient.observedAt).toLocaleDateString("en-IN")}</small></span>
+                    <strong>{formatNumber(nutrient.quantity, 2)} {nutrient.unit}</strong>
+                    <span className={`status status-${nutrient.status}`}><i aria-hidden="true" />{nutrient.status}</span>
+                  </div>
+                ))}
+              </div> : <p className="inline-empty">No additional nutrient observations are recorded for this product.</p>}
             </section>
 
             <section>
@@ -417,7 +449,7 @@ function ProductDrawer({ detail, loading, error, onClose }: {
               <p className="ingredient-raw">{detail.ingredientStatement ?? "No ingredient statement available."}</p>
               <IngredientTree items={detail.ingredients} />
               <div className="evidence-groups">
-                <div><h4>Allergens</h4>{detail.allergens.length ? detail.allergens.map((item) => <span className={`tag allergen-${item.declaration}`} key={`${item.name}-${item.declaration}`}>{item.declaration.replace("_", " ")}: {item.name}</span>) : <span className="muted">None declared</span>}</div>
+                <div><h4>Allergens</h4>{detail.allergens.length ? detail.allergens.map((item) => <span className={`tag allergen-${item.declaration}`} key={`${item.name}-${item.declaration}`}>{item.declaration.replace("_", " ")}: {item.name}</span>) : <span className="muted">{detail.ingredientStatus === "verified" ? "No allergens declared on the verified statement" : "No verified allergen declaration available"}</span>}</div>
                 <div><h4>Additives</h4>{detail.additives.length ? detail.additives.map((item) => <span className="tag" key={item}>{item}</span>) : <span className="muted">None mapped</span>}</div>
               </div>
             </section>
@@ -425,22 +457,36 @@ function ProductDrawer({ detail, loading, error, onClose }: {
             <section>
               <h3>Offers and retailer ratings</h3>
               <div className="mini-table">
-                {detail.offers.map((offer) => <div key={`${offer.retailer}-${offer.listingId}-${offer.observedAt}`}><span>{offer.retailer}<small>{offer.pincode ?? "all India"} · {new Date(offer.observedAt).toLocaleDateString("en-IN")}</small></span><strong>₹{formatNumber(offer.sellingPrice, 0)}</strong></div>)}
+                {detail.offers.length > 0 ? detail.offers.map((offer) => {
+                  const offerUrl = publicEvidenceUrl(offer.url);
+                  const content = <><span>{offer.retailer}<small>{offer.available ? offer.pincode ?? "all India" : "currently unavailable"} · observed {new Date(offer.observedAt).toLocaleDateString("en-IN")}</small></span><strong>₹{formatNumber(offer.sellingPrice, 0)}</strong></>;
+                  return offerUrl
+                    ? <a href={offerUrl} target="_blank" rel="noreferrer" key={`${offer.retailer}-${offer.listingId}-${offer.observedAt}`}>{content}</a>
+                    : <div key={`${offer.retailer}-${offer.listingId}-${offer.observedAt}`}>{content}</div>;
+                }) : <p className="inline-empty">No current retailer offers are recorded.</p>}
               </div>
-              <div className="ratings">{detail.ratings.map((rating) => <span key={`${rating.retailer}-${rating.observedAt}`}><strong>{rating.stars.toFixed(1)}★</strong> {rating.ratingCount.toLocaleString("en-IN")} ratings · {rating.retailer}</span>)}</div>
+              {detail.ratings.length > 0 ? <div className="ratings">{detail.ratings.map((rating) => <span key={`${rating.retailer}-${rating.observedAt}`}><strong>{rating.stars.toFixed(1)}★</strong> {rating.ratingCount.toLocaleString("en-IN")} ratings · {rating.retailer}<small>Observed {new Date(rating.observedAt).toLocaleDateString("en-IN")}</small></span>)}</div> : <p className="inline-empty retailer-empty">No retailer ratings are recorded.</p>}
             </section>
 
             <section>
               <h3>Selected-field provenance</h3>
               {detail.completenessMissing.length > 0 && <div className="missing-fields"><strong>Still missing</strong>{detail.completenessMissing.map((item) => <span className="tag" key={item}>{item.replaceAll("_", " ")}</span>)}</div>}
               <div className="provenance">
-                {detail.provenance.map((item, index) => (
-                  <details key={`${item.field}-${item.source}-${index}`} open={item.selected}>
+                {detail.provenance.map((item, index) => {
+                  const evidenceUrl = publicEvidenceUrl(item.evidenceUrl);
+                  return <details key={`${item.field}-${item.source}-${index}`} open={item.selected}>
                     <summary><span>{item.field}</span><span className="tag">{item.selected ? "selected value" : "source alternative"}</span></summary>
-                    <dl><dt>Source</dt><dd>{item.source}</dd><dt>Authority</dt><dd>{item.authority}/100</dd><dt>Observed</dt><dd>{new Date(item.observedAt).toLocaleString("en-IN")}</dd><dt>Value</dt><dd><code>{JSON.stringify(item.normalized)}</code></dd></dl>
-                  </details>
-                ))}
+                    <dl><dt>Source</dt><dd>{item.source}</dd><dt>Authority</dt><dd>{item.authority}/100</dd><dt>Observed</dt><dd>{new Date(item.observedAt).toLocaleString("en-IN")}</dd><dt>Value</dt><dd><code>{JSON.stringify(item.normalized)}</code></dd>{evidenceUrl && <><dt>Evidence</dt><dd><a className="evidence-link" href={evidenceUrl} target="_blank" rel="noreferrer">Open source evidence ↗</a></dd></>}</dl>
+                  </details>;
+                })}
               </div>
+              {detail.sourceRecords.length > 0 && <details className="source-records">
+                <summary>Inspect {detail.sourceRecords.length.toLocaleString("en-IN")} source record{detail.sourceRecords.length === 1 ? "" : "s"}</summary>
+                <div>{detail.sourceRecords.map((record) => {
+                  const sourceUrl = publicEvidenceUrl(record.sourceUrl);
+                  return <div key={record.id}><span><strong>{record.source}</strong><small>{record.sourceRecordId} · observed {new Date(record.observedAt).toLocaleString("en-IN")}</small></span>{sourceUrl ? <a className="evidence-link" href={sourceUrl} target="_blank" rel="noreferrer">Open source ↗</a> : <span className="muted">No public link</span>}</div>;
+                })}</div>
+              </details>}
             </section>
           </>
         )}
@@ -520,9 +566,11 @@ function IngredientCandidateEvidence({
             <span>Immutable model extraction</span>
             <p>{candidate.entityText}</p>
           </div>
-          <label>
+          <label htmlFor={`reviewed-text-${candidate.candidateHash}`}>
             Reviewer-confirmed visible label text
             <textarea
+              id={`reviewed-text-${candidate.candidateHash}`}
+              name={`reviewedText-${candidate.candidateHash}`}
               value={reviewedText}
               onChange={(event) => onReviewedText(event.target.value)}
               readOnly={readOnly}
@@ -559,26 +607,49 @@ function IngredientCandidateEvidence({
   );
 }
 
-function Reviews({ data, loading, error, onResolve, onOpenProduct, readOnly = false }: {
+type ReviewTypeFilter = ReviewType | "all";
+
+const REVIEW_TYPE_OPTIONS: Array<{ value: ReviewTypeFilter; label: string }> = [
+  { value: "all", label: "All evidence types" },
+  { value: "nutrition_validation", label: "Nutrition validation" },
+  { value: "nutrition_conflict", label: "Nutrition conflicts" },
+  { value: "ingredient_conflict", label: "Ingredient evidence" },
+  { value: "coverage_gap", label: "Coverage gaps" },
+  { value: "identity", label: "Identity matching" },
+  { value: "invalid_gtin", label: "Invalid GTIN" },
+];
+
+function Reviews({ data, loading, error, onResolve, onOpenProduct, typeFilter, page, onType, onPage, readOnly = false }: {
   data: ReviewResponse | null;
   loading: boolean;
   error: string | null;
   onResolve: (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) => Promise<void>;
   onOpenProduct: (id: string) => void;
+  typeFilter: ReviewTypeFilter;
+  page: number;
+  onType: (type: ReviewTypeFilter) => void;
+  onPage: (page: number) => void;
   readOnly?: boolean;
 }) {
   const [rationales, setRationales] = useState<Record<string, string>>({});
   const [evidenceUrls, setEvidenceUrls] = useState<Record<string, string>>({});
   const [reviewedTexts, setReviewedTexts] = useState<Record<string, string>>({});
   const [working, setWorking] = useState<string | null>(null);
-  if (loading) return <div className="loading">Loading review queue…</div>;
-  if (error) return <div className="error-state">{error}</div>;
-  if (!data?.items.length) return <div className="empty"><strong>Review queue is clear.</strong><span>New conflicts and evidence gaps will appear here.</span></div>;
+  if (loading && !data) return <div className="loading" role="status">Loading review queue…</div>;
+  if (error) return <div className="error-state" role="alert">{error}</div>;
+  if (!data) return null;
   return (
-    <div className="review-layout">
+    <div className="review-layout" aria-busy={loading}>
       {readOnly && <div className="read-only-notice"><strong>Public read-only view</strong><span>Evidence can be inspected here. Decisions stay disabled until operator authentication is configured.</span></div>}
+      <div className="queue-tools">
+        <label htmlFor="review-type">Evidence type</label>
+        <select id="review-type" name="reviewType" value={typeFilter} onChange={(event) => onType(event.target.value as ReviewTypeFilter)}>
+          {REVIEW_TYPE_OPTIONS.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+        </select>
+        <span>{data.pagination.total.toLocaleString("en-IN")} matching item{data.pagination.total === 1 ? "" : "s"}</span>
+      </div>
       <div className="queue-summary"><strong>{data.counts.open}</strong><span>open</span><strong>{data.counts.resolved}</strong><span>resolved</span></div>
-      {data.items.map((item) => {
+      {data.items.length === 0 ? <div className="empty review-empty"><strong>No matching evidence items.</strong><span>Choose another evidence type or wait for the next source run.</span></div> : data.items.map((item) => {
         const candidate = reviewNutritionCandidate(item.evidence);
         const ingredientCandidate = reviewIngredientCandidate(item.evidence);
         const evidenceUrl = evidenceUrls[item.id] ?? candidate?.imageUrl ?? ingredientCandidate?.imageUrl ?? "";
@@ -610,8 +681,8 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, readOnly = fa
               ))}
             </div>
           )}
-          {!readOnly && <><label>Decision rationale<textarea value={rationales[item.id] ?? ""} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="What evidence supports this decision?" /></label>
-          {item.type !== "identity" && <label>Label or authoritative evidence URL<input type="url" value={evidenceUrl} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>}
+          {!readOnly && <><label htmlFor={`review-rationale-${item.id}`}>Decision rationale<textarea id={`review-rationale-${item.id}`} name={`rationale-${item.id}`} value={rationales[item.id] ?? ""} onChange={(event) => setRationales((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="What evidence supports this decision?" /></label>
+          {item.type !== "identity" && <label htmlFor={`review-evidence-${item.id}`}>Label or authoritative evidence URL<input id={`review-evidence-${item.id}`} name={`evidenceUrl-${item.id}`} type="url" value={evidenceUrl} onChange={(event) => setEvidenceUrls((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="https://… current label or official record" /></label>}
           <div className="review-actions">
             {item.type.includes("nutrition") || item.type === "coverage_gap" ? <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>{candidate ? "Verify exact label values" : "Verify nutrition"}</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_nutrition", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>Reject candidate</button></> : null}
             {ingredientCandidate && <><button disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "verify_ingredients", rationales[item.id] ?? "", evidenceUrl || null, null, reviewedText).finally(() => setWorking(null)); }}>Verify reviewed label text</button><button className="secondary" disabled={working === item.id} onClick={async () => { setWorking(item.id); await onResolve(item, "reject_ingredients", rationales[item.id] ?? "", evidenceUrl || null, null, null).finally(() => setWorking(null)); }}>Reject this candidate</button></>}
@@ -620,13 +691,14 @@ function Reviews({ data, loading, error, onResolve, onOpenProduct, readOnly = fa
           </div></>}
         </article>
       )})}
+      {data.pagination.pages > 1 && <nav className="pagination review-pagination" aria-label="Evidence queue pages"><button disabled={page <= 1 || loading} onClick={() => onPage(page - 1)}>← Previous</button><span>Page <strong>{page}</strong> of {data.pagination.pages.toLocaleString("en-IN")}</span><button disabled={page >= data.pagination.pages || loading} onClick={() => onPage(page + 1)}>Next →</button></nav>}
     </div>
   );
 }
 
 function Coverage({ data, loading, error }: { data: CoverageResponse | null; loading: boolean; error: string | null }) {
-  if (loading) return <div className="loading">Reconciling coverage…</div>;
-  if (error) return <div className="error-state">{error}</div>;
+  if (loading) return <div className="loading" role="status">Reconciling coverage…</div>;
+  if (error) return <div className="error-state" role="alert">{error}</div>;
   if (!data) return null;
   const cards = [
     ["Catalog products", data.catalog.products],
@@ -663,6 +735,8 @@ export function App() {
   const [detailState, setDetailState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
   const [reviews, setReviews] = useState<ReviewResponse | null>(null);
   const [reviewState, setReviewState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
+  const [reviewType, setReviewType] = useState<ReviewTypeFilter>("all");
+  const [reviewPage, setReviewPage] = useState(1);
   const [coverage, setCoverage] = useState<CoverageResponse | null>(null);
   const [coverageState, setCoverageState] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
   const isPublic = typeof window !== "undefined" && !["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
@@ -672,13 +746,20 @@ export function App() {
     return value;
   }, [filters, deferredQuery, page]);
 
+  const reviewParams = useMemo(() => new URLSearchParams({
+    status: "open",
+    type: reviewType,
+    page: String(reviewPage),
+    pageSize: "50",
+  }), [reviewType, reviewPage]);
+
   const updateFilters = (next: Partial<typeof initialFilters>) => {
     setPage(1);
     setFilters((current) => ({ ...current, ...next }));
   };
 
   const showTrusted = () => updateFilters({ verification: "verified", scope: "protein", sort: "protein_density" });
-  const showDiscovery = () => updateFilters({ verification: "all", scope: "all", sort: "protein_density" });
+  const showDiscovery = () => updateFilters({ verification: "all", ingredientVerification: "all", scope: "all", sort: "protein_density" });
 
   const loadCatalog = () => {
     const controller = new AbortController();
@@ -713,11 +794,19 @@ export function App() {
   }, [selectedId]);
 
   const loadReviews = () => {
+    const controller = new AbortController();
     setReviewState({ loading: true, error: null });
-    api.reviews().then((result) => { setReviews(result); setReviewState({ loading: false, error: null }); }).catch((error: unknown) => setReviewState({ loading: false, error: error instanceof Error ? error.message : String(error) }));
+    api.reviews(reviewParams, controller.signal)
+      .then((result) => { setReviews(result); setReviewState({ loading: false, error: null }); })
+      .catch((error: unknown) => { if (error instanceof DOMException && error.name === "AbortError") return; setReviewState({ loading: false, error: error instanceof Error ? error.message : String(error) }); });
+    return controller;
   };
 
-  useEffect(() => { if (tab === "reviews") loadReviews(); }, [tab]);
+  useEffect(() => {
+    if (tab !== "reviews") return;
+    const controller = loadReviews();
+    return () => controller.abort();
+  }, [tab, reviewParams]);
 
   const resolve = async (item: ReviewItem, decision: string, rationale: string, evidenceUrl: string | null, candidateProductId: string | null, reviewedText: string | null) => {
     if (rationale.trim().length < 3) { setReviewState((state) => ({ ...state, error: "Add a rationale of at least 3 characters." })); return; }
@@ -734,9 +823,9 @@ export function App() {
     <div className="app-shell">
       <a className="skip-link" href="#main-content">Skip to catalog content</a>
       <header className="topbar">
-        <button className="brand-home" onClick={() => setTab("catalog")} aria-label="Open Protein Index catalog"><span className="brand-mark">PI</span><span><small>Indian food evidence</small><strong>Protein Index</strong></span></button>
+        <button className="brand-home" onClick={() => setTab("catalog")}><span className="brand-mark">PI</span><span><small>Indian food evidence</small><strong>Protein Index</strong></span></button>
         <nav aria-label="Primary navigation">
-          {(["catalog", "coverage", "reviews"] as const).map((item) => <button key={item} aria-pressed={tab === item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item === "reviews" ? "Evidence queue" : item}{item === "reviews" && reviews?.counts.open ? <b>{reviews.counts.open}</b> : null}</button>)}
+          {(["catalog", "coverage", "reviews"] as const).map((item) => <button key={item} aria-pressed={tab === item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item === "catalog" ? "Catalog" : item === "coverage" ? "Coverage" : "Evidence queue"}{item === "reviews" && reviews?.counts.open ? <b>{reviews.counts.open}</b> : null}</button>)}
         </nav>
         <div className="source-pill"><i />{health?.latestPublishedAt ? `Evidence updated ${new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(new Date(health.latestPublishedAt))}` : "Evidence catalog"}</div>
       </header>
@@ -745,7 +834,7 @@ export function App() {
         {tab === "catalog" && (
           <>
             <section className="hero-row">
-              <div><p className="eyebrow">A living index of Indian food labels</p><h2>What’s in the pack<br /><em>before</em> the promise.</h2><p>Search canonical products, inspect where each value came from, and compare protein with the evidence state attached.</p></div>
+              <div><p className="eyebrow">A living index of Indian food labels</p><h1>What’s in the pack<br /><em>before</em> the promise.</h1><p>Search canonical products, inspect where each value came from, and compare protein with the evidence state attached.</p></div>
               <div className="hero-orbit" aria-hidden="true"><span>{coverage?.catalog.products.toLocaleString("en-IN") ?? "—"}</span><small>foods indexed</small><i /></div>
             </section>
             <section className="catalog-overview" aria-label="Catalog overview">
@@ -760,20 +849,21 @@ export function App() {
               <div role="group" aria-label="Evidence boundary"><button className={catalog?.trustedDefault ? "active" : ""} aria-pressed={catalog?.trustedDefault ?? false} onClick={showTrusted}>Trusted</button><button className={catalog && !catalog.trustedDefault ? "active" : ""} aria-pressed={catalog ? !catalog.trustedDefault : false} onClick={showDiscovery}>Discovery</button></div>
             </section>
             <section className="filters" aria-label="Catalog filters">
-              <label className="search-field"><span>Search the index</span><input type="search" value={filters.q} onChange={(event) => updateFilters({ q: event.target.value })} placeholder="Try Amul, whey, paneer, or a GTIN" /></label>
-              <label>Category<select value={filters.category} onChange={(event) => updateFilters({ category: event.target.value })}><option value="all">All categories</option><option value="protein_powder">Protein powder</option><option value="protein_bar">Protein bars</option><option value="protein_snack">Protein snacks</option><option value="soy_product">Soy products</option><option value="dairy">Dairy</option><option value="ready_to_drink">Ready to drink</option><option value="breakfast">Breakfast</option><option value="spread">Spreads</option><option value="other">Other food</option></select></label>
-              <label>Evidence<select value={filters.verification} onChange={(event) => updateFilters({ verification: event.target.value })}><option value="verified">Verified nutrition</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
-              <label>Scope<select value={filters.scope} onChange={(event) => updateFilters({ scope: event.target.value })}><option value="protein">Protein cohorts</option><option value="all">All ingested foods</option></select></label>
-              <label>Sort<select value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}><option value="protein_density">Protein density</option><option value="cost">Cost / 25 g</option><option value="completeness">Completeness</option><option value="name">Name</option></select></label>
+              <label className="search-field" htmlFor="catalog-search"><span>Search the index</span><input id="catalog-search" name="catalogSearch" type="search" value={filters.q} onChange={(event) => updateFilters({ q: event.target.value })} placeholder="Try Amul, whey, paneer, or a GTIN" /></label>
+              <label htmlFor="catalog-category">Category<select id="catalog-category" name="category" value={filters.category} onChange={(event) => updateFilters({ category: event.target.value })}><option value="all">All categories</option><option value="protein_powder">Protein powder</option><option value="protein_bar">Protein bars</option><option value="protein_snack">Protein snacks</option><option value="soy_product">Soy products</option><option value="dairy">Dairy</option><option value="ready_to_drink">Ready to drink</option><option value="breakfast">Breakfast</option><option value="spread">Spreads</option><option value="other">Other food</option></select></label>
+              <label htmlFor="catalog-evidence">Evidence<select id="catalog-evidence" name="evidence" value={filters.verification} onChange={(event) => updateFilters({ verification: event.target.value })}><option value="verified">Verified nutrition</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
+              <label htmlFor="catalog-ingredients">Ingredients<select id="catalog-ingredients" name="ingredientEvidence" value={filters.ingredientVerification} onChange={(event) => updateFilters({ ingredientVerification: event.target.value })}><option value="verified">Verified ingredients</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
+              <label htmlFor="catalog-scope">Scope<select id="catalog-scope" name="scope" value={filters.scope} onChange={(event) => updateFilters({ scope: event.target.value })}><option value="protein">Protein cohorts</option><option value="all">All ingested foods</option></select></label>
+              <label htmlFor="catalog-sort">Sort<select id="catalog-sort" name="sort" value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}><option value="protein_density">Protein density</option><option value="cost">Cost / 25 g</option><option value="completeness">Field coverage</option><option value="name">Name</option></select></label>
             </section>
-            <div className="result-meta"><span>{catalog?.pagination.total.toLocaleString("en-IN") ?? "—"} results</span><small>Missing values stay missing. Unverified values never enter trusted metrics.</small></div>
-            {catalogState.loading && <div className="loading"><span className="loader" />Querying canonical catalog…</div>}
-            {catalogState.error && <div className="error-state"><strong>Catalog unavailable</strong><span>{catalogState.error}</span><button onClick={loadCatalog}>Try again</button></div>}
+            <div className="result-meta" aria-live="polite"><span>{catalog?.pagination.total.toLocaleString("en-IN") ?? "—"} results</span><small>Missing values stay missing. Unverified values never enter trusted metrics.</small></div>
+            {catalogState.loading && <div className="loading" role="status"><span className="loader" />Querying canonical catalog…</div>}
+            {catalogState.error && <div className="error-state" role="alert"><strong>Catalog unavailable</strong><span>{catalogState.error}</span><button onClick={loadCatalog}>Try again</button></div>}
             {catalog && !catalogState.loading && !catalogState.error && <CatalogTable data={catalog} onOpen={setSelectedId} onExplore={showDiscovery} page={page} onPage={setPage} />}
           </>
         )}
-        {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h2>Evidence review queue</h2><p>{isPublic ? "Inspect unresolved evidence. Production decisions remain read-only until operator authentication is in place." : "Resolve conflicts without discarding the original source record."}</p></section><Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} readOnly={isPublic} /></>}
-        {tab === "coverage" && <><section className="page-head"><p className="eyebrow">No fake completeness claims</p><h2>Coverage ledger</h2><p>Exhaustion is proved per configured source, with disconnected sources left visible.</p></section><Coverage data={coverage} loading={coverageState.loading} error={coverageState.error} /></>}
+        {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h1>Evidence review queue</h1><p>{isPublic ? "Inspect unresolved evidence. Production decisions remain read-only until operator authentication is in place." : "Resolve conflicts without discarding the original source record."}</p></section><Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} typeFilter={reviewType} page={reviewPage} onType={(type) => { setReviewPage(1); setReviewType(type); }} onPage={setReviewPage} readOnly={isPublic} /></>}
+        {tab === "coverage" && <><section className="page-head"><p className="eyebrow">No fake completeness claims</p><h1>Coverage ledger</h1><p>Exhaustion is proved per configured source, with disconnected sources left visible.</p></section><Coverage data={coverage} loading={coverageState.loading} error={coverageState.error} /></>}
       </main>
       <footer><span>Protein Index</span><p>Evidence before rankings. Configured-source coverage, never a claim of the whole Indian market.</p><button onClick={() => setTab("coverage")}>Read the coverage ledger</button></footer>
       {selectedId && <ProductDrawer detail={detail} loading={detailState.loading} error={detailState.error} onClose={() => setSelectedId(null)} />}

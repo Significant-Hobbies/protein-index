@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { ReviewStatus, ReviewType } from "../shared/api";
 import { getProductDetail, searchProducts, validateSearch } from "./catalog";
 import { getCoverage } from "./coverage";
 import { listReviews, resolveReview, type ReviewDecision } from "./reviews";
@@ -43,11 +44,37 @@ app.get("/api/coverage", async (c) => c.json(await getCoverage(c.env.DB)));
 
 app.get("/api/reviews", async (c) => {
   const status = c.req.query("status") ?? "open";
-  const limit = Number(c.req.query("limit") ?? 50);
-  if (!["open", "resolved", "dismissed"].includes(status) || !Number.isInteger(limit) || limit < 1 || limit > 100) {
+  const type = c.req.query("type") ?? "all";
+  const page = Number(c.req.query("page") ?? 1);
+  const pageSize = Number(c.req.query("pageSize") ?? 50);
+  const statuses: ReviewStatus[] = ["open", "resolved", "dismissed"];
+  const types: Array<ReviewType | "all"> = [
+    "all",
+    "identity",
+    "invalid_gtin",
+    "nutrition_validation",
+    "nutrition_conflict",
+    "ingredient_conflict",
+    "coverage_gap",
+  ];
+  if (
+    !statuses.includes(status as ReviewStatus)
+    || !types.includes(type as ReviewType | "all")
+    || !Number.isInteger(page)
+    || page < 1
+    || !Number.isInteger(pageSize)
+    || pageSize < 1
+    || pageSize > 100
+  ) {
     return c.json(errorBody("validation_error", "Invalid review filters"), 400);
   }
-  return c.json(await listReviews(c.env.DB, status, limit));
+  return c.json(await listReviews(
+    c.env.DB,
+    status as ReviewStatus,
+    type as ReviewType | "all",
+    page,
+    pageSize,
+  ));
 });
 
 app.post("/api/reviews/:id/resolve", async (c) => {
