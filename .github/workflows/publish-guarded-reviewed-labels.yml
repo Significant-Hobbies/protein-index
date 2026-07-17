@@ -1,0 +1,181 @@
+name: Publish guarded reviewed label evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_family:
+        required: true
+        type: choice
+        options: [nutrition, ingredients]
+      extraction_run_id:
+        required: true
+        type: string
+      expected_input_hash:
+        required: true
+        type: string
+      expected_head_sha:
+        required: true
+        type: string
+      expected_artifact_digest:
+        required: true
+        type: string
+      successor_bundle_path:
+        description: Committed exact replacement bundle under review-decisions/
+        required: true
+        type: string
+      expected_ledger_hash:
+        required: true
+        type: string
+      expected_decision_count:
+        required: true
+        type: string
+      expected_verify_count:
+        required: true
+        type: string
+      confirm_production_publication:
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: protein-index-production-publication
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+    steps:
+      - id: gate
+        shell: bash
+        env:
+          CONFIRM: ${{ inputs.confirm_production_publication }}
+          FAMILY: ${{ inputs.candidate_family }}
+          BUNDLE: ${{ inputs.successor_bundle_path }}
+          LEDGER: ${{ inputs.expected_ledger_hash }}
+          DECISIONS: ${{ inputs.expected_decision_count }}
+          VERIFIES: ${{ inputs.expected_verify_count }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$CONFIRM" == "PUBLISH_GUARDED_REVIEWED_LABELS_TO_PRODUCTION" ]]
+          [[ "$FAMILY" == nutrition || "$FAMILY" == ingredients ]]
+          [[ "$BUNDLE" =~ ^review-decisions/review-[a-f0-9]{20}$ ]]
+          [[ "$LEDGER" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$DECISIONS" =~ ^[1-9][0-9]*$ && "$VERIFIES" =~ ^[1-9][0-9]*$ ]]
+          if [[ "$FAMILY" == nutrition ]]; then [[ "$DECISIONS" == 365 && "$VERIFIES" == 76 ]]; fi
+          if [[ "$FAMILY" == ingredients ]]; then [[ "$DECISIONS" == 66 && "$VERIFIES" == 65 ]]; fi
+          echo "approved=true" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: authorize
+    if: needs.authorize.outputs.approved == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      FAMILY: ${{ inputs.candidate_family }}
+      RUN_ID: ${{ inputs.extraction_run_id }}
+      INPUT_HASH: ${{ inputs.expected_input_hash }}
+      HEAD_SHA: ${{ inputs.expected_head_sha }}
+      ARTIFACT_DIGEST: ${{ inputs.expected_artifact_digest }}
+      BUNDLE: ${{ inputs.successor_bundle_path }}
+      LEDGER: ${{ inputs.expected_ledger_hash }}
+      DECISIONS: ${{ inputs.expected_decision_count }}
+      VERIFIES: ${{ inputs.expected_verify_count }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Require protected publication credentials
+        run: |
+          set -euo pipefail
+          [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]]
+      - name: Download and pin the reviewed extraction
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const run = (await github.rest.actions.getWorkflowRun({ owner: context.repo.owner, repo: context.repo.repo, run_id: Number(process.env.RUN_ID) })).data;
+            const workflow = process.env.FAMILY === 'nutrition' ? 'Extract label evidence with Robotoff' : 'Extract ingredient label evidence';
+            if (run.name !== workflow || run.conclusion !== 'success' || run.head_sha !== process.env.HEAD_SHA || run.head_branch !== context.payload.repository.default_branch || run.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`) throw new Error('Reviewed extraction identity differs');
+            const prefix = process.env.FAMILY === 'nutrition' ? 'robotoff-label-candidates' : 'robotoff-ingredient-candidates';
+            const artifacts = (await github.rest.actions.listWorkflowRunArtifacts({ owner: context.repo.owner, repo: context.repo.repo, run_id: run.id, per_page: 100 })).data.artifacts;
+            const artifact = artifacts.find((item) => item.name === `${prefix}-${run.id}` && !item.expired);
+            if (!artifact || artifact.digest !== process.env.ARTIFACT_DIGEST) throw new Error('Reviewed artifact digest differs');
+            const archive = await github.rest.actions.downloadArtifact({ owner: context.repo.owner, repo: context.repo.repo, artifact_id: artifact.id, archive_format: 'zip' });
+            fs.writeFileSync('.data-reviewed.zip', Buffer.from(archive.data));
+      - name: Validate extraction and successor bundle before remote access
+        run: |
+          set -euo pipefail
+          [[ "$HEAD_SHA" =~ ^[a-f0-9]{40}$ && "$ARTIFACT_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          [[ "$(sha256sum .data-reviewed.zip | awk '{print $1}')" == "${ARTIFACT_DIGEST#sha256:}" ]]
+          mkdir -p .data/guarded-release/artifact
+          unzip -q .data-reviewed.zip -d .data/guarded-release/artifact
+          (cd .data/guarded-release/artifact && sha256sum --check checksums.sha256)
+          test "$(jq -r '.inputHash' .data/guarded-release/artifact/manifest.json)" = "$INPUT_HASH"
+          test "$(jq -r '.ledgerSha256' "$BUNDLE/manifest.json")" = "$LEDGER"
+          pnpm data:audit-decisions -- --artifact .data/guarded-release/artifact --bundles review-decisions --bundle-set review-decisions/active-bundles.json --output .data/guarded-release/decision-drift.json --fail-on candidate_key_active_state_ambiguous
+      - name: Apply pending D1 migrations
+        run: pnpm exec wrangler d1 migrations apply protein-index --remote
+      - name: Read exact live states and derive final states
+        run: |
+          set -euo pipefail
+          pnpm data:guarded-release:state-query -- --family nutrition --output .data/guarded-release/nutrition-query.sql
+          pnpm data:guarded-release:state-query -- --family ingredients --output .data/guarded-release/ingredients-query.sql
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json --command "$(< .data/guarded-release/nutrition-query.sql)" > .data/guarded-release/before-nutrition.json
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json --command "$(< .data/guarded-release/ingredients-query.sql)" > .data/guarded-release/before-ingredients.json
+          cp .data/guarded-release/before-nutrition.json .data/guarded-release/after-nutrition.json
+          cp .data/guarded-release/before-ingredients.json .data/guarded-release/after-ingredients.json
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const count = async (name) => JSON.parse(await readFile(name, 'utf8'))[0].results.length;
+          const nutrition = await count('.data/guarded-release/before-nutrition.json');
+          const ingredients = await count('.data/guarded-release/before-ingredients.json');
+          if (ingredients !== 65 || (process.env.FAMILY === 'nutrition' && ![55, 76].includes(nutrition)) || (process.env.FAMILY === 'ingredients' && nutrition !== 76)) throw new Error('Live pre-state is not an approved guarded-release state');
+          NODE
+          pnpm data:guarded-release:final-state -- --bundle "$BUNDLE" --family "$FAMILY" --output ".data/guarded-release/after-$FAMILY.json"
+      - name: Compose and apply one guarded D1 import
+        run: |
+          set -euo pipefail
+          workflow_name="Extract label evidence with Robotoff"; artifact_name="robotoff-label-candidates-$RUN_ID"
+          if [[ "$FAMILY" == ingredients ]]; then workflow_name="Extract ingredient label evidence"; artifact_name="robotoff-ingredient-candidates-$RUN_ID"; fi
+          bytes="$(stat --format=%s .data-reviewed.zip)"
+          pnpm data:guarded-release:prepare -- --artifact .data/guarded-release/artifact --bundle "$BUNDLE" --family "$FAMILY" --before-nutrition .data/guarded-release/before-nutrition.json --before-ingredients .data/guarded-release/before-ingredients.json --after-nutrition .data/guarded-release/after-nutrition.json --after-ingredients .data/guarded-release/after-ingredients.json --expected-count "$DECISIONS" --expected-verify-count "$VERIFIES" --scratch .data/guarded-release/sql --output .data/guarded-release/guarded.sql --workflow-name "$workflow_name" --upstream-run-id "$RUN_ID" --upstream-head-sha "$HEAD_SHA" --upstream-head-branch main --upstream-repository Significant-Hobbies/protein-index --artifact-name "$artifact_name" --artifact-digest "$ARTIFACT_DIGEST" --artifact-bytes "$bytes"
+          pnpm exec wrangler d1 execute protein-index --remote --yes --file .data/guarded-release/guarded.sql
+      - name: Prove exact live postconditions
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json --command "$(< .data/guarded-release/nutrition-query.sql)" > .data/guarded-release/actual-nutrition.json
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json --command "$(< .data/guarded-release/ingredients-query.sql)" > .data/guarded-release/actual-ingredients.json
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          for (const family of ['nutrition', 'ingredients']) {
+            const expected = JSON.parse(await readFile(`.data/guarded-release/after-${family}.json`, 'utf8'));
+            const actual = JSON.parse(await readFile(`.data/guarded-release/actual-${family}.json`, 'utf8'));
+            if (JSON.stringify(expected) !== JSON.stringify(actual)) throw new Error(`Exact ${family} postcondition failed`);
+          }
+          NODE
+      - name: Upload guarded release evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: guarded-reviewed-label-release-${{ github.run_id }}
+          retention-days: 90
+          path: .data/guarded-release/

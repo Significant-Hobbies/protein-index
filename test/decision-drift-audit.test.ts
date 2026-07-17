@@ -220,7 +220,7 @@ describe("decision drift audit helpers", () => {
 
   it("keeps the checked-in active bundle partition exact and conflict-free", async () => {
     const path = "review-decisions/active-bundles.json";
-    for (const [family, expected] of [["nutrition", 312], ["ingredients", 66]] as const) {
+    for (const [family, expected] of [["nutrition", 365], ["ingredients", 66]] as const) {
       const set = await readActiveReviewBundleSet(path, family);
       const bundles = await Promise.all(set.bundleIds.map((id) => readReviewDecisionBundle(`review-decisions/${id}`)));
       const decisions = bundles.flatMap(({ decisions }) => decisions);

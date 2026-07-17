@@ -29,7 +29,8 @@ concurrency:
 
 jobs:
   publish:
-    if: github.ref == 'refs/heads/main' && inputs.confirm_remote
+    # Replaced by publish-guarded-reviewed-labels.yml: decision-only publication is unsafe for label artifacts.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production

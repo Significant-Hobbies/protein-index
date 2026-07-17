@@ -42,6 +42,8 @@ concurrency:
 
 jobs:
   authorize:
+    # Replaced by publish-guarded-reviewed-labels.yml: source and successor must share one D1 import.
+    if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

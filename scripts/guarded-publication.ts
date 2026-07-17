@@ -1,4 +1,6 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { open, rename, rm, writeFile, type FileHandle } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { canonicalJson } from "../shared/evidence-decisions";
 import type { ExtractionFieldFamily } from "../shared/extraction-outcomes";
 import type { ReviewDecisionBundle, ReviewEvidenceDecision } from "./review-bundles";
@@ -157,10 +159,48 @@ function activeDecisionSetPredicate(bundle: ReviewDecisionBundle): string {
   return `((SELECT COUNT(*) FROM evidence_decisions active WHERE active.active = 1 AND active.source_id = ${sql(sourceId)} AND active.field_family = ${sql(fieldFamily)}) = ${bundle.decisions.length} AND NOT EXISTS (SELECT id FROM evidence_decisions active WHERE active.active = 1 AND active.source_id = ${sql(sourceId)} AND active.field_family = ${sql(fieldFamily)} EXCEPT SELECT id FROM (${ids})) AND NOT EXISTS (SELECT id FROM (${ids}) EXCEPT SELECT id FROM evidence_decisions active WHERE active.active = 1 AND active.source_id = ${sql(sourceId)} AND active.field_family = ${sql(fieldFamily)}))`;
 }
 
-function assertSqlFragment(fragment: string, name: string): void {
-  if (!fragment.trim() || /\b(?:BEGIN(?:\s+IMMEDIATE)?|COMMIT|ROLLBACK|PRAGMA)\b/i.test(fragment)) {
-    throw new Error(`${name} must be a non-empty transaction-free mutation fragment`);
+const transactionToken = /\b(?:BEGIN(?:\s+IMMEDIATE)?|COMMIT|ROLLBACK|PRAGMA)\b/i;
+
+function hasTransactionTokenOutsideString(line: string, state: { quoted: boolean }): boolean {
+  let sql = "";
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    if (character === "'") {
+      if (state.quoted && line[index + 1] === "'") {
+        index += 1;
+        continue;
+      }
+      state.quoted = !state.quoted;
+      continue;
+    }
+    if (!state.quoted) sql += character;
   }
+  return transactionToken.test(sql);
+}
+
+async function writeLine(file: FileHandle, line: string): Promise<void> {
+  await file.write(`${line}\n`);
+}
+
+async function appendSqlFragment(
+  file: FileHandle,
+  fragmentPath: string,
+  name: string,
+): Promise<void> {
+  let hasSql = false;
+  const stringState = { quoted: false };
+  const lines = createInterface({
+    input: createReadStream(fragmentPath, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
+  for await (const line of lines) {
+    if (hasTransactionTokenOutsideString(line, stringState)) {
+      throw new Error(`${name} must be a non-empty transaction-free mutation fragment`);
+    }
+    if (line.trim()) hasSql = true;
+    await writeLine(file, line);
+  }
+  if (!hasSql) throw new Error(`${name} must be a non-empty transaction-free mutation fragment`);
 }
 
 export async function emitGuardedSuccessorPublication(input: GuardedSuccessorPublicationInput): Promise<void> {
@@ -184,38 +224,41 @@ export async function emitGuardedSuccessorPublication(input: GuardedSuccessorPub
   if (JSON.stringify(verifiedProducts) !== JSON.stringify(expectedFamilyState)) {
     throw new Error("Successor verify decisions do not exactly define the approved final verified product set");
   }
-  const [artifactSql, successorSql] = await Promise.all([
-    readFile(input.artifactSqlPath, "utf8"),
-    readFile(input.successorSqlPath, "utf8"),
-  ]);
-  assertSqlFragment(artifactSql, "Artifact SQL");
-  assertSqlFragment(successorSql, "Successor SQL");
-  const sourceGuards = successor.decisions.map((decision) => guard(`source:${decision.id}`, exactSourcePredicate(decision)));
-  const immutableGuards = successor.decisions.map((decision) => guard(
-    `decision:${decision.id}`,
-    `NOT EXISTS (SELECT 1 FROM evidence_decisions existing WHERE existing.id = ${sql(decision.id)} AND NOT (${exactDecisionPredicate(decision, "existing")}))`,
-  ));
-  const candidateGuards = successor.decisions.map((decision) => guard(
-    `candidate:${decision.id}`,
-    `NOT EXISTS (SELECT 1 FROM evidence_decisions active WHERE active.active = 1 AND active.source_id = ${sql(decision.sourceId)} AND active.source_record_key = ${sql(decision.sourceRecordKey)} AND active.candidate_hash = ${sql(decision.candidateHash)} AND active.field_family = ${sql(decision.fieldFamily)} AND active.id <> ${sql(decision.id)})`,
-  ));
   const preOrRetry = `(${exactProductSetPredicate(input.before.nutrition)} AND ${exactProductSetPredicate(input.before.ingredients)}) OR (${exactProductSetPredicate(input.expectedAfter.nutrition)} AND ${exactProductSetPredicate(input.expectedAfter.ingredients)})`;
   const candidateHashes = successor.decisions.map(({ candidateHash }) => sql(candidateHash)).join(", ");
-  const statements = [
-    "PRAGMA foreign_keys = ON;",
-    "DROP TABLE IF EXISTS temp._guarded_successor_publication;",
-    "CREATE TEMP TABLE _guarded_successor_publication (ok INTEGER NOT NULL CHECK(ok = 1), label TEXT NOT NULL);",
-    guard("pre_or_idempotent_state", preOrRetry),
-    ...immutableGuards,
-    artifactSql.trim(),
-    ...sourceGuards,
-    ...candidateGuards,
-    successorSql.trim(),
-    guard("active_successor_decisions", activeDecisionSetPredicate(successor)),
-    guard("final_nutrition_set", exactProductSetPredicate(input.expectedAfter.nutrition)),
-    guard("final_ingredient_set", exactProductSetPredicate(input.expectedAfter.ingredients)),
-    guard("unresolved_successor_candidates", `NOT EXISTS (SELECT 1 FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes}))`),
-    "DROP TABLE _guarded_successor_publication;",
-  ];
-  await writeFile(input.outputPath, `${statements.join("\n")}\n`, "utf8");
+  const temporaryOutputPath = `${input.outputPath}.tmp`;
+  await rm(temporaryOutputPath, { force: true });
+  const output = await open(temporaryOutputPath, "w");
+  try {
+    await writeLine(output, "PRAGMA foreign_keys = ON;");
+    await writeLine(output, "DROP TABLE IF EXISTS temp._guarded_successor_publication;");
+    await writeLine(output, "CREATE TEMP TABLE _guarded_successor_publication (ok INTEGER NOT NULL CHECK(ok = 1), label TEXT NOT NULL);");
+    await writeLine(output, guard("pre_or_idempotent_state", preOrRetry));
+    for (const decision of successor.decisions) {
+      await writeLine(output, guard(
+        `decision:${decision.id}`,
+        `NOT EXISTS (SELECT 1 FROM evidence_decisions existing WHERE existing.id = ${sql(decision.id)} AND NOT (${exactDecisionPredicate(decision, "existing")}))`,
+      ));
+    }
+    await appendSqlFragment(output, input.artifactSqlPath, "Artifact SQL");
+    for (const decision of successor.decisions) {
+      await writeLine(output, guard(`source:${decision.id}`, exactSourcePredicate(decision)));
+      await writeLine(output, guard(
+        `candidate:${decision.id}`,
+        `NOT EXISTS (SELECT 1 FROM evidence_decisions active WHERE active.active = 1 AND active.source_id = ${sql(decision.sourceId)} AND active.source_record_key = ${sql(decision.sourceRecordKey)} AND active.candidate_hash = ${sql(decision.candidateHash)} AND active.field_family = ${sql(decision.fieldFamily)} AND active.id <> ${sql(decision.id)})`,
+      ));
+    }
+    await appendSqlFragment(output, input.successorSqlPath, "Successor SQL");
+    await writeLine(output, guard("active_successor_decisions", activeDecisionSetPredicate(successor)));
+    await writeLine(output, guard("final_nutrition_set", exactProductSetPredicate(input.expectedAfter.nutrition)));
+    await writeLine(output, guard("final_ingredient_set", exactProductSetPredicate(input.expectedAfter.ingredients)));
+    await writeLine(output, guard("unresolved_successor_candidates", `NOT EXISTS (SELECT 1 FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes}))`));
+    await writeLine(output, "DROP TABLE _guarded_successor_publication;");
+    await output.close();
+    await rename(temporaryOutputPath, input.outputPath);
+  } catch (error) {
+    await output.close();
+    await rm(temporaryOutputPath, { force: true });
+    throw error;
+  }
 }

@@ -90,7 +90,7 @@ describe("guarded successor publication", () => {
     const artifact = join(root, "artifact.sql");
     const successor = join(root, "successor.sql");
     const output = join(root, "guarded.sql");
-    await writeFile(artifact, "UPDATE source_records SET observed_at = observed_at;\n", "utf8");
+    await writeFile(artifact, "UPDATE source_records SET observed_at = observed_at, content_hash = 'BEGIN is label text';\n", "utf8");
     await writeFile(successor, "UPDATE review_items SET status = status;\n", "utf8");
     const nutrition = parseVerifiedProductState("nutrition", productState([productId]));
     const ingredients = parseVerifiedProductState("ingredients", productState([`prd_${"1".repeat(24)}`]));

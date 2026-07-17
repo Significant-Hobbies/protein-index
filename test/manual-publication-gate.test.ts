@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const workflowPath = ".github/workflows/publish-automatic-evidence.yml";
 const candidateWorkflowPath = ".github/workflows/publish-robotoff-candidates.yml";
+const guardedCandidateWorkflowPath = ".github/workflows/publish-guarded-reviewed-labels.yml";
 
 async function readWorkflow(): Promise<string> {
   return readFile(workflowPath, "utf8");
@@ -177,5 +178,16 @@ describe("manual evidence publication workflow", () => {
     expect(beforeCredentials).toContain("--fail-on candidate_key_active_state_ambiguous");
     expect(beforeCredentials).not.toContain("secrets.");
     expect(workflow).toContain("bound-decision-drift.json");
+  });
+
+  it("uses one protected guarded D1 import for reviewed label artifacts and successors", async () => {
+    const workflow = await readFile(guardedCandidateWorkflowPath, "utf8");
+    expect(workflow).toContain("PUBLISH_GUARDED_REVIEWED_LABELS_TO_PRODUCTION");
+    expect(workflow).toContain("environment: production");
+    expect(workflow).toContain("pnpm data:guarded-release:prepare");
+    expect(workflow).toContain("pnpm exec wrangler d1 execute protein-index --remote --yes --file .data/guarded-release/guarded.sql");
+    expect(workflow).toContain("Exact ${family} postcondition failed");
+    expect(workflow).toContain('[[ "$DECISIONS" == 365 && "$VERIFIES" == 76 ]]');
+    expect(workflow).toContain('[[ "$DECISIONS" == 66 && "$VERIFIES" == 65 ]]');
   });
 });
