@@ -135,6 +135,27 @@ credentials retain the trigger and immutable artifact digest, then fail before
 artifact download so blocked runs do not repeatedly transfer large evidence
 bundles.
 
+## Review decision drift audit
+
+Before preparing any review publication, audit every checked-in human decision
+against one exact, checksum-validated nutrition or ingredient artifact:
+
+```bash
+pnpm data:audit-decisions -- \
+  --artifact .data/robotoff-nutrition-v8 \
+  --bundles review-decisions \
+  --output .data/nutrition-decision-drift.json
+```
+
+The audit is read-only and suitable for GitHub Actions. It validates the full
+artifact and each review bundle, collapses identical historical copies, fails
+closed on conflicting decision identities or inconsistent exact proof, and
+reports drift plus current candidates that still need review. A legacy decision
+that semantically matches fresh evidence is never upgraded in place: immutable
+exact extraction linkage requires a newly reviewed decision. Pass a comma-
+separated `--fail-on` list when automation should also reject selected ordinary
+finding categories. The command never connects to D1 or changes review ledgers.
+
 ## Reviewed catalog publication
 
 Validate and publish an existing source-complete snapshot locally:

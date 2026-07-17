@@ -25,6 +25,7 @@
     "data:coverage": "tsx scripts/sync.ts coverage",
     "data:publish": "tsx scripts/sync.ts publish",
     "data:review:export": "tsx scripts/sync.ts review-export",
+    "data:audit-decisions": "tsx scripts/audit-decisions.ts",
     "check": "pnpm cf-typegen && pnpm typecheck && pnpm test && pnpm build",
     "release:startup": "wrangler deploy --dry-run --outfile .data/worker.bundle && wrangler check startup --worker .data/worker.bundle --outfile .data/worker-startup.cpuprofile",
     "release:dry-run": "wrangler deploy --dry-run --outdir .data/deploy-dry-run",
