@@ -27,7 +27,7 @@ jobs:
   extract:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 360
     env:
       SOURCE_RUN_ID: ${{ github.event.workflow_run.id || inputs.source_run_id }}
       EXPECTED_INPUT_HASH: ${{ inputs.expected_input_hash || '' }}
@@ -113,7 +113,7 @@ jobs:
           restore-label-proofs: "true"
 
       - name: Extract every eligible nutrition label image
-        timeout-minutes: 225
+        timeout-minutes: 345
         shell: bash
         run: |
           set -uo pipefail
