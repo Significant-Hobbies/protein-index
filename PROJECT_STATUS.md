@@ -159,6 +159,7 @@ must pass desktop/mobile verification.
 - 2026-07-16 — a ninth 24-record distinct-GTIN liquid batch was checked against exact retained images in checksummed bundle `review-c13277f3643949c99c92`: Rio Mango Beverage exactly matches every supported value declared on its per-100-mL panel, while 23 candidates are rejected for omitted declarations, incorrect field mapping, unconverted serving values, or wrong mass/volume basis. Across all nine bundles, 206 of 258 decision-eligible records covering 195 of 209 GTINs now have exact artifact-bound decisions (16 pending verifications and 190 rejections); 52 records across 45 GTINs remain, and live coverage is unchanged before protected publication.
 - 2026-07-16 — the final 12 readable, previously unreviewed liquid-product GTINs were checked against exact retained images in checksummed bundle `review-35df940b2a5dff4da6b0`; all 12 candidates were rejected for omitted declarations, severe column mapping errors, unconverted serving values, or wrong mass/volume basis. The distinct-product pass now covers 207 of 209 GTINs: 218 of 258 decision-eligible records have exact artifact-bound decisions (16 pending verifications and 202 rejections), while 40 additional-image records across 33 GTINs remain and the two untouched GTINs are the deliberately excluded unreadable labels. Live coverage is unchanged before protected publication.
 - 2026-07-17 — first additional-image reconciliation checked 18 exact retained liquid labels in checksummed bundle `review-ee74911697e3fe5a8a06`; all 18 candidates were independently rejected for omitted declarations, incorrect values, wrong physical basis, or unconverted serving data. Across all liquid bundles, 236 of 258 decision-eligible records have artifact-bound decisions (16 pending verifications and 220 rejections), leaving 22 records across 18 GTINs. Valid redundant images remain unresolved because the current binary decision contract cannot truthfully mark evidence as redundant, and the two unreadable GTINs remain deliberately unresolved. Live coverage is unchanged before protected publication.
+- 2026-07-17 — original-resolution review resolved 19 of the final 22 liquid records in checksummed bundle `review-7fe63c92ea9f7e373c72`; all are rejected for omitted or incorrect declarations, wrong physical basis, or incomplete serving conversion. Both Campa images and the Paper Boat Swing label proved readable at original resolution, so all 209 GTINs now have at least one exact decision. Overall, 255 of 258 records are reviewed (16 pending verifications and 239 rejections); only two duplicate Coca-Cola images and one duplicate Local soda image remain, each exactly matching an already verified projection and requiring a truthful redundant-evidence outcome rather than rejection or a second product verification. Live coverage is unchanged before protected publication.
 
 ## Products
 
@@ -278,10 +279,10 @@ must pass desktop/mobile verification.
     `review-6f3e91617c0bb4bcf50d`,
     `review-af930823bd0d8c430b9f`,
     `review-c13277f3643949c99c92`,
-    `review-35df940b2a5dff4da6b0`, and
-    `review-ee74911697e3fe5a8a06` with exact postconditions and replay.
-    Reconcile the remaining 22 additional-image records across 18 GTINs,
-    including valid redundant evidence that needs a truthful terminal outcome;
-    preserve the two unreadable GTINs as unresolved rather than guessing, and
-    resolve the two audited cross-image conflicts separately. Do not claim the
+    `review-35df940b2a5dff4da6b0`,
+    `review-ee74911697e3fe5a8a06`, and
+    `review-7fe63c92ea9f7e373c72` with exact postconditions and replay. Add a
+    truthful terminal redundant-evidence outcome for the remaining two
+    Coca-Cola images and one Local soda image; do not reject valid duplicates or
+    verify the same canonical product twice in one publication. Do not claim the
     sixteen verified per-100-mL candidates until live publication proves them.
