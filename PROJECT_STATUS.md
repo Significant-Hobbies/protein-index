@@ -168,6 +168,7 @@ must pass desktop/mobile verification.
 - 2026-07-17 — every pending nutrition decision was drift-audited against the official v5 artifact: 287 of 297 remained exact, eight rejection candidates changed only through corrected energy interpretation, and two former juice candidates now correctly fail closed on an internal basis conflict. Six replacement bundles preserve the still-valid exact-image rejection reasons, omit the two non-candidates, and bring all 295 retained decisions across 15 bundles (17 verifies, 278 rejects) into exact agreement with v5 source content, candidate hash, GTIN, and image URL; no production data or verified coverage changed.
 - 2026-07-17 — the first adapter-v5-recovered protein-priority review checked 13 original-resolution whey, isolate, plant-protein, soy, muesli, peanut-butter, pasta, and tuna labels: 12 candidates are rejected in checksummed bundle `review-75a54506b4d31f98265d` for omitted or incorrect declared sugar, fat, saturated fat, fibre, carbohydrate, or sodium, while a cropped Saffola soya-chunks panel is deliberately excluded rather than guessed. Every decision matches the official v5 source content, candidate hash, GTIN, and image URL; the current-v5 ledger now has 411 reviewed candidate hashes, with 1,293 mass and nine liquid candidates remaining, and no live coverage change before protected publication.
 - 2026-07-17 — a complete-field adapter-v5 pass checked six exact serving-basis labels that had no existing verified-product decision: Deanos Ricotta Gnocchi, Cheese flavor Super Ring, Satvikveda, Pepper Delight Roasted Rice Crackers, and Haldiram's Minute Khana Rajma Raseela reproduce all eight supported values after exact per-100-g conversion, while Mr Makhana Pickle Tickle is rejected because its 25 g serving row was left unscaled after an incorrect 100 g serving-size context. Checksummed bundle `review-2a0863c88dd1d8bd4b99` matches all six official-v5 source contents, candidate payloads, hashes, GTINs, product identities, and image URLs; reviewed candidate hashes increase from 411 to 417 and the remaining mass queue falls from 1,293 to 1,287, with five verifications still pending and no live coverage change before protected publication.
+- 2026-07-17 — Robotoff adapter v6 now uses a confident, dimension-compatible serving size extracted from the same nutrition label instead of a conflicting or absent catalog serving size, while retaining the catalog fallback for low-confidence label evidence. A source-complete replay restored all 5,944 exact responses with zero requests and zero failures: candidate barcodes increase from 1,524 to 1,600, rejected barcodes fall from 3,614 to 3,538, and ambiguous-serving errors fall from 256 to 95. Exactly 181 of 17,626 prediction records change across 159 GTINs (106 new candidates, 48 changed candidates, 18 removed candidates, and nine content-only changes); seven previously reviewed source records drift, so adapter-v5 artifact `8395774354` is superseded and must not be published. No production data or verified coverage changed.
 
 ## Products
 
@@ -276,11 +277,14 @@ must pass desktop/mobile verification.
     failed closed before import or write; earlier runs `29449999090`,
     `29474290721`, and `29495130626` remain durable evidence of the prior empty
     credential state.
-17. Publish official adapter-v5 nutrition artifact `8395774354` from run
-    `29551181430` only after pending production migration
-    `0007_review_queue_indexes.sql` is explicitly approved. The 295 retained
-    nutrition decisions are already drift-audited against v5; source-check and
-    publish the surviving liquid bundles, including
+17. Generate and checksum an official adapter-v6 nutrition artifact from the
+    same exact source snapshot and restored response cohort; do not publish the
+    superseded adapter-v5 artifact `8395774354`. Drift-audit every retained
+    decision against the official v6 source content and rebuild or omit the
+    seven locally identified changed source records before any publication.
+    After pending production migration `0007_review_queue_indexes.sql` is
+    explicitly approved, source-check and publish the surviving liquid bundles,
+    including
     `review-230fca7ea00663c6c05e`,
     `review-9c7ac1f9e044ed7bce6e`,
     `review-6b5e8b66259669560d75`,
@@ -298,29 +302,32 @@ must pass desktop/mobile verification.
     verify the same canonical product twice in one publication. Do not claim the
     sixteen verified per-100-mL candidates until live publication proves them.
 18. Drift-audit, source-check, and publish mass-label bundle
-    `review-0793ac6010da3d71f11d` only after the exact adapter-v5 artifact is
+    `review-0793ac6010da3d71f11d` only after the exact adapter-v6 artifact is
     live; rebuild any changed decisions from their exact images, then prove one
     verified-product increase, ten resolved rejections, exact selected Epigamia
     values, and unchanged replay counts before claiming any coverage change.
 19. Drift-audit, source-check, and publish mass-label rejection bundle
-    `review-e9a215051b2fe4662517` only after the exact adapter-v5 artifact is
+    `review-e9a215051b2fe4662517` only after the exact adapter-v6 artifact is
     live; rebuild any changed decisions from their exact images, then prove 17
     resolved candidates, zero verified-fact promotions, unchanged trusted
     coverage, and idempotent replay before claiming any live queue reduction.
 20. Source-check and publish rebuilt mass-label rejection bundle
-    `review-174cdb19d84d9fd99525` only after the exact adapter-v5 artifact is
+    `review-174cdb19d84d9fd99525` only after the exact adapter-v6 artifact is
     live; its MuscleBlaze and Bimbo decisions are already rebound to the
     corrected calorie candidates, so prove 14 resolved candidates, zero
     verified-fact promotions, unchanged trusted coverage, and idempotent replay
     before claiming any live queue reduction.
-21. Source-check and publish adapter-v5 protein-priority rejection bundle
-    `review-75a54506b4d31f98265d` only after the exact adapter-v5 artifact is
-    live, then prove 12 resolved candidates, zero verified-fact promotions,
-    unchanged trusted coverage, and idempotent replay before claiming any live
-    queue reduction.
-22. Source-check and publish complete-field adapter-v5 bundle
-    `review-2a0863c88dd1d8bd4b99` only after the exact adapter-v5 artifact is
-    live, then prove six resolved candidates, the actual verified-product and
-    verified-fact increases from its five verification decisions, exact selected
-    per-100-g values, and idempotent replay before claiming any live coverage
+21. Rebuild, source-check, and publish adapter-v6 protein-priority decisions
+    only after the exact adapter-v6 artifact is live; the Optimum Nutrition
+    Performance Whey candidate changes under corrected serving conversion, so
+    re-review it rather than carrying its v5 rejection forward unchanged. Then
+    prove the actual resolved-candidate and verified-fact deltas plus idempotent
+    replay before claiming any live queue reduction.
+22. Rebuild and source-check complete-field adapter-v6 decisions only after the
+    exact adapter-v6 artifact is live. Mr Makhana Pickle Tickle is expected to
+    change from rejection to verification because its 25 g label serving now
+    converts exactly to 500 kcal, 8 g protein, 64 g carbohydrate, 0 g sugar,
+    24 g fat, 4 g saturated fat, 4 g fibre, and 1,332 mg sodium per 100 g. Prove
+    six verified-product increases, the actual verified-fact increase, exact
+    selected values, and idempotent replay before claiming any live coverage
     change.

@@ -8,7 +8,7 @@ import {
   type MassNutritionCandidate,
   type VolumeNutritionCandidate,
 } from "../../shared/evidence-decisions";
-import { normalizeGtin } from "../../shared/gtin";
+import { normalizeGtin, parseQuantity } from "../../shared/gtin";
 import { calculateCompleteness } from "../../shared/metrics";
 import { emptyNutrition, normalizePerServing, validateNutrition } from "../../shared/nutrition";
 import type { NutritionPer100g, ProductCategory, StagedProduct, ValidationIssue } from "../../shared/types";
@@ -160,6 +160,22 @@ function hasComparableCore(left: NutritionPer100g, right: NutritionPer100g): boo
   return (["calories", "proteinGrams"] as const).some((field) => left[field] !== null && right[field] !== null);
 }
 
+function labelServingQuantity(
+  rawNutrients: RawRecord,
+  volumeBased: boolean,
+  confidenceThreshold: number,
+): { quantity: number; rawValue: string; score: number } | null {
+  const raw = rawNutrients.serving_size;
+  if (!isRecord(raw)) return null;
+  const score = number(raw.score);
+  const rawValue = text(raw.value) ?? text(raw.text);
+  if (score === null || score < confidenceThreshold || !rawValue) return null;
+  const unit = text(raw.unit);
+  const parsed = parseQuantity(rawValue) ?? parseQuantity(unit ? `${rawValue} ${unit}` : null);
+  const quantity = volumeBased ? parsed?.millilitres : parsed?.grams;
+  return quantity !== null && quantity !== undefined ? { quantity, rawValue, score } : null;
+}
+
 function parsePrediction(
   prediction: RawRecord,
   context: RobotoffProductContext,
@@ -229,8 +245,28 @@ function parsePrediction(
 
   const volumeBased = context.nutritionBasis === "per_100ml";
   const normalizedBasis = volumeBased ? "per_100ml" as const : "per_100g" as const;
-  const servingQuantity = volumeBased ? context.servingSizeMillilitres ?? null : context.servingSizeGrams;
   const servingField = volumeBased ? "servingSizeMillilitres" : "servingSizeGrams";
+  const contextServingQuantity = volumeBased ? context.servingSizeMillilitres ?? null : context.servingSizeGrams;
+  const labelServing = labelServingQuantity(rawNutrients, volumeBased, confidenceThreshold);
+  const servingQuantity = labelServing?.quantity ?? contextServingQuantity;
+  if (
+    labelServing && contextServingQuantity !== null
+    && Math.abs(labelServing.quantity - contextServingQuantity) > 0.01
+  ) {
+    issues.push({
+      code: "robotoff_label_serving_size_overrides_context",
+      message: `A confident serving ${volumeBased ? "volume" : "mass"} from the same label image overrides the conflicting catalog value.`,
+      severity: "warning",
+      field: servingField,
+      details: {
+        predictionId,
+        labelServingQuantity: labelServing.quantity,
+        contextServingQuantity,
+        rawValue: labelServing.rawValue,
+        score: labelServing.score,
+      },
+    });
+  }
   let basis: "per_100g" | "per_100ml" | "per_serving" | null = null;
   let normalized: NutritionPer100g | null = null;
   if (completeCore(per100g)) {

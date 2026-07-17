@@ -1937,6 +1937,78 @@ describe("Robotoff label evidence", () => {
     expect(ambiguous.issues.some(({ code }) => code === "robotoff_ambiguous_serving_basis")).toBe(true);
   });
 
+  it("uses the serving mass extracted from the same label instead of a conflicting catalog value", () => {
+    const response = { image_predictions: [prediction(28, "26", {
+      serving_size: { value: "25g", unit: null, score: 0.99 },
+      "energy-kcal_serving": nutrient(125, "kcal"),
+      proteins_serving: nutrient(2, "g"),
+      carbohydrates_serving: nutrient(16, "g"),
+      fat_serving: nutrient(6, "g"),
+    })] };
+    const result = parseRobotoffNutritionEvidence(response, { ...context, servingSizeGrams: 100 });
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      basis: "per_serving",
+      nutritionPer100g: {
+        calories: 500,
+        proteinGrams: 8,
+        carbohydrateGrams: 64,
+        fatGrams: 24,
+      },
+    });
+    expect(result.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_label_serving_size_overrides_context",
+      field: "servingSizeGrams",
+    }));
+  });
+
+  it("uses a confident label serving volume but ignores a low-confidence override", () => {
+    const volumeContext: RobotoffProductContext = {
+      ...context,
+      name: "Cola",
+      netQuantityGrams: null,
+      servingSizeGrams: null,
+      servingSizeMillilitres: 200,
+      nutritionBasis: "per_100ml",
+    };
+    const nutrients = {
+      serving_size: { value: "355", unit: "mL", score: 0.99 },
+      "energy-kcal_serving": nutrient(95, "kcal"),
+      proteins_serving: nutrient(0, "g"),
+      carbohydrates_serving: nutrient(24, "g"),
+    };
+    const corrected = parseRobotoffNutritionEvidence(
+      { image_predictions: [prediction(29, "27", nutrients)] },
+      volumeContext,
+    );
+    expect(corrected.candidates[0]).toMatchObject({
+      basis: "per_serving",
+      nutritionPer100ml: {
+        calories: expect.closeTo(26.760563, 6),
+        proteinGrams: 0,
+        carbohydrateGrams: expect.closeTo(6.760563, 6),
+      },
+    });
+    expect(corrected.issues).toContainEqual(expect.objectContaining({
+      code: "robotoff_label_serving_size_overrides_context",
+      field: "servingSizeMillilitres",
+    }));
+
+    const untrusted = parseRobotoffNutritionEvidence(
+      { image_predictions: [prediction(30, "28", {
+        ...nutrients,
+        serving_size: { value: "355", unit: "mL", score: 0.5 },
+      })] },
+      volumeContext,
+    );
+    expect(untrusted.candidates[0]).toMatchObject({
+      nutritionPer100ml: { calories: 47.5, proteinGrams: 0, carbohydrateGrams: 12 },
+    });
+    expect(untrusted.issues).not.toContainEqual(expect.objectContaining({
+      code: "robotoff_label_serving_size_overrides_context",
+    }));
+  });
+
   it("retains volume nutrition without treating millilitres as grams", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-volume-"));
     const input = join(directory, "source.jsonl");
@@ -1969,7 +2041,7 @@ describe("Robotoff label evidence", () => {
       })] }), { status: 200 }),
     });
     expect(result.outcomes).toEqual({ candidate: 1, no_prediction: 0, rejected: 0, failed: 0 });
-    expect(result.manifest.adapterVersion).toBe("robotoff-api-v5");
+    expect(result.manifest.adapterVersion).toBe("robotoff-api-v6");
     const staged = JSON.parse((await readFile(result.stagedPath, "utf8")).trim()) as {
       validationIssues: Array<{ code: string }>;
       rawEvidence: { candidate: Record<string, unknown> };
