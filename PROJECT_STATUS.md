@@ -166,6 +166,7 @@ must pass desktop/mobile verification.
 - 2026-07-17 — Robotoff adapter v5 detects a narrow upstream entity error where a plausible kcal value is labeled as per-100-g kJ but converting it would violate the declared protein-and-carbohydrate calorie floor; a source-complete offline replay corrects 273 image records across 253 GTINs, recovers 170 barcodes from rejected to reviewable (1,524 candidate, 806 no-prediction, 3,614 rejected, zero failed), and never promotes model output. Of 68 corrected records with official-source calories, 64 agree within 2%; exact original-image review confirms all four disagreements use the corrected label values (Milkmaid 303, Maggi 389, Sundrop 642, and iD chapati 270.37 kcal per 100 g), finding no false positive in the source-comparable cohort. Live data and verified coverage remain unchanged until an official v5 artifact is published and all affected decisions are drift-audited.
 - 2026-07-17 — official adapter-v5 nutrition run `29551181430` restored all 5,944 responses from the checksum-valid exact source snapshot, made zero upstream requests, and reconciled every barcode in 1m08s to 1,524 candidate, 806 no-prediction, 3,614 rejected, and zero failed outcomes; artifact `8395774354` independently passes the automatic-publication contract, all 5,950 checksums, 17,626 staged/source-index records, and terminal accounting, with 273 recorded energy-entity corrections.
 - 2026-07-17 — every pending nutrition decision was drift-audited against the official v5 artifact: 287 of 297 remained exact, eight rejection candidates changed only through corrected energy interpretation, and two former juice candidates now correctly fail closed on an internal basis conflict. Six replacement bundles preserve the still-valid exact-image rejection reasons, omit the two non-candidates, and bring all 295 retained decisions across 15 bundles (17 verifies, 278 rejects) into exact agreement with v5 source content, candidate hash, GTIN, and image URL; no production data or verified coverage changed.
+- 2026-07-17 — the first adapter-v5-recovered protein-priority review checked 13 original-resolution whey, isolate, plant-protein, soy, muesli, peanut-butter, pasta, and tuna labels: 12 candidates are rejected in checksummed bundle `review-75a54506b4d31f98265d` for omitted or incorrect declared sugar, fat, saturated fat, fibre, carbohydrate, or sodium, while a cropped Saffola soya-chunks panel is deliberately excluded rather than guessed. Every decision matches the official v5 source content, candidate hash, GTIN, and image URL; the current-v5 ledger now has 411 reviewed candidate hashes, with 1,293 mass and nine liquid candidates remaining, and no live coverage change before protected publication.
 
 ## Products
 
@@ -311,3 +312,8 @@ must pass desktop/mobile verification.
     corrected calorie candidates, so prove 14 resolved candidates, zero
     verified-fact promotions, unchanged trusted coverage, and idempotent replay
     before claiming any live queue reduction.
+21. Source-check and publish adapter-v5 protein-priority rejection bundle
+    `review-75a54506b4d31f98265d` only after the exact adapter-v5 artifact is
+    live, then prove 12 resolved candidates, zero verified-fact promotions,
+    unchanged trusted coverage, and idempotent replay before claiming any live
+    queue reduction.
