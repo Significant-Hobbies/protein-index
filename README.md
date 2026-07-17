@@ -119,6 +119,14 @@ may seed that response cache but can never bypass current artifact validation or
 be published as current evidence. A changed source snapshot fetches current
 responses; a request-schema mismatch is rejected and fetched again.
 
+A failed extraction diagnostic is never publishable, but its label-byte hashes
+may be used as a download cache when the immutable GitHub archive digest, exact
+producer workflow and failed step, default-branch ancestry, source snapshot,
+request schema, current adapter, complete barcode partition, bounded failure
+reasons, canonical asset IDs, and current source subjects all match. The current
+adapter still rebuilds every attempt, outcome, candidate, checksum, and decision
+audit; any cache mismatch falls back to downloading the label again.
+
 ## Manual fresh-evidence publication
 
 Successful producer runs do not start a credentialed publication job. An

@@ -118,6 +118,9 @@ jobs:
           expected-source: open_food_facts_robotoff_ingredients
           expected-request-schema: 36dbe4371ac9da9ea089a5ef8e88264e19ab6bb5764b15235561a136199b491d
           expected-workflow-name: Extract ingredient label evidence
+          diagnostic-artifact-prefix: robotoff-ingredient-diagnostics-
+          expected-adapter-version: robotoff-ingredients-api-v3
+          expected-diagnostic-failure-step: Extract every eligible ingredient label image
           restore-label-proofs: "true"
 
       - name: Extract every eligible ingredient label image

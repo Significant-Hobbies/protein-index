@@ -2217,10 +2217,16 @@ describe("Open Food Facts bulk staging", () => {
     const restore = await readFile(".github/actions/restore-exact-responses/action.yml", "utf8");
     expect(restore).toContain("expected-source:");
     expect(restore).toContain("expected-request-schema:");
-    expect(restore).not.toContain("expected-adapter-version:");
     expect(restore).toContain("expected-workflow-name:");
+    expect(restore).toContain("diagnostic-artifact-prefix:");
+    expect(restore).toContain("expected-adapter-version:");
+    expect(restore).toContain("expected-diagnostic-failure-step:");
     expect(restore).toContain("github.paginate");
     expect(restore).toContain("run.conclusion === 'success'");
+    expect(restore).toContain("run.conclusion !== 'failure'");
+    expect(restore).toContain("compareCommitsWithBasehead");
+    expect(restore).toContain("Upload extraction diagnostics");
+    expect(restore).toContain("candidate.name === `${process.env.DIAGNOSTIC_ARTIFACT_PREFIX}${candidate.workflow_run?.id}`");
     expect(restore).toContain("digest !== artifact.digest");
     expect(restore).toContain("restore-label-proofs:");
     expect(restore).toContain("prior-label-assets.jsonl");
@@ -2228,6 +2234,12 @@ describe("Open Food Facts bulk staging", () => {
     expect(restore).toContain("residualAccounting || failed === 0");
     expect(restore).toContain('[[ "$RESTORE_LABEL_PROOFS" == "true" && -f .data/prior-exact/label-assets.jsonl ]]');
     expect(restore).toContain('outcomes.jsonl "$OUTPUT_DIRECTORY/outcomes.jsonl"');
+    expect(restore).toContain("report.labelAssets === labels.length");
+    expect(restore).toContain("manifest.adapterVersion === process.env.EXPECTED_ADAPTER_VERSION");
+    expect(restore).toContain("Restored exact-snapshot label hashes");
+    expect(restore).toContain("allowedFailureReasons");
+    expect(restore).toContain("label.id === expectedId");
+    expect(restore).toContain("currentSubject?.subjectSourceContentHash === label.subjectSourceContentHash");
     for (const sourceConsumerWorkflow of [
       ".github/workflows/enrich-open-food-facts.yml",
       ".github/workflows/extract-robotoff.yml",
@@ -2254,6 +2266,9 @@ describe("Open Food Facts bulk staging", () => {
       expect(extraction).toContain("extraction-attempts.jsonl");
       expect(extraction).toContain("extraction-attempt-labels.jsonl");
       expect(extraction).toContain('restore-label-proofs: "true"');
+      expect(extraction).toContain("diagnostic-artifact-prefix:");
+      expect(extraction).toContain("expected-adapter-version:");
+      expect(extraction).toContain("expected-diagnostic-failure-step:");
       expect(extraction).toContain("pnpm data:audit-decisions --");
       expect(extraction).toContain("--fail-on candidate_key_active_state_ambiguous");
       expect(extraction).toContain("decision-drift audit");

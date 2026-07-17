@@ -17,6 +17,18 @@ inputs:
   expected-workflow-name:
     description: Exact successful producer workflow allowed to supply reusable evidence
     required: true
+  diagnostic-artifact-prefix:
+    description: Optional prefix of same-snapshot failed-run diagnostics that may seed label hashes only
+    required: false
+    default: ""
+  expected-adapter-version:
+    description: Exact current adapter required before diagnostic label hashes may be reused
+    required: false
+    default: ""
+  expected-diagnostic-failure-step:
+    description: Exact extraction step that must have failed before its diagnostic label cache is eligible
+    required: false
+    default: ""
   restore-label-proofs:
     description: Copy a validated prior label ledger when the artifact contains one
     required: false
@@ -88,6 +100,90 @@ runs:
           core.setOutput('artifact_id', String(artifact.id));
           core.setOutput('artifact_name', artifact.name);
 
+    - name: Locate exact-snapshot label diagnostics
+      id: labels
+      if: inputs.restore-label-proofs == 'true' && inputs.diagnostic-artifact-prefix != ''
+      uses: actions/github-script@v9
+      env:
+        DIAGNOSTIC_ARTIFACT_PREFIX: ${{ inputs.diagnostic-artifact-prefix }}
+        EXPECTED_WORKFLOW_NAME: ${{ inputs.expected-workflow-name }}
+        EXPECTED_FAILURE_STEP: ${{ inputs.expected-diagnostic-failure-step }}
+      with:
+        script: |
+          const fs = require('fs');
+          const { createHash } = require('crypto');
+          const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            per_page: 100,
+          });
+          const candidates = artifacts
+            .filter((candidate) =>
+              !candidate.expired &&
+              candidate.name === `${process.env.DIAGNOSTIC_ARTIFACT_PREFIX}${candidate.workflow_run?.id}` &&
+              candidate.workflow_run?.head_branch === context.payload.repository.default_branch)
+            .sort((left, right) => Date.parse(right.created_at) - Date.parse(left.created_at));
+          let artifact = null;
+          for (const candidate of candidates) {
+            const runId = candidate.workflow_run?.id;
+            if (!Number.isSafeInteger(runId) || runId <= 0) continue;
+            const response = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+            });
+            const run = response.data;
+            if (run.name !== process.env.EXPECTED_WORKFLOW_NAME ||
+                run.conclusion !== 'failure' ||
+                run.head_branch !== context.payload.repository.default_branch ||
+                run.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`) continue;
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+              per_page: 100,
+            });
+            const extract = jobs.find((job) =>
+              job.name === 'extract' &&
+              job.conclusion === 'failure' &&
+              job.steps?.some((step) => step.name === process.env.EXPECTED_FAILURE_STEP && step.conclusion === 'failure') &&
+              job.steps?.some((step) => step.name === 'Upload extraction diagnostics' && step.conclusion === 'success'));
+            if (!extract) continue;
+            if (run.head_sha !== context.sha) {
+              const comparison = await github.rest.repos.compareCommitsWithBasehead({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                basehead: `${run.head_sha}...${context.sha}`,
+              });
+              if (comparison.data.status !== 'ahead') continue;
+            }
+            artifact = candidate;
+            break;
+          }
+          if (!artifact) {
+            core.notice(`No prior ${process.env.DIAGNOSTIC_ARTIFACT_PREFIX} label artifact is available.`);
+            core.setOutput('available', 'false');
+            return;
+          }
+          if (!/^sha256:[a-f0-9]{64}$/.test(artifact.digest ?? '') || artifact.size_in_bytes <= 0) {
+            throw new Error('Prior label diagnostic does not expose a valid immutable digest and size');
+          }
+          const download = await github.rest.actions.downloadArtifact({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            artifact_id: artifact.id,
+            archive_format: 'zip',
+          });
+          const archive = Buffer.from(download.data);
+          const digest = `sha256:${createHash('sha256').update(archive).digest('hex')}`;
+          if (digest !== artifact.digest || archive.byteLength !== artifact.size_in_bytes) {
+            throw new Error('Downloaded prior label diagnostic digest or size differs from immutable GitHub metadata');
+          }
+          fs.writeFileSync('.data-prior-labels.zip', archive);
+          core.setOutput('available', 'true');
+          core.setOutput('artifact_id', String(artifact.id));
+          core.setOutput('artifact_name', artifact.name);
+
     - name: Restore responses for the exact staged snapshot
       if: steps.prior.outputs.available == 'true'
       shell: bash
@@ -97,9 +193,14 @@ runs:
         PRIOR_ARTIFACT_NAME: ${{ steps.prior.outputs.artifact_name }}
         EXPECTED_SOURCE: ${{ inputs.expected-source }}
         EXPECTED_REQUEST_SCHEMA: ${{ inputs.expected-request-schema }}
+        EXPECTED_ADAPTER_VERSION: ${{ inputs.expected-adapter-version }}
         RESTORE_LABEL_PROOFS: ${{ inputs.restore-label-proofs }}
+        PRIOR_LABELS_AVAILABLE: ${{ steps.labels.outputs.available }}
+        PRIOR_LABELS_ARTIFACT_ID: ${{ steps.labels.outputs.artifact_id }}
+        PRIOR_LABELS_ARTIFACT_NAME: ${{ steps.labels.outputs.artifact_name }}
       run: |
         set -euo pipefail
+        label_proofs_restored=false
         mkdir -p .data/prior-exact
         unzip -q .data-prior-exact.zip -d .data/prior-exact
         (
@@ -170,12 +271,182 @@ runs:
           cp .data/prior-exact/outcomes.jsonl "$OUTPUT_DIRECTORY/outcomes.jsonl"
           if [[ "$RESTORE_LABEL_PROOFS" == "true" && -f .data/prior-exact/label-assets.jsonl ]]; then
             cp .data/prior-exact/label-assets.jsonl "$OUTPUT_DIRECTORY/prior-label-assets.jsonl"
-          elif [[ "$RESTORE_LABEL_PROOFS" == "true" ]]; then
-            echo "Prior artifact has no label ledger; rebuilding current label proofs from exact responses"
+            label_proofs_restored=true
           fi
           echo "Restored exact-snapshot responses from $PRIOR_ARTIFACT_NAME ($PRIOR_ARTIFACT_ID)"
         elif [[ "$exact_status" -eq 10 ]]; then
           echo "Prior responses belong to a different source snapshot; fetching current evidence"
         else
           exit "$exact_status"
+        fi
+        if [[ "$RESTORE_LABEL_PROOFS" == "true" && "$label_proofs_restored" != "true" && "$PRIOR_LABELS_AVAILABLE" == "true" ]]; then
+          test -n "$EXPECTED_ADAPTER_VERSION"
+          mkdir -p .data/prior-labels
+          unzip -q .data-prior-labels.zip manifest.json report.json outcomes.jsonl label-assets.jsonl -d .data/prior-labels
+          set +e
+          node --input-type=module <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { readFile } from 'node:fs/promises';
+          const [manifest, report, sourceManifest, sourceProductsText, outcomesText, labelsText] = await Promise.all([
+            readFile('.data/prior-labels/manifest.json', 'utf8').then(JSON.parse),
+            readFile('.data/prior-labels/report.json', 'utf8').then(JSON.parse),
+            readFile('.data/source-snapshot/manifest.json', 'utf8').then(JSON.parse),
+            readFile('.data/source-snapshot/staged-products.jsonl', 'utf8'),
+            readFile('.data/prior-labels/outcomes.jsonl', 'utf8'),
+            readFile('.data/prior-labels/label-assets.jsonl', 'utf8'),
+          ]);
+          const counts = report.outcomes && typeof report.outcomes === 'object'
+            ? Object.values(report.outcomes)
+            : [];
+          const outcomes = outcomesText.split(/\r?\n/).filter((line) => line.trim()).map((line, index) => {
+            try {
+              return JSON.parse(line);
+            } catch {
+              throw new Error(`Prior label diagnostics contain invalid outcome JSON on line ${index + 1}`);
+            }
+          });
+          const labels = labelsText.split(/\r?\n/).filter((line) => line.trim());
+          const outcomeStatuses = ['candidate', 'failed', 'no_prediction', 'rejected'];
+          const allowedFailureReasons = new Set([
+            'label_declared_size_exceeded',
+            'label_fetch_failed',
+            'label_http_error',
+            'label_request_timeout',
+            'label_stream_chunk_limit_exceeded',
+            'label_stream_missing',
+            'label_stream_read_failed',
+            'label_stream_size_exceeded',
+          ]);
+          const outcomeCodes = new Set();
+          const observedCounts = { candidate: 0, no_prediction: 0, rejected: 0, failed: 0 };
+          for (const outcome of outcomes) {
+            if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)
+              || typeof outcome.requestedCode !== 'string' || !outcome.requestedCode
+              || outcomeCodes.has(outcome.requestedCode) || !outcomeStatuses.includes(outcome.status)) {
+              throw new Error('Prior label diagnostics contain a malformed or duplicate outcome');
+            }
+            if (!Array.isArray(outcome.reasons) || !outcome.reasons.every((reason) => typeof reason === 'string')) {
+              throw new Error('Prior label diagnostics contain malformed outcome reasons');
+            }
+            if (outcome.status === 'failed'
+              && (outcome.reasons.length !== 1 || !allowedFailureReasons.has(outcome.reasons[0]))) {
+              throw new Error('Prior label diagnostics contain a non-allowlisted failed outcome');
+            }
+            outcomeCodes.add(outcome.requestedCode);
+            observedCounts[outcome.status] += 1;
+          }
+          const failed = observedCounts.failed;
+          const exact = manifest.inputHash === process.env.SOURCE_STAGED_HASH
+            && report.inputManifestHash === sourceManifest.inputHash
+            && manifest.source === process.env.EXPECTED_SOURCE
+            && manifest.adapterVersion === process.env.EXPECTED_ADAPTER_VERSION
+            && report.requestSchema === process.env.EXPECTED_REQUEST_SCHEMA
+            && manifest.mode === 'production'
+            && Number.isSafeInteger(report.requestedBarcodes)
+            && report.requestedBarcodes > 0
+            && report.accountedBarcodes === report.requestedBarcodes
+            && counts.length > 0
+            && counts.every((count) => Number.isSafeInteger(count) && count >= 0)
+            && counts.reduce((sum, count) => sum + count, 0) === report.requestedBarcodes
+            && outcomes.length === report.requestedBarcodes
+            && outcomeCodes.size === report.requestedBarcodes
+            && JSON.stringify(observedCounts) === JSON.stringify(report.outcomes)
+            && failed <= 10
+            && failed / report.requestedBarcodes <= 0.0025
+            && report.extractionAttempts === report.requestedBarcodes
+            && Number.isSafeInteger(report.labelAssets)
+            && report.labelAssets === labels.length;
+          if (!exact) throw new Error('Prior label diagnostics do not exactly match the current extraction contract');
+          const expectedFieldFamily = process.env.EXPECTED_SOURCE.endsWith('_ingredients') ? 'ingredients' : 'nutrition';
+          const stableId = (prefix, value) => `${prefix}_${createHash('sha256').update(value).digest('hex').slice(0, 24)}`;
+          const currentSubjects = new Map();
+          for (const [index, line] of sourceProductsText.split(/\r?\n/).filter((value) => value.trim()).entries()) {
+            let product;
+            try {
+              product = JSON.parse(line);
+            } catch {
+              throw new Error(`Current source snapshot contains invalid JSON on line ${index + 1}`);
+            }
+            if (typeof product.source !== 'string' || typeof product.sourceRecordId !== 'string'
+              || typeof product.contentHash !== 'string' || typeof product.gtin !== 'string' || !product.gtin) continue;
+            const subjectSourceRecordId = stableId('src', `${product.source}:${product.sourceRecordId}`);
+            currentSubjects.set(subjectSourceRecordId, {
+              subjectSourceContentHash: product.contentHash,
+              productId: stableId('prd', `gtin:${product.gtin}`),
+            });
+          }
+          const allowedLabelKeys = [
+            'id', 'subjectSourceRecordId', 'subjectSourceContentHash', 'productId', 'fieldFamily',
+            'sourceImageId', 'sourceImageRevision', 'requestedUrl', 'effectiveUrl', 'contentSha256',
+            'byteLength', 'mediaType', 'fetchedAt',
+          ];
+          const reuseKeys = new Set();
+          for (const [index, line] of labels.entries()) {
+            let label;
+            try {
+              label = JSON.parse(line);
+            } catch {
+              throw new Error(`Prior label diagnostics contain invalid JSON on line ${index + 1}`);
+            }
+            const https = (value) => {
+              try {
+                const url = new URL(value);
+                return url.protocol === 'https:' && !url.username && !url.password && url.hostname && url.toString() === value;
+              } catch {
+                return false;
+              }
+            };
+            const naturalKey = [
+              label.subjectSourceRecordId,
+              label.subjectSourceContentHash,
+              label.productId,
+              label.fieldFamily,
+              label.sourceImageId,
+              label.sourceImageRevision ?? '',
+              label.effectiveUrl,
+              label.contentSha256,
+            ].join(':');
+            const expectedId = stableId('lbl', naturalKey);
+            const reuseKey = [
+              label.subjectSourceRecordId,
+              label.subjectSourceContentHash,
+              label.fieldFamily,
+              label.requestedUrl,
+            ].join(':');
+            const shapeIsExact = label && typeof label === 'object' && !Array.isArray(label)
+              && Object.keys(label).sort().join('\0') === [...allowedLabelKeys].sort().join('\0');
+            const currentSubject = currentSubjects.get(label.subjectSourceRecordId);
+            const valid = shapeIsExact
+              && label.id === expectedId
+              && /^src_[a-f0-9]{24}$/.test(label.subjectSourceRecordId)
+              && /^[a-f0-9]{64}$/.test(label.subjectSourceContentHash)
+              && /^prd_[a-f0-9]{24}$/.test(label.productId)
+              && label.fieldFamily === expectedFieldFamily
+              && typeof label.sourceImageId === 'string' && label.sourceImageId.length > 0 && label.sourceImageId.length <= 512
+              && (label.sourceImageRevision === null || (typeof label.sourceImageRevision === 'string' && label.sourceImageRevision.length > 0 && label.sourceImageRevision.length <= 512))
+              && https(label.requestedUrl) && https(label.effectiveUrl)
+              && /^[a-f0-9]{64}$/.test(label.contentSha256)
+              && Number.isSafeInteger(label.byteLength) && label.byteLength > 0
+              && /^image\/[a-z0-9][a-z0-9.+-]*$/.test(label.mediaType)
+              && typeof label.fetchedAt === 'string' && Number.isFinite(Date.parse(label.fetchedAt))
+              && currentSubject?.subjectSourceContentHash === label.subjectSourceContentHash
+              && currentSubject?.productId === label.productId
+              && !reuseKeys.has(reuseKey);
+            if (!valid) throw new Error(`Prior label diagnostics contain a noncanonical asset on line ${index + 1}`);
+            reuseKeys.add(reuseKey);
+          }
+          NODE
+          diagnostic_status=$?
+          set -e
+          if [[ "$diagnostic_status" -eq 0 ]]; then
+            mkdir -p "$OUTPUT_DIRECTORY"
+            cp .data/prior-labels/label-assets.jsonl "$OUTPUT_DIRECTORY/prior-label-assets.jsonl"
+            label_proofs_restored=true
+            echo "Restored exact-snapshot label hashes from $PRIOR_LABELS_ARTIFACT_NAME ($PRIOR_LABELS_ARTIFACT_ID)"
+          else
+            echo "Prior label diagnostics failed the exact cache contract; rebuilding label proofs live"
+          fi
+        fi
+        if [[ "$RESTORE_LABEL_PROOFS" == "true" && "$label_proofs_restored" != "true" ]]; then
+          echo "No exact label ledger is reusable; rebuilding current label proofs from exact responses"
         fi
