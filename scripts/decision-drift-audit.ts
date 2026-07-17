@@ -50,6 +50,7 @@ export type DecisionDriftClassification = (typeof DECISION_DRIFT_CLASSIFICATIONS
 export interface DecisionDriftAuditOptions {
   artifactDirectory: string;
   bundlesDirectory: string;
+  bundleSetFile?: string;
 }
 
 export interface CurrentArtifactCandidate {
@@ -154,6 +155,9 @@ export interface DecisionDriftAuditReport {
     candidateCount: number;
   };
   inputs: {
+    bundleSetFile: string | null;
+    bundleSetSha256: string | null;
+    bundleIds: string[];
     bundleCount: number;
     decisionRecords: number;
     uniqueDecisions: number;
@@ -304,7 +308,53 @@ async function validateSelectedArtifact(directory: string): Promise<ValidatedArt
   throw new Error("Decision drift audit requires a supported nutrition or ingredient extraction artifact");
 }
 
-async function discoverReviewBundles(directory: string): Promise<ReviewDecisionBundle[]> {
+export async function readActiveReviewBundleSet(
+  path: string,
+  fieldFamily: ExtractionFieldFamily,
+): Promise<{ bundleIds: string[]; sha256: string }> {
+  const text = await readFile(path, "utf8");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("Active review bundle set is not valid JSON");
+  }
+  const input = record(parsed);
+  const families = record(input?.families);
+  if (!input || input.schemaVersion !== 1 || !families
+    || Object.keys(input).sort().join("\0") !== ["families", "schemaVersion"].join("\0")
+    || Object.keys(families).sort().join("\0") !== ["ingredients", "nutrition"].join("\0")) {
+    throw new Error("Active review bundle set has an unsupported shape");
+  }
+  const selected = families[fieldFamily];
+  if (!Array.isArray(selected) || selected.length === 0
+    || !selected.every((value) => typeof value === "string" && /^review-[a-f0-9]{20}$/.test(value))) {
+    throw new Error(`Active review bundle set has no valid ${fieldFamily} selection`);
+  }
+  const bundleIds = [...selected] as string[];
+  if (new Set(bundleIds).size !== bundleIds.length) throw new Error("Active review bundle set repeats a bundle ID");
+  if (JSON.stringify(bundleIds) !== JSON.stringify([...bundleIds].sort())) {
+    throw new Error("Active review bundle set must be sorted deterministically");
+  }
+  return { bundleIds, sha256: createHash("sha256").update(text).digest("hex") };
+}
+
+async function discoverReviewBundles(
+  directory: string,
+  fieldFamily: ExtractionFieldFamily,
+  selectedBundleIds?: readonly string[],
+): Promise<ReviewDecisionBundle[]> {
+  if (selectedBundleIds) {
+    const bundles: ReviewDecisionBundle[] = [];
+    for (const bundleId of selectedBundleIds) {
+      const bundle = await readReviewDecisionBundle(join(directory, bundleId));
+      if (bundle.manifest.bundleId !== bundleId || bundle.decisions.some((decision) => decision.fieldFamily !== fieldFamily)) {
+        throw new Error(`Active review bundle ${bundleId} is not a pure ${fieldFamily} bundle`);
+      }
+      bundles.push(bundle);
+    }
+    return bundles;
+  }
   const entries = (await readdir(directory, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory())
     .sort((left, right) => left.name.localeCompare(right.name));
@@ -561,10 +611,15 @@ function finding(
 }
 
 export async function auditDecisionDrift(options: DecisionDriftAuditOptions): Promise<DecisionDriftAuditReport> {
-  const [validated, bundles] = await Promise.all([
-    validateSelectedArtifact(options.artifactDirectory),
-    discoverReviewBundles(options.bundlesDirectory),
-  ]);
+  const validated = await validateSelectedArtifact(options.artifactDirectory);
+  const bundleSet = options.bundleSetFile
+    ? await readActiveReviewBundleSet(options.bundleSetFile, validated.fieldFamily)
+    : null;
+  const bundles = await discoverReviewBundles(
+    options.bundlesDirectory,
+    validated.fieldFamily,
+    bundleSet?.bundleIds,
+  );
   const currentCandidates = await buildCurrentCandidates(validated);
   const occurrences = bundles.flatMap((bundle) => {
     const provenance: DecisionBundleProvenance = {
@@ -574,6 +629,22 @@ export async function auditDecisionDrift(options: DecisionDriftAuditOptions): Pr
     };
     return bundle.decisions.map((decision) => ({ decision, provenance }));
   });
+  if (bundleSet) {
+    const decisionIds = occurrences.map(({ decision }) => decision.id);
+    const candidateKeys = occurrences.map(({ decision }) => candidateKey(decision));
+    const sourceKeys = occurrences.map(({ decision }) => sourceKey(decision));
+    const verifiedProducts = occurrences
+      .filter(({ decision }) => decision.decision === "verify")
+      .map(({ decision }) => `${decision.fieldFamily}\u0000${decision.productId}`);
+    for (const [values, message] of [
+      [decisionIds, "Active review bundle set repeats a decision ID"],
+      [candidateKeys, "Active review bundle set repeats a candidate key"],
+      [sourceKeys, "Active review bundle set repeats a source key"],
+      [verifiedProducts, "Active review bundle set verifies one product more than once"],
+    ] as const) {
+      if (new Set(values).size !== values.length) throw new Error(message);
+    }
+  }
   const deduplicated = deduplicateOccurrences(occurrences);
   const reportBase = {
     schemaVersion: 1 as const,
@@ -589,6 +660,9 @@ export async function auditDecisionDrift(options: DecisionDriftAuditOptions): Pr
       candidateCount: currentCandidates.length,
     },
     inputs: {
+      bundleSetFile: options.bundleSetFile ? basename(options.bundleSetFile) : null,
+      bundleSetSha256: bundleSet?.sha256 ?? null,
+      bundleIds: bundles.map(({ manifest }) => manifest.bundleId),
       bundleCount: bundles.length,
       decisionRecords: occurrences.length,
       uniqueDecisions: deduplicated.decisions.length,

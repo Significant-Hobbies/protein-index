@@ -189,6 +189,7 @@ jobs:
           pnpm data:audit-decisions -- \
             --artifact .data/robotoff-ingredients \
             --bundles review-decisions \
+            --bundle-set review-decisions/active-bundles.json \
             --output .data/decision-drift/ingredients-v3.json \
             --fail-on candidate_key_active_state_ambiguous
 

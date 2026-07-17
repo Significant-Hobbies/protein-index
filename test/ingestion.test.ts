@@ -392,9 +392,15 @@ describe("Robotoff ingredient evidence", () => {
   it("collects the exact ingredient-image cohort and resumes per GTIN", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-index-robotoff-ingredients-"));
     const input = join(directory, "source.jsonl");
+    const sourceCode = "00024907";
+    const requestedCode = "00000000024907";
+    const shortCodePrediction = {
+      ...ingredientPrediction,
+      image: { ...ingredientPrediction.image, barcode: sourceCode },
+    };
     await writeFile(input, `${JSON.stringify({
       ...indiaProduct,
-      code: "00001241000224",
+      code: sourceCode,
       image_ingredients_url: context.ingredientImageUrl,
     })}\n`, "utf8");
     const source = await stageOpenFoodFacts({
@@ -419,8 +425,8 @@ describe("Robotoff ingredient evidence", () => {
         const url = new URL(request.toString());
         expect(url.searchParams.get("type")).toBe("ner");
         expect(url.searchParams.get("model_name")).toBe("ingredient_detection");
-        expect(url.searchParams.get("barcode")).toBe("00001241000224");
-        return new Response(JSON.stringify({ image_predictions: [ingredientPrediction] }), { status: 200 });
+        expect(url.searchParams.get("barcode")).toBe(requestedCode);
+        return new Response(JSON.stringify({ image_predictions: [shortCodePrediction] }), { status: 200 });
       },
     });
     expect(requests).toBe(1);
@@ -434,7 +440,7 @@ describe("Robotoff ingredient evidence", () => {
     const candidates = (await readFile(first.candidatesPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(candidates).toHaveLength(1);
     expect(candidates[0]).toMatchObject({
-      requestedCode: "00001241000224",
+      requestedCode,
       candidateHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       candidate: { predictionId: "10477207", entityIndex: 0 },
     });
@@ -854,6 +860,21 @@ describe("Robotoff ingredient evidence", () => {
     await writeFile(result.candidatesPath, `${originalCandidates} `, "utf8");
     await expect(validateRobotoffIngredientArtifact(outputDirectory)).rejects.toThrow("checksum mismatch");
     await writeFile(result.candidatesPath, originalCandidates, "utf8");
+
+    const originalCandidate = JSON.parse(originalCandidates.trim());
+    for (const mutation of [
+      { extractionAttemptId: `xat_${"f".repeat(24)}` },
+      { labelAssetId: `lbl_${"f".repeat(24)}` },
+      { labelContentSha256: "f".repeat(64) },
+    ]) {
+      await writeFile(result.candidatesPath, `${JSON.stringify({ ...originalCandidate, ...mutation })}\n`, "utf8");
+      await rewritePortableChecksum(outputDirectory, "candidates.jsonl");
+      await expect(validateRobotoffIngredientArtifact(outputDirectory))
+        .rejects.toThrow("not bound to its exact extraction attempt and label bytes");
+    }
+    await writeFile(result.candidatesPath, originalCandidates, "utf8");
+    await rewritePortableChecksum(outputDirectory, "candidates.jsonl");
+
     const responsePath = join(outputDirectory, "responses", "00001241000224.json");
     const originalResponse = await readFile(responsePath, "utf8");
     expect(await readFile(result.checksumsPath, "utf8")).toContain("responses/00001241000224.json");
@@ -2280,6 +2301,7 @@ describe("Open Food Facts bulk staging", () => {
       expect(extraction).toContain("expected-adapter-version:");
       expect(extraction).toContain("expected-diagnostic-failure-step:");
       expect(extraction).toContain("pnpm data:audit-decisions --");
+      expect(extraction).toContain("--bundle-set review-decisions/active-bundles.json");
       expect(extraction).toContain("--fail-on candidate_key_active_state_ambiguous");
       expect(extraction).toContain("decision-drift audit");
       expect(extraction).toContain("if: always()");
@@ -2290,6 +2312,12 @@ describe("Open Food Facts bulk staging", () => {
       expect(extraction).toContain("digest !== artifact.digest");
       expect(extraction).toContain("retention-days: 90");
       expect(extraction).toMatch(/expected-request-schema: [a-f0-9]{64}/);
+    }
+    for (const publisher of [
+      ".github/workflows/publish-automatic-evidence.yml",
+      ".github/workflows/publish-robotoff-candidates.yml",
+    ]) {
+      expect(await readFile(publisher, "utf8")).toContain("--bundle-set review-decisions/active-bundles.json");
     }
     expect(await readFile(".github/workflows/enrich-open-food-facts.yml", "utf8"))
       .toContain(`expected-request-schema: ${OPEN_FOOD_FACTS_API_REQUEST_SCHEMA}`);

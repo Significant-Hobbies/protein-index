@@ -22,9 +22,14 @@ function failureCategories(value: string | null): string[] {
 async function main(): Promise<void> {
   const artifactDirectory = resolve(requiredOption("artifact"));
   const bundlesDirectory = resolve(option("bundles") ?? "review-decisions");
+  const bundleSetFile = option("bundle-set");
   const output = option("output");
   const failOn = failureCategories(option("fail-on"));
-  const report = await auditDecisionDrift({ artifactDirectory, bundlesDirectory });
+  const report = await auditDecisionDrift({
+    artifactDirectory,
+    bundlesDirectory,
+    ...(bundleSetFile ? { bundleSetFile: resolve(bundleSetFile) } : {}),
+  });
   const classificationCounts: Record<string, number> = report.classificationCounts;
   const availableCategories = new Set([
     ...Object.keys(classificationCounts),

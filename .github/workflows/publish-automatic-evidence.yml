@@ -263,6 +263,7 @@ jobs:
               pnpm data:audit-decisions -- \
                 --artifact .data/automatic \
                 --bundles review-decisions \
+                --bundle-set review-decisions/active-bundles.json \
                 --output "$PUBLICATION_EVIDENCE_DIR/publication-decision-drift.json" \
                 --fail-on candidate_key_active_state_ambiguous
               ;;

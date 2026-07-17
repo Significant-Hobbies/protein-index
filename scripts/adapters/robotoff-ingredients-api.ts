@@ -1255,7 +1255,8 @@ export async function validateRobotoffIngredientArtifact(
     }
     const attempt = stored.extractionAttemptId ? attemptById.get(stored.extractionAttemptId) : null;
     const asset = stored.labelAssetId ? assetById.get(stored.labelAssetId) : null;
-    if (!attempt || !asset || stored.labelContentSha256 !== asset.contentSha256 || attempt.subjectSourceRecordKey !== stored.requestedCode) {
+    if (!attempt || !asset || stored.labelContentSha256 !== asset.contentSha256
+      || attempt.subjectSourceRecordKey !== cohortContext.subjectSourceRecordKey) {
       throw new Error("Ingredient candidate is not bound to its exact extraction attempt and label bytes");
     }
     const errors = validateIngredientCandidate(stored.candidate, { expectedGtin: stored.requestedCode, confidenceThreshold: report.confidenceThreshold });

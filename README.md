@@ -127,6 +127,11 @@ reasons, canonical asset IDs, and current source subjects all match. The current
 adapter still rebuilds every attempt, outcome, candidate, checksum, and decision
 audit; any cache mismatch falls back to downloading the label again.
 
+Reviewed-decision drift audits use the checked-in
+`review-decisions/active-bundles.json` set. Historical and superseded bundles
+remain immutable on disk for audit history, but they cannot be mixed into the
+current proof set or create false decision-ID conflicts.
+
 ## Manual fresh-evidence publication
 
 Successful producer runs do not start a credentialed publication job. An
@@ -165,13 +170,14 @@ missing credentials still fail before any D1 read or write.
 
 ## Review decision drift audit
 
-Before preparing any review publication, audit every checked-in human decision
-against one exact, checksum-validated nutrition or ingredient artifact:
+Before preparing any review publication, audit the checked-in active decision
+set against one exact, checksum-validated nutrition or ingredient artifact:
 
 ```bash
 pnpm data:audit-decisions -- \
   --artifact .data/robotoff-nutrition-v8 \
   --bundles review-decisions \
+  --bundle-set review-decisions/active-bundles.json \
   --output .data/nutrition-decision-drift.json
 ```
 
@@ -186,6 +192,9 @@ finding categories. The command never connects to D1 or changes review ledgers.
 Fresh nutrition-v8 and ingredient-v3 producer workflows run this audit before
 uploading publishable candidates and retain the report as a separate 30-day
 artifact even when a failure prevents candidate publication.
+
+Omitting `--bundle-set` is an explicit forensic all-history mode. It scans
+superseded immutable bundles too and is not a publication proof.
 
 ## Reviewed catalog publication
 
