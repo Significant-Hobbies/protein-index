@@ -118,6 +118,7 @@ jobs:
         run: |
           set -euo pipefail
           test -f .github/workflows/publish-automatic-evidence.yml
+          test -f migrations/0009_extraction_outcome_ledger.sql
           grep -F -- "validateAutomaticPublicationSnapshot" scripts/sync.ts >/dev/null
           grep -F -- "--skip-migrations" scripts/sync.ts >/dev/null
           grep -F -- "applyEvidenceDecisions: !automatic" scripts/sync.ts >/dev/null

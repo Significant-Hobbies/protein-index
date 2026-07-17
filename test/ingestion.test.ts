@@ -1643,6 +1643,7 @@ describe("Open Food Facts bulk staging", () => {
     expect(workflow).toContain("ref: ${{ github.event.workflow_run.head_sha }}");
     expect(workflow).toContain("persist-credentials: false");
     expect(workflow).toContain("Require automatic-publication contract at upstream commit");
+    expect(workflow).toContain("test -f migrations/0009_extraction_outcome_ledger.sql");
     expect(workflow).toContain("validateAutomaticPublicationSnapshot");
     expect(workflow).toContain("applyEvidenceDecisions: !automatic");
     expect(workflow).toContain("Require protected publication credentials");
@@ -1688,6 +1689,20 @@ describe("Open Food Facts bulk staging", () => {
     expect(restore).toContain("expected-adapter-version:");
     expect(restore).toContain("restore-label-proofs:");
     expect(restore).toContain("prior-label-assets.jsonl");
+    for (const sourceConsumerWorkflow of [
+      ".github/workflows/enrich-open-food-facts.yml",
+      ".github/workflows/extract-robotoff.yml",
+      ".github/workflows/extract-robotoff-ingredients.yml",
+    ]) {
+      const consumer = await readFile(sourceConsumerWorkflow, "utf8");
+      expect(consumer).toContain("getWorkflowRun");
+      expect(consumer).toContain("run.name !== 'Source sync' || run.conclusion !== 'success'");
+      expect(consumer).toContain("run.head_branch !== context.payload.repository.default_branch");
+      expect(consumer).toContain("run.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`");
+      expect(consumer).toContain("matches.length !== 1");
+      expect(consumer).toContain("artifact.digest");
+      expect(consumer).toContain("artifact.size_in_bytes <= 0");
+    }
     for (const extractionWorkflow of [
       ".github/workflows/extract-robotoff.yml",
       ".github/workflows/extract-robotoff-ingredients.yml",
