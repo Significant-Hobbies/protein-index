@@ -200,6 +200,7 @@ async function extractCommand(): Promise<void> {
       confidenceThreshold,
       maximumAttempts: Number(option("maximum-attempts") ?? "4"),
       retryBaseMs: Number(option("retry-base-ms") ?? "1500"),
+      progress: (message) => process.stderr.write(`${message}\n`),
     })
     : await extractRobotoffApi({
       input,
@@ -209,6 +210,7 @@ async function extractCommand(): Promise<void> {
       limit,
       minimumIntervalMs,
       confidenceThreshold,
+      progress: (message) => process.stderr.write(`${message}\n`),
     });
   if (source === "robotoff-ingredients") await validateRobotoffIngredientArtifact(outputDirectory);
   else await validateRobotoffNutritionArtifact(outputDirectory);

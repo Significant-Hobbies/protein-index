@@ -113,6 +113,7 @@ jobs:
           restore-label-proofs: "true"
 
       - name: Extract every eligible nutrition label image
+        timeout-minutes: 225
         shell: bash
         run: |
           set -uo pipefail
@@ -216,4 +217,7 @@ jobs:
             .data/robotoff/manifest.json
             .data/robotoff/report.json
             .data/robotoff/outcomes.jsonl
+            .data/robotoff/label-assets.jsonl
+            .data/robotoff/extraction-attempts.jsonl
+            .data/robotoff/extraction-attempt-labels.jsonl
             .data/robotoff/responses/*.error.json

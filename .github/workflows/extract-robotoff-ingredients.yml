@@ -113,6 +113,7 @@ jobs:
           restore-label-proofs: "true"
 
       - name: Extract every eligible ingredient label image
+        timeout-minutes: 225
         shell: bash
         run: |
           set -uo pipefail
@@ -210,4 +211,11 @@ jobs:
           name: robotoff-ingredient-diagnostics-${{ github.run_id }}
           retention-days: 14
           if-no-files-found: warn
-          path: .data/robotoff-ingredients/
+          path: |
+            .data/robotoff-ingredients/manifest.json
+            .data/robotoff-ingredients/report.json
+            .data/robotoff-ingredients/outcomes.jsonl
+            .data/robotoff-ingredients/label-assets.jsonl
+            .data/robotoff-ingredients/extraction-attempts.jsonl
+            .data/robotoff-ingredients/extraction-attempt-labels.jsonl
+            .data/robotoff-ingredients/responses/*.error.json

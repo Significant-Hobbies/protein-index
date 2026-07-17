@@ -18,6 +18,7 @@ import {
   type LabelEvidenceAsset,
 } from "../../shared/extraction-outcomes";
 import { parseRobotoffNutritionEvidence, type RobotoffProductContext } from "./robotoff";
+import { startExtractionProgress, type ExtractionProgressSink } from "./extraction-progress";
 import {
   createExtractionAttempt,
   createExtractionAttemptLabel,
@@ -89,6 +90,8 @@ export interface RobotoffApiOptions {
   maximumLabelBytes?: number;
   maximumLabelChunks?: number;
   userAgent?: string;
+  progress?: ExtractionProgressSink;
+  progressIntervalMs?: number;
 }
 
 export interface RobotoffApiResult {
@@ -353,10 +356,26 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
   let fetchedBarcodes = 0;
   let resumedBarcodes = 0;
   let requests = 0;
+  let fetchedLabelAssets = 0;
+  let reusedLabelAssets = 0;
   let lastFetchStartedAt: number | null = null;
   const fetcher = options.fetcher ?? fetch;
   const labelFetcher = options.labelFetcher ?? fetch;
   const userAgent = options.userAgent ?? "protein-index/0.1 (+https://github.com/sarthakagrawal927/protein-index; label-evidence)";
+  const progress = options.progress ? startExtractionProgress({
+    label: ROBOTOFF_API_ADAPTER_VERSION,
+    totalBarcodes: contexts.length,
+    intervalMs: options.progressIntervalMs,
+    write: options.progress,
+    snapshot: () => ({
+      processedBarcodes: Object.values(outcomes).reduce((sum, count) => sum + count, 0),
+      fetchedBarcodes,
+      resumedBarcodes,
+      fetchedLabelAssets,
+      reusedLabelAssets,
+      outcomes,
+    }),
+  }) : null;
 
   const fetchPage = async (code: string, page: number): Promise<Record<string, unknown>[]> => {
     let lastError: Error | null = null;
@@ -486,6 +505,7 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
           if (reusable && reusable.productId === stagedProductId(context.product)) {
             assetsByUrl.set(reference.url, reusable);
             await writeLine(labelAssetOutput, reusable);
+            reusedLabelAssets += 1;
             continue;
           }
           const hashed = await hashHttpsLabelImage({
@@ -498,6 +518,7 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
           const asset = createLabelEvidenceAsset({ product: context.product, fieldFamily: "nutrition", reference, hash: hashed });
           assetsByUrl.set(reference.url, asset);
           await writeLine(labelAssetOutput, asset);
+          fetchedLabelAssets += 1;
         } catch (error) {
           labelFailure = error instanceof Error && "code" in error && typeof error.code === "string"
             ? `label_${error.code}`
@@ -637,6 +658,7 @@ export async function extractRobotoffApi(options: RobotoffApiOptions): Promise<R
       if (status !== "candidate") await writeLine(exclusionOutput, outcome);
     }
   } finally {
+    progress?.stop();
     await Promise.all([
       closeStream(labelAssetOutput),
       closeStream(extractionAttemptOutput),
