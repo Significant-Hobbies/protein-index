@@ -106,15 +106,15 @@ describe("guarded successor publication", () => {
       expectedVerifyCount: 1,
     });
     const sql = await readFile(output, "utf8");
-    expect(sql).toContain("CREATE TEMP TABLE _guarded_successor_publication");
+    expect(sql).not.toContain("TEMP TABLE");
+    expect(sql).toContain("json_extract('not valid JSON', '$')");
     expect(sql).toContain("pre_or_idempotent_state");
-    expect(sql).toContain(`source:${reviewed.id}`);
-    expect(sql).toContain(`decision:${reviewed.id}`);
-    expect(sql).toContain(`candidate:${reviewed.id}`);
+    expect(sql).toContain(`source_${reviewed.id}`);
+    expect(sql).toContain(`decision_${reviewed.id}`);
+    expect(sql).toContain(`candidate_${reviewed.id}`);
     expect(sql).toContain("final_nutrition_set");
     expect(sql).toContain("final_ingredient_set");
     expect(sql).toContain("unresolved_successor_candidates");
-    expect(sql).toContain("DROP TABLE _guarded_successor_publication");
   });
 
   it("derives a portable exact final verified-product state from a family-pure successor bundle", async () => {

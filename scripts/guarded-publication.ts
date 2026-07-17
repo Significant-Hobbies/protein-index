@@ -123,7 +123,7 @@ function exactProductSetPredicate(state: VerifiedProductState): string {
 }
 
 function guard(label: string, predicate: string): string {
-  return `INSERT INTO _guarded_successor_publication (ok, label) SELECT CASE WHEN ${predicate} THEN 1 ELSE 0 END, ${sql(label)};`;
+  return `SELECT CASE WHEN ${predicate} THEN 1 ELSE json_extract('not valid JSON', '$') END AS ${label.replace(/[^a-z0-9_]/gi, "_")};`;
 }
 
 function exactDecisionPredicate(decision: ReviewEvidenceDecision, alias: string): string {
@@ -230,8 +230,6 @@ export async function emitGuardedSuccessorPublication(input: GuardedSuccessorPub
   await rm(temporaryOutputPath, { force: true });
   const output = await open(temporaryOutputPath, "w");
   try {
-    await writeLine(output, "DROP TABLE IF EXISTS temp._guarded_successor_publication;");
-    await writeLine(output, "CREATE TEMP TABLE _guarded_successor_publication (ok INTEGER NOT NULL CHECK(ok = 1), label TEXT NOT NULL);");
     await writeLine(output, guard("pre_or_idempotent_state", preOrRetry));
     for (const decision of successor.decisions) {
       await writeLine(output, guard(
@@ -252,7 +250,6 @@ export async function emitGuardedSuccessorPublication(input: GuardedSuccessorPub
     await writeLine(output, guard("final_nutrition_set", exactProductSetPredicate(input.expectedAfter.nutrition)));
     await writeLine(output, guard("final_ingredient_set", exactProductSetPredicate(input.expectedAfter.ingredients)));
     await writeLine(output, guard("unresolved_successor_candidates", `NOT EXISTS (SELECT 1 FROM review_items WHERE status = 'open' AND json_extract(evidence_json, '$.details.candidateHash') IN (${candidateHashes}))`));
-    await writeLine(output, "DROP TABLE _guarded_successor_publication;");
     await output.close();
     await rename(temporaryOutputPath, input.outputPath);
   } catch (error) {
