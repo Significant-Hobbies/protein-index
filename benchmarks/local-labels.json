@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "teriyaki-qualifier-rejection",
+      "image": "../.data/robotoff-sample-current/teriyaki-label.jpg",
+      "contentSha256": "2041a97e2170e86fac072ea7dbb2e055a9a3d851e659ad3b76bda4d793aad055",
+      "expect": { "nutritionAccepted": true, "ingredientsAccepted": false, "basis": "per_100g", "nutrition": { "calories": 173, "proteinGrams": 1.9, "saturatedFatGrams": null, "fibreGrams": null } }
+    },
+    {
+      "id": "standard-per-100g-table",
+      "image": "../.data/local-machine-labels/artifacts-v8/mlc_4c860e9685d46487bdd8c66b/55d06997a4d52b900dc4a72cb1e09134408bb024100cf45c9e6b91c14ace9d99.jpg",
+      "contentSha256": "55d06997a4d52b900dc4a72cb1e09134408bb024100cf45c9e6b91c14ace9d99",
+      "expect": { "nutritionAccepted": true, "ingredientsAccepted": false, "basis": "per_100g", "nutrition": { "calories": 312, "proteinGrams": 53, "carbohydrateGrams": 30.2, "sugarGrams": 2.9, "fatGrams": 1, "saturatedFatGrams": 0.3, "fibreGrams": 15.5, "sodiumMg": 441.1 } }
+    },
+    {
+      "id": "complete-ingredients-and-nutrition",
+      "image": "../.data/local-machine-labels/artifacts-v8/mlc_d6ce7806ef0af456c20cda42/cda8aa2d032f02e1bc4ad13e3147cde85d836840de4279abc23b30e67211e737.jpg",
+      "contentSha256": "cda8aa2d032f02e1bc4ad13e3147cde85d836840de4279abc23b30e67211e737",
+      "expect": { "nutritionAccepted": true, "ingredientsAccepted": true, "basis": "per_100g", "nutrition": { "calories": 203.8, "proteinGrams": 25, "carbohydrateGrams": 5.7, "fatGrams": 9, "saturatedFatGrams": 6.1, "sodiumMg": 125 }, "ingredientsRaw": "Milk Solids & Vinegar" }
+    },
+    {
+      "id": "vertical-table-cropped-ingredients",
+      "image": "../.data/robotoff-ingredient-live-sample/label.jpg",
+      "contentSha256": "1239a37fa24f273e380e1569d95dcd254a9ceaa93ab40b8ae50d8a3806124820",
+      "expect": { "nutritionAccepted": true, "ingredientsAccepted": false, "basis": "per_100g", "nutrition": { "calories": 438, "proteinGrams": 30, "carbohydrateGrams": 48, "sugarGrams": 30, "fatGrams": 14 } }
+    },
+    {
+      "id": "per-100ml-table",
+      "image": "../.data/local-machine-labels/artifacts-v8/mlc_7c367fadd7584dee4f38e6e8/69d60c5d209716b57d6f3ffe277677a012d5fea46f6a138decb262c2274a454f.jpg",
+      "contentSha256": "69d60c5d209716b57d6f3ffe277677a012d5fea46f6a138decb262c2274a454f",
+      "expect": { "nutritionAccepted": true, "ingredientsAccepted": false, "basis": "per_100ml", "nutrition": { "calories": 25, "proteinGrams": 1.7, "carbohydrateGrams": 0.3, "sugarGrams": 0.2, "fatGrams": 1.9, "saturatedFatGrams": 0.2, "sodiumMg": 10.3 } }
+    }
+  ]
+}

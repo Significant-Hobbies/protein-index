@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CatalogTable } from "../src/App";
+import { CatalogTable, HeaderProductLookup, lookupDestination } from "../src/App";
 import type { CatalogProduct, CatalogResponse } from "../shared/api";
 import { calculateMetrics } from "../shared/metrics";
 
@@ -32,6 +32,7 @@ function product(input: { calories: number | null; proteinGrams: number | null }
     nutritionallyProteinDense: true,
     nutritionReasons: ["protein_at_least_10g_per_100kcal"],
     nutritionStatus: "verified",
+    nutritionEvidenceAuthority: "human_reviewed_label",
     nutritionEvidenceUrl: "https://images.openfoodfacts.org/fixture.jpg",
     nutritionEvidenceKind: "label",
     ingredientStatus: "verified",
@@ -91,6 +92,16 @@ describe("catalog comparison surface", () => {
     expect(mobile.match(/status-verified/g)).toHaveLength(2);
   });
 
+  it("labels machine nutrition as label-backed without presenting it as human-reviewed", () => {
+    const item = product({ calories: 360, proteinGrams: 52 });
+    item.nutritionStatus = "machine_verified";
+    item.nutritionEvidenceAuthority = "machine_verified_label";
+    const markup = renderCatalog(item);
+
+    expect(markup).toContain("machine-verified from label");
+    expect(markup).not.toContain("verified nutrition");
+  });
+
   it("shows terminal ingredient evidence instead of calling it missing", () => {
     const item = product({ calories: 360, proteinGrams: 52 });
     item.ingredientStatus = "missing";
@@ -106,5 +117,30 @@ describe("catalog comparison surface", () => {
 
     expect(markup).toContain("Energy missing");
     expect(markup).not.toMatch(/>0 kcal</);
+  });
+
+  it("renders the compact header lookup with product evidence", () => {
+    const item = product({ calories: 360, proteinGrams: 52 });
+    item.nutritionStatus = "machine_verified";
+    const markup = renderToStaticMarkup(createElement(HeaderProductLookup, {
+      query: "atlas",
+      products: [item],
+      loading: false,
+      error: null,
+      onQuery: () => undefined,
+      onSelect: () => undefined,
+      onSubmit: () => undefined,
+    }));
+
+    expect(markup).toContain('role="combobox"');
+    expect(markup).toContain('role="listbox"');
+    expect(markup).toContain("Protein Food");
+    expect(markup).toContain("machine-verified from label");
+  });
+
+  it("opens an exact lookup match and hands ambiguous queries to the full catalog", () => {
+    const item = product({ calories: 360, proteinGrams: 52 });
+    expect(lookupDestination("atlas protein", [item])).toEqual({ kind: "open", productId: item.id });
+    expect(lookupDestination("protein", [item, { ...item, id: "prd_second" }])).toEqual({ kind: "catalog", query: "protein" });
   });
 });

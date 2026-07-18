@@ -31,7 +31,7 @@ export function hasProteinEnergyConflict(nutrition: NutritionPer100g): boolean {
 
 export function validateNutrition(
   nutrition: NutritionPer100g,
-  normalizedBasis: "per_100g" | "per_100ml" = "per_100g",
+  normalizedBasis: "per_100g" | "per_100ml" | "per_serving" | "unknown" = "per_100g",
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   for (const [field, value] of Object.entries(nutrition)) {
@@ -108,7 +108,7 @@ export function validateNutrition(
   const [protein, carbohydrate, fat] = CORE_MACROS.map((field) => nutrition[field]);
   if (protein !== null && protein !== undefined && carbohydrate !== null && carbohydrate !== undefined && fat !== null && fat !== undefined) {
     const macroTotal = protein + carbohydrate + fat;
-    if (macroTotal > 110) {
+    if (normalizedBasis === "per_100g" && macroTotal > 110) {
       issues.push({ code: "macro_total_impossible", message: "Core macros sum materially above 100 g", severity: "error", field: "nutrition" });
     }
     if (nutrition.calories !== null) {

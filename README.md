@@ -241,8 +241,9 @@ profiling, Wrangler dry run, and the strict deployment. Roll back Worker code
 with Wrangler deployment rollback; catalog corrections are republished as new
 evidence-preserving runs instead of deleting the audit trail.
 
-See [docs/SOURCES.md](docs/SOURCES.md) for trust states, coverage semantics, and
-the DataKart integration checklist.
+See [docs/product/sources.md](docs/product/sources.md) for trust states, coverage
+semantics, and the DataKart integration checklist. The full repository knowledge
+system lives under [docs/](docs/index.md).
 
 Implementation work is tracked in `openspec/changes/` and durable product status
 lives in `PROJECT_STATUS.md`.

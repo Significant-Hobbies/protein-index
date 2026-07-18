@@ -112,12 +112,21 @@ async function splitSqlFile(inputPath: string, maxBytes = 60_000): Promise<strin
   return chunks;
 }
 
-async function applyLocal(importSqlPath: string): Promise<void> {
-  await run("pnpm", ["exec", "wrangler", "d1", "migrations", "apply", "protein-index", "--local"]);
+async function applyLocal(importSqlPath: string, persistTo?: string): Promise<void> {
+  const persistence = persistTo ? ["--persist-to", persistTo] : [];
+  await run("pnpm", ["exec", "wrangler", "d1", "migrations", "apply", "protein-index", "--local", ...persistence]);
   const chunks = await splitSqlFile(importSqlPath);
   for (const chunk of chunks) {
-    await run("pnpm", ["exec", "wrangler", "d1", "execute", "protein-index", "--local", "--file", chunk]);
+    await run("pnpm", ["exec", "wrangler", "d1", "execute", "protein-index", "--local", ...persistence, "--file", chunk]);
   }
+}
+
+async function localImportCommand(): Promise<void> {
+  const input = option("input");
+  const persistTo = option("persist-to");
+  if (!input || !persistTo) throw new Error("local-import requires --input <import.sql> and --persist-to <local-state-directory>.");
+  await applyLocal(input, persistTo);
+  process.stdout.write(`${JSON.stringify({ input, persistTo, target: "local" })}\n`);
 }
 
 async function stageCommand(): Promise<void> {
@@ -247,10 +256,14 @@ async function publishCommand(): Promise<void> {
   const directory = option("input");
   if (!directory) throw new Error("--input is required for publish.");
   const remote = hasFlag("remote");
+  const persistTo = option("persist-to");
   const automatic = hasFlag("automatic");
   const skipMigrations = hasFlag("skip-migrations");
   if (remote && !hasFlag("confirm-remote")) {
     throw new Error("Remote publication requires both --remote and --confirm-remote.");
+  }
+  if (persistTo && remote) {
+    throw new Error("--persist-to is supported only for local publication.");
   }
   if (automatic && (!remote || !skipMigrations)) {
     throw new Error("Automatic publication requires --remote, --confirm-remote, and --skip-migrations.");
@@ -296,7 +309,7 @@ async function publishCommand(): Promise<void> {
     await run("pnpm", ["exec", "wrangler", "d1", "execute", "protein-index", "--remote", "--yes", "--file", importSqlPath]);
   } else {
     const chunks = await splitSqlFile(importSqlPath);
-    for (const chunk of chunks) await run("pnpm", ["exec", "wrangler", "d1", "execute", "protein-index", "--local", "--file", chunk]);
+    for (const chunk of chunks) await run("pnpm", ["exec", "wrangler", "d1", "execute", "protein-index", "--local", ...(persistTo ? ["--persist-to", persistTo] : []), "--file", chunk]);
   }
   let automaticEvidence: Record<string, unknown> | null = null;
   let products: number;
@@ -582,6 +595,7 @@ async function main(): Promise<void> {
   if (command === "stage") return stageCommand();
   if (command === "enrich") return enrichCommand();
   if (command === "extract") return extractCommand();
+  if (command === "local-import") return localImportCommand();
   if (command === "seed") return seedCommand();
   if (command === "coverage") return coverageCommand();
   if (command === "publish") return publishCommand();
@@ -600,7 +614,7 @@ async function main(): Promise<void> {
     process.stdout.write(`${JSON.stringify(DATAKART_ADAPTER_STATUS, null, 2)}\n`);
     return;
   }
-  throw new Error("Usage: sync.ts <stage|enrich|extract|seed|coverage|publish|review-export|review-reattest|review-live-selection-query|review-live-selection-prepare|guarded-release-prepare|guarded-release-state-query|guarded-release-final-state|review-query|review-source-check|review-prepare|review-postquery|review-postcheck|datakart-status> [options]");
+  throw new Error("Usage: sync.ts <stage|enrich|extract|local-import|seed|coverage|publish|review-export|review-reattest|review-live-selection-query|review-live-selection-prepare|guarded-release-prepare|guarded-release-state-query|guarded-release-final-state|review-query|review-source-check|review-prepare|review-postquery|review-postcheck|datakart-status> [options]");
 }
 
 main().catch((error: unknown) => {

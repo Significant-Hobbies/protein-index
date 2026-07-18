@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "the_whole_truth_india",
+      "name": "The Whole Truth Foods",
+      "allowedHosts": ["thewholetruthfoods.com"],
+      "sitemapUrls": ["https://thewholetruthfoods.com/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 750,
+      "maxRetries": 3
+    },
+    {
+      "id": "yoga_bar_india",
+      "name": "Yoga Bar",
+      "allowedHosts": ["www.yogabars.in"],
+      "sitemapUrls": ["https://www.yogabars.in/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 750,
+      "maxRetries": 3
+    },
+    {
+      "id": "oziva_india",
+      "name": "OZiva",
+      "allowedHosts": ["www.oziva.in"],
+      "sitemapUrls": ["https://www.oziva.in/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 1000,
+      "maxRetries": 3
+    },
+    {
+      "id": "muscleblaze_india",
+      "name": "MuscleBlaze",
+      "allowedHosts": ["www.muscleblaze.com"],
+      "sitemapUrls": ["https://www.muscleblaze.com/sitemap.xml"],
+      "productPathPrefixes": ["/sv/"],
+      "requiredNameTerms": ["protein", "whey", "casein", "gainer"],
+      "maxProductPages": 650,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 1000,
+      "maxRetries": 3
+    },
+    {
+      "id": "max_protein_india",
+      "name": "Max Protein",
+      "allowedHosts": ["maxprotein.in", "www.maxprotein.in"],
+      "sitemapUrls": ["https://maxprotein.in/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 750,
+      "maxRetries": 3
+    },
+    {
+      "id": "the_health_factory_india",
+      "name": "The Health Factory",
+      "allowedHosts": ["www.thehealthfactory.in"],
+      "sitemapUrls": ["https://www.thehealthfactory.in/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 750,
+      "maxRetries": 3
+    },
+    {
+      "id": "nakpro_india",
+      "name": "Nakpro Nutrition",
+      "allowedHosts": ["nakpro.com"],
+      "sitemapUrls": ["https://nakpro.com/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "requiredNameTerms": ["protein", "whey", "casein", "gainer", "isolate"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "maximumResponseBytes": 4194304,
+      "minimumRequestIntervalMs": 1000,
+      "maxRetries": 3
+    },
+    {
+      "id": "naturaltein_india",
+      "name": "Naturaltein",
+      "allowedHosts": ["naturaltein.in"],
+      "sitemapUrls": ["https://naturaltein.in/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "requiredNameTerms": ["protein", "whey", "casein", "gainer", "isolate"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 1000,
+      "maxRetries": 3
+    },
+    {
+      "id": "asitis_india",
+      "name": "AS-IT-IS Nutrition",
+      "allowedHosts": ["asitisnutrition.com"],
+      "sitemapUrls": ["https://asitisnutrition.com/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "requiredNameTerms": ["protein", "whey", "casein", "gainer", "isolate"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 1000,
+      "maxRetries": 3
+    },
+    {
+      "id": "beastlife_india",
+      "name": "Beastlife",
+      "allowedHosts": ["beastlife.in"],
+      "sitemapUrls": ["https://beastlife.in/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "requiredNameTerms": ["protein", "whey", "casein", "gainer", "isolate"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 1000,
+      "maxRetries": 3
+    },
+    {
+      "id": "bgreen_india",
+      "name": "BGreen",
+      "allowedHosts": ["bgreen.in"],
+      "sitemapUrls": ["https://bgreen.in/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "requiredNameTerms": ["protein", "whey", "casein", "gainer", "isolate"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 1000,
+      "maxRetries": 3
+    },
+    {
+      "id": "snackible_india",
+      "name": "Snackible",
+      "allowedHosts": ["snackible.com"],
+      "sitemapUrls": ["https://snackible.com/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "requiredNameTerms": ["protein", "whey", "casein", "gainer", "isolate"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 1000,
+      "maxRetries": 3
+    },
+    {
+      "id": "lofoods_india",
+      "name": "Lo! Foods",
+      "allowedHosts": ["lofoods.fit"],
+      "sitemapUrls": ["https://lofoods.fit/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 750,
+      "maxRetries": 3
+    },
+    {
+      "id": "protein_chef_india",
+      "name": "Protein Chef",
+      "allowedHosts": ["proteinchef.fit"],
+      "sitemapUrls": ["https://proteinchef.fit/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "nutritionImageFilenamePrefixes": ["nivalues_"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 750,
+      "maxRetries": 3
+    },
+    {
+      "id": "superyou_india",
+      "name": "SuperYou",
+      "allowedHosts": ["superyou.in"],
+      "sitemapUrls": ["https://superyou.in/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 750,
+      "maxRetries": 3
+    },
+    {
+      "id": "fitfeast_india",
+      "name": "FitFeast",
+      "brandAliases": ["fitfeast1"],
+      "allowedHosts": ["fitfeast.in"],
+      "sitemapUrls": ["https://fitfeast.in/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 750,
+      "maxRetries": 3
+    }
+  ]
+}

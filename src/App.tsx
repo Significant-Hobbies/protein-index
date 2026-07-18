@@ -12,6 +12,7 @@ import type {
   CompletionSummary,
   CoverageResponse,
   HealthResponse,
+  NutritionEvidenceStatus,
   ProductDetailResponse,
   ReviewDecision,
   ReviewItem,
@@ -39,7 +40,7 @@ export const initialFilters = {
   trust: "all",
   verification: "all",
   ingredientVerification: "all",
-  scope: "all",
+  scope: "protein_branded",
   sort: "protein_density",
 };
 
@@ -76,8 +77,8 @@ const initialCompletionFilters = {
 };
 type CompletionUiFilters = typeof initialCompletionFilters;
 
-export function metricEvidenceLabel(status: EvidenceStatus): string {
-  return status === "verified" ? "verified nutrition" : status === "unverified" ? "unverified nutrition" : `${status} nutrition`;
+export function metricEvidenceLabel(status: NutritionEvidenceStatus): string {
+  return status === "machine_verified" ? "machine-verified from label" : status === "verified" ? "verified nutrition" : status === "unverified" ? "unverified nutrition" : `${status} nutrition`;
 }
 
 export interface ReviewNutritionCandidate {
@@ -265,7 +266,7 @@ function metric(result: MetricResult, suffix = ""): string {
 }
 
 function nutritionBasisLabel(basis: CatalogProduct["nutrition"]["basis"]): string {
-  return basis === "per_100ml" ? "per 100 ml" : basis === "per_serving" ? "per serving" : basis === "per_100g" ? "per 100 g" : "normalized basis";
+  return basis === "per_100ml" ? "per 100 ml" : basis === "per_serving" ? "per serving" : basis === "per_100g" ? "per 100 g" : "declared basis not stated";
 }
 
 export function publicEvidenceUrl(value: string | null): string | null {
@@ -290,8 +291,37 @@ function MetricValue({ result, prefix = "", suffix = "" }: { result: MetricResul
   return <>{prefix}{formatNumber(result.value, 2)}{suffix}</>;
 }
 
-function StatusBadge({ status }: { status: EvidenceStatus }) {
+function StatusBadge({ status }: { status: EvidenceStatus | NutritionEvidenceStatus }) {
   return <span className={`status status-${status}`}><i aria-hidden="true" />{status}</span>;
+}
+
+export function lookupDestination(query: string, products: CatalogProduct[]): { kind: "open"; productId: string } | { kind: "catalog"; query: string } {
+  return products.length === 1 ? { kind: "open", productId: products[0]!.id } : { kind: "catalog", query: query.trim() };
+}
+
+export function HeaderProductLookup({ query, products, loading, error, onQuery, onSelect, onSubmit }: {
+  query: string;
+  products: CatalogProduct[];
+  loading: boolean;
+  error: string | null;
+  onQuery: (query: string) => void;
+  onSelect: (product: CatalogProduct) => void;
+  onSubmit: () => void;
+}) {
+  const active = query.trim().length >= 2;
+  return (
+    <form className="header-lookup" role="search" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
+      <label htmlFor="header-product-lookup"><span className="sr-only">Quick product lookup</span><input id="header-product-lookup" name="productLookup" type="search" role="combobox" aria-autocomplete="list" aria-expanded={active} aria-controls="header-product-lookup-results" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Check a product, brand, or barcode" /></label>
+      <button type="submit" aria-label="Search products">Search</button>
+      {active && <div id="header-product-lookup-results" className="header-lookup-results" role="listbox" aria-label="Product matches">
+        {loading && <span className="header-lookup-note" role="status">Checking the index…</span>}
+        {error && <span className="header-lookup-note header-lookup-error" role="alert">{error}</span>}
+        {!loading && !error && products.length === 0 && <span className="header-lookup-note">No exact catalog match yet. Search all results.</span>}
+        {!loading && !error && products.map((product) => <button type="button" key={product.id} role="option" aria-selected="false" onClick={() => onSelect(product)}><span><strong>{product.name}</strong><small>{product.brand}{product.flavour ? ` · ${product.flavour}` : ""}</small></span><em>{metricEvidenceLabel(product.nutritionStatus)}</em></button>)}
+        {!loading && !error && products.length > 1 && <span className="header-lookup-note">Multiple matches — search all results for the full list.</span>}
+      </div>}
+    </form>
+  );
 }
 
 function IngredientStatusBadge({ product }: { product: Pick<CatalogProduct, "ingredientStatus" | "ingredientTerminalOutcome"> }) {
@@ -461,7 +491,7 @@ function ProductDrawer({ detail, loading, error, onClose }: {
               <div><p className="eyebrow">{detail.brand} · {detail.category.replaceAll("_", " ")}</p><h2>{detail.name}</h2><p>{detail.flavour ?? "No flavour declared"} · GTIN {detail.gtin ?? "not recorded"}</p><div className="product-pack-meta"><span><small>Pack size</small><strong>{detail.netQuantityGrams === null ? "Not recorded" : `${formatNumber(detail.netQuantityGrams, 0)} g`}</strong></span><span><small>Serving size</small><strong>{detail.servingSizeGrams === null ? "Not recorded" : `${formatNumber(detail.servingSizeGrams, 1)} g`}</strong></span></div><ClassificationBadges product={detail} /></div>
             </header>
 
-            {detail.nutritionStatus !== "verified" && <div className={`evidence-notice evidence-notice-${detail.nutritionStatus}`}><strong>{detail.nutritionStatus === "missing" ? "Nutrition is missing" : detail.nutritionStatus === "conflict" ? "Nutrition sources conflict" : "Community evidence—not label verified"}</strong><span>{detail.nutritionStatus === "unverified" ? "Validation-passing metrics are shown for discovery, but this product remains excluded from Trusted comparisons until a current label or authoritative source is verified." : "This product is excluded from trusted comparisons until the evidence gap is resolved."}</span></div>}
+            {detail.nutritionStatus !== "verified" && <div className={`evidence-notice evidence-notice-${detail.nutritionStatus}`}><strong>{detail.nutritionStatus === "machine_verified" ? "Machine-verified from the current label" : detail.nutritionStatus === "missing" ? "Nutrition is missing" : detail.nutritionStatus === "conflict" ? "Nutrition sources conflict" : detail.nutritionEvidenceAuthority === "first_party_structured_source" ? "First-party structured nutrition—not label verified" : "Community evidence—not label verified"}</strong><span>{detail.nutritionStatus === "machine_verified" ? "Two local extractors and deterministic validation agree on this label. It remains excluded from Trusted comparisons until human or authoritative-source verification." : detail.nutritionEvidenceAuthority === "first_party_structured_source" ? "Protein-per-calorie metrics are shown because the source declares calories and protein together. Its basis is not stated, so it remains excluded from Trusted comparisons and mass-normalized price metrics." : detail.nutritionStatus === "unverified" ? "Validation-passing metrics are shown for discovery, but this product remains excluded from Trusted comparisons until a current label or authoritative source is verified." : "This product is excluded from trusted comparisons until the evidence gap is resolved."}</span></div>}
 
             <section className="trust-panel">
               <div><span>Nutrition</span><StatusBadge status={detail.nutritionStatus} /></div>
@@ -1655,6 +1685,10 @@ export function App() {
   const [filters, setFilters] = useState(initialFilters);
   const [page, setPage] = useState(1);
   const deferredQuery = useDeferredValue(filters.q);
+  const [lookupQuery, setLookupQuery] = useState("");
+  const deferredLookupQuery = useDeferredValue(lookupQuery);
+  const [lookupProducts, setLookupProducts] = useState<CatalogProduct[]>([]);
+  const [lookupState, setLookupState] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [catalogState, setCatalogState] = useState<{ loading: boolean; error: string | null }>({ loading: true, error: null });
@@ -1704,6 +1738,37 @@ export function App() {
   const updateFilters = (next: Partial<typeof initialFilters>) => {
     setPage(1);
     setFilters((current) => ({ ...current, ...next }));
+  };
+
+  useEffect(() => {
+    const query = deferredLookupQuery.trim();
+    if (query.length < 2) {
+      setLookupProducts([]);
+      setLookupState({ loading: false, error: null });
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setLookupState({ loading: true, error: null });
+      const params = new URLSearchParams({ q: query, scope: "all", trust: "all", verification: "all", ingredientVerification: "all", page: "1", pageSize: "6" });
+      api.catalog(params, controller.signal)
+        .then((result) => { setLookupProducts(result.products); setLookupState({ loading: false, error: null }); })
+        .catch((error: unknown) => { if (error instanceof DOMException && error.name === "AbortError") return; setLookupProducts([]); setLookupState({ loading: false, error: error instanceof Error ? error.message : String(error) }); });
+    }, 180);
+    return () => { window.clearTimeout(timeout); controller.abort(); };
+  }, [deferredLookupQuery]);
+
+  const selectLookupProduct = (product: CatalogProduct) => {
+    setLookupQuery("");
+    setLookupProducts([]);
+    setSelectedId(product.id);
+  };
+  const submitLookup = () => {
+    const destination = lookupDestination(lookupQuery, lookupProducts);
+    if (destination.kind === "open") { selectLookupProduct(lookupProducts[0]!); return; }
+    if (!destination.query) return;
+    setTab("catalog");
+    updateFilters({ q: destination.query, trust: "all", verification: "all", ingredientVerification: "all", scope: "all", sort: "protein_density" });
   };
 
   const showTrusted = () => updateFilters({ trust: "strict", verification: "verified", ingredientVerification: "all", scope: "protein", sort: "protein_density" });
@@ -1859,6 +1924,7 @@ export function App() {
         <nav aria-label="Primary navigation">
           {(["catalog", "coverage", "reviews"] as const).map((item) => <button key={item} aria-pressed={tab === item} className={tab === item ? "active" : ""} onClick={() => { if (item === "reviews") setReviewId(null); setTab(item); }}>{item === "catalog" ? "Catalog" : item === "coverage" ? "Coverage" : "Evidence queue"}{item === "reviews" && reviews?.counts.open ? <b>{reviews.counts.open}</b> : null}</button>)}
         </nav>
+        <HeaderProductLookup query={lookupQuery} products={lookupProducts} loading={lookupState.loading} error={lookupState.error} onQuery={setLookupQuery} onSelect={selectLookupProduct} onSubmit={submitLookup} />
         <div className="source-pill"><i />{health?.latestPublishedAt ? `Evidence updated ${new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(new Date(health.latestPublishedAt))}` : "Evidence catalog"}</div>
       </header>
 
@@ -1872,6 +1938,9 @@ export function App() {
             <section className="catalog-overview" aria-label="Catalog overview">
               <div><span>Catalog</span><strong>{coverage?.catalog.products.toLocaleString("en-IN") ?? "—"}</strong><small>canonical food records</small></div>
               <div><span>Protein discovery</span><strong>{coverage?.catalog.marketedProtein.toLocaleString("en-IN") ?? "—"}</strong><small>marketed protein products</small></div>
+              <div><span>Protein-branded</span><strong>{coverage?.catalog.proteinBranded.toLocaleString("en-IN") ?? "—"}</strong><small>default discovery set</small></div>
+              <div><span>Comparable macros</span><strong>{coverage?.catalog.proteinBrandedWithUsableNutrition.toLocaleString("en-IN") ?? "—"}</strong><small>protein-branded with calories + protein</small></div>
+              <div><span>Machine labels</span><strong>{coverage?.catalog.machineVerifiedNutrition.toLocaleString("en-IN") ?? "—"}</strong><small>machine-verified nutrition</small></div>
               <div><span>Nutrition evidence</span><strong>{coverage ? (coverage.catalog.verifiedNutrition + coverage.catalog.unverifiedNutrition).toLocaleString("en-IN") : "—"}</strong><small>{coverage?.catalog.verifiedNutrition.toLocaleString("en-IN") ?? "—"} label verified</small></div>
               <div><span>Ingredients</span><strong>{coverage ? (coverage.catalog.verifiedIngredients + coverage.catalog.unverifiedIngredients).toLocaleString("en-IN") : "—"}</strong><small>statements captured</small></div>
               <button onClick={() => setTab("coverage")}><span>Source state</span><strong>{coverage?.completion.sourceCoverageComplete ? "Exhausted" : "Checking"}</strong><small>configured sources only →</small></button>
@@ -1883,9 +1952,9 @@ export function App() {
             <section className="filters" aria-label="Catalog filters">
               <label className="search-field" htmlFor="catalog-search"><span>Search the index</span><input id="catalog-search" name="catalogSearch" type="search" value={filters.q} onChange={(event) => updateFilters({ q: event.target.value })} placeholder="Try Amul, whey, paneer, or a GTIN" /></label>
               <label htmlFor="catalog-category">Category<select id="catalog-category" name="category" value={filters.category} onChange={(event) => updateFilters({ category: event.target.value })}><option value="all">All categories</option><option value="protein_powder">Protein powder</option><option value="protein_bar">Protein bars</option><option value="protein_snack">Protein snacks</option><option value="soy_product">Soy products</option><option value="dairy">Dairy</option><option value="ready_to_drink">Ready to drink</option><option value="breakfast">Breakfast</option><option value="spread">Spreads</option><option value="other">Other food</option></select></label>
-              <label htmlFor="catalog-evidence">Evidence<select id="catalog-evidence" name="evidence" value={filters.verification} onChange={(event) => updateFilters({ trust: "all", verification: event.target.value })}><option value="verified">Verified nutrition</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
+              <label htmlFor="catalog-evidence">Evidence<select id="catalog-evidence" name="evidence" value={filters.verification} onChange={(event) => updateFilters({ trust: "all", verification: event.target.value })}><option value="verified">Verified nutrition</option><option value="machine_verified">Machine-verified label</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
               <label htmlFor="catalog-ingredients">Ingredients<select id="catalog-ingredients" name="ingredientEvidence" value={filters.ingredientVerification} onChange={(event) => updateFilters({ trust: "all", ingredientVerification: event.target.value })}><option value="verified">Verified ingredients</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
-              <label htmlFor="catalog-scope">Scope<select id="catalog-scope" name="scope" value={filters.scope} onChange={(event) => updateFilters({ scope: event.target.value })}><option value="protein">Protein cohorts</option><option value="all">All ingested foods</option></select></label>
+              <label htmlFor="catalog-scope">Scope<select id="catalog-scope" name="scope" value={filters.scope} onChange={(event) => updateFilters({ scope: event.target.value })}><option value="protein_branded">Protein-branded discovery</option><option value="protein">Protein cohorts</option><option value="all">All ingested foods</option></select></label>
               <label htmlFor="catalog-sort">Sort<select id="catalog-sort" name="sort" value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}><option value="protein_density">Protein / 100 kcal</option><option value="cost">Cost / 25 g</option><option value="completeness">Field coverage</option><option value="name">Name</option></select></label>
             </section>
             <div className="result-meta" aria-live="polite"><span>{catalog?.pagination.total.toLocaleString("en-IN") ?? "—"} results</span><small>Missing values stay missing. Unverified values never enter trusted metrics.</small></div>

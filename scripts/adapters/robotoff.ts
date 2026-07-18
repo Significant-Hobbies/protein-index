@@ -532,7 +532,7 @@ function stagedReview(
     observedAt,
     labelVerifiedAt: null,
   };
-  const classification = classifyProtein({ name: context.name, categories: context.categoryRaw ?? context.category, labels: "", nutrition });
+  const classification = classifyProtein({ brand: context.brand, name: context.name, categories: context.categoryRaw ?? context.category, labels: "", nutrition });
   const rawEvidence = { prediction: parsed.prediction, candidate: parsed.candidate, candidateHash, crossImageConflict };
   const completeness = calculateCompleteness({
     gtin: normalizeGtin(context.code),

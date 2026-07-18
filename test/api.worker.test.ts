@@ -618,6 +618,42 @@ describe("Worker catalog API", () => {
       .bind(first.nutrition.calories, first.nutrition.proteinGrams, first.nutrition.carbohydrateGrams, first.nutrition.fatGrams, first.id).run();
   });
 
+  it("finds protein-branded discovery products across brand and category metadata", async () => {
+    const product = await env.DB.prepare(`SELECT id, brand, brand_normalized, name, name_normalized,
+      category, category_raw, marketed_protein, marketed_reasons_json
+      FROM products WHERE is_active = 1 ORDER BY id LIMIT 1`)
+      .first<{
+        id: string;
+        brand: string;
+        brand_normalized: string;
+        name: string;
+        name_normalized: string;
+        category: string;
+        category_raw: string | null;
+        marketed_protein: number;
+        marketed_reasons_json: string;
+      }>();
+    if (!product) throw new Error("Expected a seeded product");
+    await env.DB.prepare(`UPDATE products
+      SET brand = 'MyProtein', brand_normalized = 'myprotein', name = 'Millet Bites', name_normalized = 'millet bites',
+          category = 'other', category_raw = 'Snacks', marketed_protein = 0, marketed_reasons_json = '[]'
+      WHERE id = ?`).bind(product.id).run();
+
+    const response = await worker.fetch("http://localhost/api/products?scope=protein_branded&q=protein+snacks&pageSize=100");
+    expect(response.status).toBe(200);
+    const catalog = await json<CatalogResponse>(response);
+    expect(catalog.filters.scope).toBe("protein_branded");
+    expect(catalog.products.map(({ id }) => id)).toContain(product.id);
+    expect(catalog.products.find(({ id }) => id === product.id)?.marketedProtein).toBe(false);
+    await env.DB.prepare(`UPDATE products
+      SET brand = ?, brand_normalized = ?, name = ?, name_normalized = ?, category = ?, category_raw = ?,
+          marketed_protein = ?, marketed_reasons_json = ?
+      WHERE id = ?`).bind(
+      product.brand, product.brand_normalized, product.name, product.name_normalized, product.category,
+      product.category_raw, product.marketed_protein, product.marketed_reasons_json, product.id,
+    ).run();
+  });
+
   it("keeps strict trust separate from discovery and revokes it on identity drift", async () => {
     const observedAt = "2026-07-17T16:00:00.000Z";
     const contentHash = "7".repeat(64);

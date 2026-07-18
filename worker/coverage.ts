@@ -8,11 +8,14 @@ interface CatalogCountRow {
   structured_nutrition: number;
   nutrition_label_images: number;
   verified_nutrition: number;
+  machine_verified_nutrition: number;
   unverified_nutrition: number;
   conflicting_nutrition: number;
   unverified_ingredients: number;
   verified_ingredients: number;
   marketed_protein: number;
+  protein_branded: number;
+  protein_branded_with_usable_nutrition: number;
   nutritionally_protein_dense: number;
 }
 
@@ -49,25 +52,39 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
     db.prepare(`SELECT
       COUNT(*) AS products,
       SUM(CASE WHEN p.gtin IS NOT NULL THEN 1 ELSE 0 END) AS valid_gtin,
-      SUM(CASE WHEN n.status IS NULL OR n.status = 'missing' THEN 1 ELSE 0 END) AS missing_nutrition,
-      SUM(CASE WHEN n.status IS NOT NULL AND n.status <> 'missing' THEN 1 ELSE 0 END) AS structured_nutrition,
+      SUM(CASE WHEN verified_nutrition.product_id IS NULL
+        AND machine_nutrition.product_id IS NULL
+        AND (n.status IS NULL OR n.status = 'missing') THEN 1 ELSE 0 END) AS missing_nutrition,
+      SUM(CASE WHEN verified_nutrition.product_id IS NOT NULL
+        OR machine_nutrition.product_id IS NOT NULL
+        OR (n.status IS NOT NULL AND n.status <> 'missing') THEN 1 ELSE 0 END) AS structured_nutrition,
       SUM(CASE WHEN p.nutrition_image_url IS NOT NULL THEN 1 ELSE 0 END) AS nutrition_label_images,
       SUM(CASE WHEN n.status = 'verified' AND verified_nutrition.product_id IS NOT NULL THEN 1 ELSE 0 END) AS verified_nutrition,
-      SUM(CASE WHEN n.status = 'unverified' OR (
-        n.status = 'verified' AND verified_nutrition.product_id IS NULL
-      ) THEN 1 ELSE 0 END) AS unverified_nutrition,
+      SUM(CASE WHEN machine_nutrition.product_id IS NOT NULL AND verified_nutrition.product_id IS NULL THEN 1 ELSE 0 END) AS machine_verified_nutrition,
+      SUM(CASE WHEN machine_nutrition.product_id IS NULL
+        AND (n.status = 'unverified' OR (
+          n.status = 'verified' AND verified_nutrition.product_id IS NULL
+        )) THEN 1 ELSE 0 END) AS unverified_nutrition,
       SUM(CASE WHEN n.status = 'conflict' THEN 1 ELSE 0 END) AS conflicting_nutrition,
       SUM(CASE WHEN i.status = 'unverified' OR (
         i.status = 'verified' AND verified_ingredients.product_id IS NULL
       ) THEN 1 ELSE 0 END) AS unverified_ingredients,
       SUM(CASE WHEN i.status = 'verified' AND verified_ingredients.product_id IS NOT NULL THEN 1 ELSE 0 END) AS verified_ingredients,
       SUM(CASE WHEN p.marketed_protein = 1 THEN 1 ELSE 0 END) AS marketed_protein,
+      SUM(CASE WHEN p.marketed_protein = 1 OR p.brand_normalized LIKE '%protein%' OR p.brand_normalized LIKE '%whey%' OR p.brand_normalized LIKE '%casein%' THEN 1 ELSE 0 END) AS protein_branded,
+      SUM(CASE WHEN (p.marketed_protein = 1 OR p.brand_normalized LIKE '%protein%' OR p.brand_normalized LIKE '%whey%' OR p.brand_normalized LIKE '%casein%')
+        AND COALESCE(verified_nutrition.calories, machine_nutrition.calories, n.calories) > 0
+        AND COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams) >= 0
+        AND (verified_nutrition.product_id IS NOT NULL OR machine_nutrition.product_id IS NOT NULL OR n.status IN ('unverified', 'verified'))
+        THEN 1 ELSE 0 END) AS protein_branded_with_usable_nutrition,
       SUM(CASE WHEN p.nutritionally_protein_dense = 1 THEN 1 ELSE 0 END) AS nutritionally_protein_dense
       FROM products p
       LEFT JOIN nutrition_facts n ON n.product_id = p.id
       LEFT JOIN ingredient_statements i ON i.product_id = p.id
       LEFT JOIN current_verified_nutrition_facts verified_nutrition
         ON verified_nutrition.product_id = p.id
+      LEFT JOIN current_machine_verified_nutrition_facts machine_nutrition
+        ON machine_nutrition.product_id = p.id
       LEFT JOIN current_verified_ingredient_statements verified_ingredients
         ON verified_ingredients.product_id = p.id
       WHERE p.is_active = 1`),
@@ -103,11 +120,14 @@ export async function getCoverage(db: D1Database): Promise<CoverageResponse> {
       nutritionLabelImages: counts?.nutrition_label_images ?? 0,
       extractionCandidates: extractionCounts?.extraction_candidates ?? 0,
       verifiedNutrition: counts?.verified_nutrition ?? 0,
+      machineVerifiedNutrition: counts?.machine_verified_nutrition ?? 0,
       unverifiedNutrition: counts?.unverified_nutrition ?? 0,
       conflictingNutrition: counts?.conflicting_nutrition ?? 0,
       unverifiedIngredients: counts?.unverified_ingredients ?? 0,
       verifiedIngredients: counts?.verified_ingredients ?? 0,
       marketedProtein: counts?.marketed_protein ?? 0,
+      proteinBranded: counts?.protein_branded ?? 0,
+      proteinBrandedWithUsableNutrition: counts?.protein_branded_with_usable_nutrition ?? 0,
       nutritionallyProteinDense: counts?.nutritionally_protein_dense ?? 0,
       terminalUnavailableNutrition: completionAccounting.families.nutrition.terminalUnavailable,
       terminalUnavailableIngredients: completionAccounting.families.ingredients.terminalUnavailable,

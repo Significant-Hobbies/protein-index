@@ -28,6 +28,14 @@ export interface HashedLabelImage {
   fetchedAt: string;
 }
 
+/**
+ * The bytes are intentionally returned only to local/offline consumers. Callers
+ * that merely need provenance should use hashHttpsLabelImage instead.
+ */
+export interface DownloadedLabelImage extends HashedLabelImage {
+  bytes: Uint8Array;
+}
+
 export interface LabelImageReference {
   sourceImageId: string;
   sourceImageRevision: string | null;
@@ -80,7 +88,9 @@ export function stagedSourceRecordId(product: StagedProduct): string {
 export function labelReferenceFromUrl(url: string, sourceImageId?: string | null): LabelImageReference {
   const parsed = parseHttpsUrl(url, "invalid_url");
   const basename = parsed.pathname.split("/").filter(Boolean).at(-1) ?? "label";
-  const revisionMatch = /^(.*)\.(\d+)(?:\.\d+)?\.[a-z0-9]+$/i.exec(basename);
+  // OFF image URLs end in `<field>.<revision>.<display-size>.<extension>`.
+  // The display size is a delivery variant, not a source-label revision.
+  const revisionMatch = /^(.*?)\.(\d+)(?:\.\d+)?\.[a-z0-9]+$/i.exec(basename);
   return {
     sourceImageId: sourceImageId?.trim() || parsed.pathname,
     sourceImageRevision: revisionMatch?.[2] ?? null,
@@ -252,7 +262,7 @@ function declaredLength(value: string | null, maximumBytes: number): number | nu
   return length;
 }
 
-export async function hashHttpsLabelImage(options: {
+export async function downloadHttpsLabelImage(options: {
   url: string;
   fetcher?: LabelImageFetchLike;
   maximumBytes?: number;
@@ -260,7 +270,7 @@ export async function hashHttpsLabelImage(options: {
   timeoutMilliseconds?: number;
   userAgent?: string;
   now?: () => Date;
-}): Promise<HashedLabelImage> {
+}): Promise<DownloadedLabelImage> {
   const requested = parseHttpsUrl(options.url, "invalid_url");
   const maximumBytes = options.maximumBytes ?? DEFAULT_LABEL_IMAGE_MAX_BYTES;
   const maximumChunks = options.maximumChunks ?? DEFAULT_LABEL_IMAGE_MAX_CHUNKS;
@@ -283,7 +293,9 @@ export async function hashHttpsLabelImage(options: {
     try {
       response = await fetcher(requested, {
         headers: {
-          Accept: "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8",
+          // Prefer formats the pinned local vision model decodes reliably. A
+          // generic image fallback still permits sources that have no PNG/JPEG.
+          Accept: "image/png,image/jpeg,image/*;q=0.8",
           ...(options.userAgent ? { "User-Agent": options.userAgent } : {}),
         },
         redirect: "follow",
@@ -306,6 +318,7 @@ export async function hashHttpsLabelImage(options: {
 
     const reader = response.body.getReader();
     const hash = createHash("sha256");
+    const chunksRead: Uint8Array[] = [];
     let byteLength = 0;
     let chunks = 0;
     try {
@@ -322,6 +335,7 @@ export async function hashHttpsLabelImage(options: {
           throw new LabelImageHashError("stream_size_exceeded", `Label image stream exceeds ${maximumBytes} bytes.`);
         }
         hash.update(item.value);
+        chunksRead.push(item.value);
       }
     } catch (error) {
       await reader.cancel().catch(() => undefined);
@@ -343,8 +357,22 @@ export async function hashHttpsLabelImage(options: {
       byteLength,
       mediaType,
       fetchedAt: (options.now ?? (() => new Date()))().toISOString(),
+      bytes: Buffer.concat(chunksRead),
     };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function hashHttpsLabelImage(options: {
+  url: string;
+  fetcher?: LabelImageFetchLike;
+  maximumBytes?: number;
+  maximumChunks?: number;
+  timeoutMilliseconds?: number;
+  userAgent?: string;
+  now?: () => Date;
+}): Promise<HashedLabelImage> {
+  const { bytes: _bytes, ...hashed } = await downloadHttpsLabelImage(options);
+  return hashed;
 }

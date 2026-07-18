@@ -13,6 +13,7 @@ import {
 } from "../shared/evidence-decisions";
 import { identityEvidenceHash } from "../scripts/reconcile";
 import { classifyProtein } from "../shared/classification";
+import { validateSearch } from "../worker/catalog";
 import { resolveIdentity } from "../shared/entity-resolution";
 import {
   ingredientCandidateHash,
@@ -129,13 +130,24 @@ describe("nutrition accuracy and classification", () => {
     });
     expect(volumeOnlyServing.nutritionReasons).not.toContain("protein_at_least_10g_per_serving");
   });
+
+  it("does not mistake a community category tag for protein branding", () => {
+    const ordinaryFood = classifyProtein({ name: "Maida", categories: "protein, high protein", labels: "", nutrition: verifiedNutrition });
+    expect(ordinaryFood.marketed).toBe(false);
+    expect(ordinaryFood.marketedReasons).toEqual([]);
+  });
 });
 
 describe("metrics and completeness", () => {
   it("defaults the dashboard to evidence-aware protein density", () => {
-    expect(initialFilters).toEqual({ q: "", category: "all", trust: "all", verification: "all", ingredientVerification: "all", scope: "all", sort: "protein_density" });
+    expect(initialFilters).toEqual({ q: "", category: "all", trust: "all", verification: "all", ingredientVerification: "all", scope: "protein_branded", sort: "protein_density" });
     expect(metricEvidenceLabel("unverified")).toBe("unverified nutrition");
     expect(metricEvidenceLabel("verified")).toBe("verified nutrition");
+  });
+
+  it("accepts the protein-branded discovery scope without changing the default", () => {
+    expect(validateSearch(new URLSearchParams("scope=protein_branded")).value?.scope).toBe("protein_branded");
+    expect(validateSearch(new URLSearchParams("scope=protein_branding")).error).toBe("Invalid scope");
   });
 
   it("exposes only browser-safe public evidence links and readable nutrient labels", () => {
@@ -478,6 +490,21 @@ describe("metrics and completeness", () => {
     expect(result.costPer25gProtein.value).toBeNull();
     expect(result.proteinPerInr100.value).toBeNull();
     expect(result.pricePerServing).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });
+  });
+
+  it("calculates source-declared unknown-basis ratios without treating them as mass-normalized", () => {
+    const nutrition = { ...emptyNutrition(), calories: 100, proteinGrams: 12, carbohydrateGrams: 8, fatGrams: 2 };
+    const result = calculateMetrics({
+      nutrition,
+      nutritionBasis: "unknown",
+      netQuantityGrams: 250,
+      servingSizeGrams: null,
+      sellingPrice: 199,
+    });
+    expect(validateNutrition(nutrition, "unknown").filter((issue) => issue.severity === "error")).toEqual([]);
+    expect(result.proteinPer100Calories.value).toBe(12);
+    expect(result.costPer25gProtein).toEqual({ value: null, reason: "missing_price_or_pack_protein" });
+    expect(result.totalProteinInPack).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });
   });
 
   it("withholds calorie-derived protein metrics when rounded label values exceed total energy", () => {

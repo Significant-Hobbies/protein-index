@@ -1,4 +1,4 @@
-import type { CatalogProduct, CatalogResponse, ProductDetailResponse } from "../shared/api";
+import type { CatalogProduct, CatalogResponse, NutritionEvidenceStatus, ProductDetailResponse } from "../shared/api";
 import { normalizeText } from "../shared/gtin";
 import { calculateMetrics } from "../shared/metrics";
 import { hasNutritionErrors, validateNutrition } from "../shared/nutrition";
@@ -21,7 +21,8 @@ interface ProductRow {
   nutrition_reasons_json: string;
   completeness: number;
   completeness_missing_json: string;
-  nutrition_status: EvidenceStatus | null;
+  nutrition_status: NutritionEvidenceStatus | null;
+  nutrition_evidence_authority: CatalogProduct["nutritionEvidenceAuthority"];
   nutrition_evidence_url: string | null;
   nutrition_evidence_kind: "label" | "source" | null;
   ingredient_status: EvidenceStatus | null;
@@ -86,9 +87,9 @@ function mapProduct(row: ProductRow): CatalogProduct {
   });
   const nutritionPassesValidation = !hasNutritionErrors(validateNutrition(
     nutritionPer100g,
-    row.nutrition_basis === "per_100ml" ? "per_100ml" : "per_100g",
+    row.nutrition_basis ?? "unknown",
   ));
-  const metrics = (row.nutrition_status === "verified" || row.nutrition_status === "unverified") && nutritionPassesValidation
+  const metrics = (row.nutrition_status === "verified" || row.nutrition_status === "machine_verified" || row.nutrition_status === "unverified") && nutritionPassesValidation
     ? calculatedMetrics
     : {
         proteinPer100Calories: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
@@ -118,6 +119,7 @@ function mapProduct(row: ProductRow): CatalogProduct {
     nutritionallyProteinDense: booleanValue(row.nutritionally_protein_dense),
     nutritionReasons: parseJson(row.nutrition_reasons_json, []),
     nutritionStatus: row.nutrition_status ?? "missing",
+    nutritionEvidenceAuthority: row.nutrition_evidence_authority,
     nutritionEvidenceUrl: row.nutrition_evidence_url,
     nutritionEvidenceKind: row.nutrition_evidence_kind,
     ingredientStatus: row.ingredient_status ?? "missing",
@@ -179,11 +181,11 @@ export function validateSearch(input: URLSearchParams): { value?: SearchInput; e
   if (!["all", "true", "false"].includes(value.marketed)) return { error: "Invalid marketed filter" };
   if (!["all", "strict"].includes(value.trust)) return { error: "Invalid trust filter" };
   if (!["all", "true", "false", "unknown"].includes(value.dense)) return { error: "Invalid dense filter" };
-  if (!["all", "missing", "unverified", "verified", "conflict"].includes(value.verification)) return { error: "Invalid verification filter" };
+  if (!["all", "missing", "unverified", "machine_verified", "verified", "conflict"].includes(value.verification)) return { error: "Invalid verification filter" };
   if (!["all", "missing", "unverified", "verified", "conflict"].includes(value.ingredientVerification)) {
     return { error: "Invalid ingredient verification filter" };
   }
-  if (!["all", "protein"].includes(value.scope)) return { error: "Invalid scope" };
+  if (!["all", "protein", "protein_branded"].includes(value.scope)) return { error: "Invalid scope" };
   if (!["protein_density", "cost", "completeness", "name"].includes(value.sort)) return { error: "Invalid sort" };
   if (!Number.isInteger(value.page) || value.page < 1) return { error: "Page must be a positive integer" };
   if (!Number.isInteger(value.pageSize) || value.pageSize < 1 || value.pageSize > 100) return { error: "Page size must be between 1 and 100" };
@@ -197,28 +199,50 @@ const SELECT_PRODUCT = `
     p.marketed_reasons_json, p.nutritionally_protein_dense,
     p.nutrition_reasons_json, p.completeness, p.completeness_missing_json,
     CASE
-      WHEN n.status = 'verified' AND verified_nutrition.product_id IS NULL THEN 'unverified'
+      WHEN verified_nutrition.product_id IS NOT NULL THEN 'verified'
+      WHEN machine_nutrition.product_id IS NOT NULL THEN 'machine_verified'
+      WHEN n.status = 'verified' THEN 'unverified'
       ELSE n.status
     END AS nutrition_status,
+    CASE
+      WHEN verified_nutrition.product_id IS NOT NULL AND verified_nutrition.evidence_kind = 'source' THEN 'authoritative_source'
+      WHEN verified_nutrition.product_id IS NOT NULL THEN 'human_reviewed_label'
+      WHEN machine_nutrition.product_id IS NOT NULL THEN 'machine_verified_label'
+      WHEN n.status IS NOT NULL AND n.status <> 'missing' AND nutrition_source.kind = 'brand' THEN 'first_party_structured_source'
+      WHEN n.status IS NOT NULL AND n.status <> 'missing' THEN 'community'
+      ELSE NULL
+    END AS nutrition_evidence_authority,
     CASE
       WHEN i.status = 'verified' AND verified_ingredients.product_id IS NULL THEN 'unverified'
       ELSE i.status
     END AS ingredient_status,
-    verified_nutrition.evidence_url AS nutrition_evidence_url,
-    verified_nutrition.evidence_kind AS nutrition_evidence_kind,
+    COALESCE(verified_nutrition.evidence_url, machine_nutrition.evidence_url) AS nutrition_evidence_url,
+    COALESCE(verified_nutrition.evidence_kind, machine_nutrition.evidence_kind) AS nutrition_evidence_kind,
     COALESCE(verified_ingredients.evidence_url, ingredient_terminal.evidence_url) AS ingredient_evidence_url,
     COALESCE(verified_ingredients.evidence_kind, ingredient_terminal_decision.evidence_kind) AS ingredient_evidence_kind,
     ingredient_terminal.outcome AS ingredient_terminal_outcome,
-    n.calories, n.protein_grams, n.carbohydrate_grams, n.sugar_grams,
-    n.fat_grams, n.saturated_fat_grams, n.fibre_grams, n.sodium_mg, n.basis AS nutrition_basis,
-    n.observed_at AS nutrition_observed_at, n.label_verified_at,
+    COALESCE(verified_nutrition.calories, machine_nutrition.calories, n.calories) AS calories,
+    COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams) AS protein_grams,
+    COALESCE(verified_nutrition.carbohydrate_grams, machine_nutrition.carbohydrate_grams, n.carbohydrate_grams) AS carbohydrate_grams,
+    COALESCE(verified_nutrition.sugar_grams, machine_nutrition.sugar_grams, n.sugar_grams) AS sugar_grams,
+    COALESCE(verified_nutrition.fat_grams, machine_nutrition.fat_grams, n.fat_grams) AS fat_grams,
+    COALESCE(verified_nutrition.saturated_fat_grams, machine_nutrition.saturated_fat_grams, n.saturated_fat_grams) AS saturated_fat_grams,
+    COALESCE(verified_nutrition.fibre_grams, machine_nutrition.fibre_grams, n.fibre_grams) AS fibre_grams,
+    COALESCE(verified_nutrition.sodium_mg, machine_nutrition.sodium_mg, n.sodium_mg) AS sodium_mg,
+    COALESCE(verified_nutrition.basis, machine_nutrition.basis, n.basis) AS nutrition_basis,
+    COALESCE(verified_nutrition.observed_at, machine_nutrition.verified_at, n.observed_at) AS nutrition_observed_at,
+    COALESCE(verified_nutrition.label_verified_at, machine_nutrition.verified_at, n.label_verified_at) AS label_verified_at,
     o.retailer AS offer_retailer, o.selling_price, o.mrp,
     o.pincode AS offer_pincode, o.observed_at AS offer_observed_at
   FROM products p
   LEFT JOIN nutrition_facts n ON n.product_id = p.id
+  LEFT JOIN source_records nutrition_record ON nutrition_record.id = n.source_record_id
+  LEFT JOIN sources nutrition_source ON nutrition_source.id = nutrition_record.source_id
   LEFT JOIN ingredient_statements i ON i.product_id = p.id
   LEFT JOIN current_verified_nutrition_facts verified_nutrition
     ON verified_nutrition.product_id = p.id
+  LEFT JOIN current_machine_verified_nutrition_facts machine_nutrition
+    ON machine_nutrition.product_id = p.id
   LEFT JOIN current_verified_ingredient_statements verified_ingredients
     ON verified_ingredients.product_id = p.id
   LEFT JOIN terminal_evidence_projection_candidates ingredient_terminal_decision
@@ -246,9 +270,9 @@ function filtersFor(input: SearchInput): { sql: string; bindings: Array<string |
   const bindings: Array<string | number> = [];
   if (input.q) {
     for (const term of normalizeText(input.q).split(" ").filter(Boolean)) {
-      clauses.push("(p.name_normalized LIKE ? OR p.brand_normalized LIKE ? OR COALESCE(p.flavour_normalized, '') LIKE ? OR p.gtin LIKE ?)");
+      clauses.push("(p.name_normalized LIKE ? OR p.brand_normalized LIKE ? OR COALESCE(p.flavour_normalized, '') LIKE ? OR p.gtin LIKE ? OR p.category LIKE ? OR COALESCE(p.category_raw, '') LIKE ? OR p.marketed_reasons_json LIKE ?)");
       const like = `%${term}%`;
-      bindings.push(like, like, like, like);
+      bindings.push(like, like, like, like, like, like, like);
     }
   }
   if (input.category !== "all") { clauses.push("p.category = ?"); bindings.push(input.category); }
@@ -260,7 +284,9 @@ function filtersFor(input: SearchInput): { sql: string; bindings: Array<string |
   }
   if (input.verification !== "all") {
     clauses.push(`COALESCE(CASE
-      WHEN n.status = 'verified' AND verified_nutrition.product_id IS NULL THEN 'unverified'
+      WHEN verified_nutrition.product_id IS NOT NULL THEN 'verified'
+      WHEN machine_nutrition.product_id IS NOT NULL THEN 'machine_verified'
+      WHEN n.status = 'verified' THEN 'unverified'
       ELSE n.status
     END, 'missing') = ?`);
     bindings.push(input.verification);
@@ -273,6 +299,9 @@ function filtersFor(input: SearchInput): { sql: string; bindings: Array<string |
     bindings.push(input.ingredientVerification);
   }
   if (input.scope === "protein") clauses.push("(p.marketed_protein = 1 OR p.nutritionally_protein_dense = 1)");
+  if (input.scope === "protein_branded") {
+    clauses.push("(p.marketed_protein = 1 OR p.brand_normalized LIKE '%protein%' OR p.brand_normalized LIKE '%whey%' OR p.brand_normalized LIKE '%casein%')");
+  }
   clauses.push("p.completeness >= ?");
   bindings.push(input.minCompleteness);
   return { sql: clauses.length ? ` WHERE ${clauses.join(" AND ")}` : "", bindings };
@@ -281,8 +310,8 @@ function filtersFor(input: SearchInput): { sql: string; bindings: Array<string |
 export async function searchProducts(db: D1Database, input: SearchInput): Promise<CatalogResponse> {
   const filters = filtersFor(input);
   const order = {
-    protein_density: "CASE WHEN n.status IN ('verified', 'unverified') AND n.calories > 0 AND n.protein_grams >= 0 AND n.protein_grams * 4.0 <= n.calories AND (n.carbohydrate_grams IS NULL OR n.fat_grams IS NULL OR ABS((n.protein_grams * 4.0 + n.carbohydrate_grams * 4.0 + n.fat_grams * 9.0) - n.calories) <= n.calories * 0.5) THEN n.protein_grams * 100.0 / n.calories END DESC, p.name_normalized",
-    cost: "CASE WHEN n.status IN ('verified', 'unverified') AND n.basis = 'per_100g' AND n.protein_grams > 0 AND p.net_quantity_grams > 0 THEN o.selling_price * 2500.0 / (p.net_quantity_grams * n.protein_grams) END ASC NULLS LAST, p.name_normalized",
+    protein_density: "CASE WHEN (verified_nutrition.product_id IS NOT NULL OR machine_nutrition.product_id IS NOT NULL OR n.status IN ('verified', 'unverified')) AND COALESCE(verified_nutrition.calories, machine_nutrition.calories, n.calories) > 0 AND COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams) >= 0 AND COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams) * 4.0 <= COALESCE(verified_nutrition.calories, machine_nutrition.calories, n.calories) THEN COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams) * 100.0 / COALESCE(verified_nutrition.calories, machine_nutrition.calories, n.calories) END DESC, p.name_normalized",
+    cost: "CASE WHEN (verified_nutrition.product_id IS NOT NULL OR machine_nutrition.product_id IS NOT NULL OR n.status IN ('verified', 'unverified')) AND COALESCE(verified_nutrition.basis, machine_nutrition.basis, n.basis) = 'per_100g' AND COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams) > 0 AND p.net_quantity_grams > 0 THEN o.selling_price * 2500.0 / (p.net_quantity_grams * COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams)) END ASC NULLS LAST, p.name_normalized",
     completeness: "p.completeness DESC, p.name_normalized",
     name: "p.name_normalized, p.brand_normalized",
   }[input.sort] ?? "p.name_normalized";
@@ -293,6 +322,8 @@ export async function searchProducts(db: D1Database, input: SearchInput): Promis
     LEFT JOIN ingredient_statements i ON i.product_id = p.id
     LEFT JOIN current_verified_nutrition_facts verified_nutrition
       ON verified_nutrition.product_id = p.id
+    LEFT JOIN current_machine_verified_nutrition_facts machine_nutrition
+      ON machine_nutrition.product_id = p.id
     LEFT JOIN current_verified_ingredient_statements verified_ingredients
       ON verified_ingredients.product_id = p.id${filters.sql}`).bind(...filters.bindings);
   const batch = await db.batch<ProductRow | CountRow>([list, count]);

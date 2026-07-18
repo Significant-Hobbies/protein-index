@@ -20,7 +20,7 @@ import type {
   ValidationIssue,
 } from "../../shared/types";
 
-export const OPEN_FOOD_FACTS_ADAPTER_VERSION = "off-bulk-v3";
+export const OPEN_FOOD_FACTS_ADAPTER_VERSION = "off-bulk-v6";
 export const OPEN_FOOD_FACTS_EXPORT_URL =
   "https://static.openfoodfacts.org/data/en.openfoodfacts.org.products.csv.gz";
 
@@ -173,13 +173,13 @@ function categoryFor(record: RawRecord): ProductCategory {
   );
   if (/whey|casein|protein powder|protein supplement/.test(category)) return "protein_powder";
   if (/protein bar|energy bar/.test(category)) return "protein_bar";
-  if (/protein chip|protein snack/.test(category)) return "protein_snack";
-  if (/soy chunk|soya chunk|tofu|soy product/.test(category)) return "soy_product";
+  if (/soy chunks?|soya chunks?|tofu|soy product/.test(category)) return "soy_product";
   if (/greek yogurt|yoghurt|paneer|cheese|dairy/.test(category)) return "dairy";
   if (/plant milk|plant based milk|vegan milk/.test(category)) return "plant_dairy";
-  if (/protein shake|ready to drink|beverage/.test(category)) return "ready_to_drink";
-  if (/cereal|oat|muesli|breakfast/.test(category)) return "breakfast";
+  if (/protein shake|protein drink|ready to drink|beverage/.test(category)) return "ready_to_drink";
+  if (/cereal|oat|muesli|breakfast|idly|ready mix/.test(category)) return "breakfast";
   if (/peanut butter|nut butter|spread/.test(category)) return "spread";
+  if (/protein(?:\s+[a-z]+){0,3}\s+(?:chips?|snacks?|puffs?|wafers?|makhana|crisps?|mix|bites?|balls?|pops?)/.test(category)) return "protein_snack";
   return "other";
 }
 
@@ -242,7 +242,9 @@ export function normalizeOpenFoodFactsRecord(
     observedAt,
     labelVerifiedAt: null,
   };
+  const brand = stringValue(record.brands)?.split(",")[0]?.trim() || "Unknown brand";
   const classification = classifyProtein({
+    brand,
     name,
     categories: `${stringValue(record.categories) ?? ""} ${stringValue(record.categories_tags) ?? ""}`,
     labels: `${stringValue(record.labels) ?? ""} ${stringValue(record.labels_tags) ?? ""}`,
@@ -288,7 +290,7 @@ export function normalizeOpenFoodFactsRecord(
       contentHash,
       gtinRaw: sourceRecordId,
       gtin,
-      brand: stringValue(record.brands)?.split(",")[0]?.trim() || "Unknown brand",
+      brand,
       name,
       flavour: null,
       category: categoryFor(record),

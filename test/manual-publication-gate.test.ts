@@ -100,7 +100,7 @@ describe("manual evidence publication workflow", () => {
       "\n      - name: Require protected publication credentials\n",
     );
 
-    expect(workflow).toContain("adapterVersion: 'off-bulk-v3'");
+    expect(workflow).toContain("adapterVersion: 'off-bulk-v6'");
     expect(workflow).toContain("adapterVersion: 'off-api-enrichment-v6'");
     expect(workflow).toContain("adapterVersion: 'robotoff-api-v8'");
     expect(workflow).toContain("adapterVersion: 'robotoff-ingredients-api-v3'");

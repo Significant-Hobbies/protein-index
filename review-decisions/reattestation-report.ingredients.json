@@ -1,0 +1,1437 @@
+{
+  "schemaVersion": 1,
+  "artifact": {
+    "directory": "audit-ingredients-29598465319",
+    "fieldFamily": "ingredients",
+    "sourceId": "open_food_facts_robotoff_ingredients",
+    "adapterVersion": "robotoff-ingredients-api-v3",
+    "inputHash": "f9d29ba427f6835e2984b0dd09cabcbdd1d47dbe6426649adfbf1c0469b99b9f",
+    "extractionRunId": "xrun_42b6f24cc3fc2b8c452b78a0",
+    "parentSourceRunId": "run_1bf411cc19a4b2aa3ebd7d01",
+    "sourceComplete": true,
+    "candidateCount": 5622,
+    "checksumsSha256": "13156cf5619d84dcf52741b35b8a8f9cee0bcb7e1ad4a8a6ee14c4cc9e6ddd9f"
+  },
+  "activeSet": {
+    "file": "active-bundles.json",
+    "sha256": "255eca19455c336258bd0d47cf57836b5d260a480b793faf8e36dc11f67955bf",
+    "selectedBundleIds": [
+      "review-2e577fd180832df5bc94"
+    ]
+  },
+  "authorization": {
+    "confirmed": true,
+    "decidedBy": "sarthak",
+    "decidedAt": "2026-07-17T20:02:12.000Z",
+    "confirmationBatchDigest": "66311c9c8b7ad1e002423f7c1cab061a734e966f8ee8c6911315971917beac00"
+  },
+  "fieldFamily": "ingredients",
+  "expectedDecisionCount": 66,
+  "predecessorCount": 66,
+  "replacementCount": 66,
+  "replacementBundle": {
+    "bundleId": "review-8d0c28bc88ee8e60bc35",
+    "ledgerSha256": "8d0c28bc88ee8e60bc35621a0fd3c35d386a7cbe1e92441914a04f169fbd2841",
+    "decisionCount": 66,
+    "verifyCount": 65,
+    "rejectCount": 1
+  },
+  "proposedActiveSet": {
+    "file": "active-bundles.next.json",
+    "sha256": "62a1144812a3bb1a290586fb203865426007ce4ed4b2722a1497a76be1703193"
+  },
+  "exactLinkAudit": {
+    "exactLinkValid": 66,
+    "uniqueDecisions": 66,
+    "conflicts": 0,
+    "hasHardFailure": false
+  },
+  "entries": [
+    {
+      "predecessorDecisionId": "evd_rev_00d349c47ce38a91166e6d9c",
+      "replacementDecisionId": "evd_reattest_7bf61d8cfaeb0f839a5b1f34",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08904384814005:16610451:0",
+      "sourceRecordId": "src_d3408382b78ef1c1ce030033",
+      "productId": "prd_398600029fe75e180d7d2925",
+      "candidateHash": "9967cb81fbf8b5b74530df1558ff01958ff076a48f2a1aac52365acab50d20ad",
+      "previousSourceContentHash": "aaa54bd333eeab6b9233c1e3a292eda4cdac42b535e4a7727701ed3263b63b55",
+      "currentSourceContentHash": "72955341b9312abf1ed64284864b33f34037bd4cfef0bd34bc893fbeeb43b474",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/438/481/4005/5.jpg",
+      "extractionAttemptId": "xat_3a389721a6e853f7fb004ef1",
+      "labelAssetId": "lbl_affd6630e136b8907b8066cd",
+      "labelContentSha256": "b0965b1645ad5425e6fdf23151be0a989437be34b79d73967d660da9cb2dd4c6",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_02840ca91ea63b2386f3eff1",
+      "replacementDecisionId": "evd_reattest_ed4baf03ae895baabe9c022a",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08908013338795:9451879:0",
+      "sourceRecordId": "src_1280202ef8936b4d501f5d31",
+      "productId": "prd_931296902b8a9366995d93ae",
+      "candidateHash": "9086e7283e1ed619f96fedd4c36d809dde2543a032d09696332861ac00c9fcfb",
+      "previousSourceContentHash": "f1e3c1d6589b5d1317906fef9acc41f06c8bffea7b77dddd18314d35456307d5",
+      "currentSourceContentHash": "084edc9d152f52d8bdc4e7a6f5de7b05e8a2aaa00728a35eb7692160a1847e02",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/801/333/8795/2.jpg",
+      "extractionAttemptId": "xat_7d72297f1911fb9090e2609f",
+      "labelAssetId": "lbl_db61cf1d8d48b09cced60d63",
+      "labelContentSha256": "df527fcbeb56a9e9db051f149fc0725c73d2fabf08552bc080b24f570f72554f",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_038da3456fe2387c1208ce8b",
+      "replacementDecisionId": "evd_reattest_3b1aa0932ba892da3484394c",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08901648920120:10757350:0",
+      "sourceRecordId": "src_9c4c68a44f2e2a1b3fd06c64",
+      "productId": "prd_1c217281a944b6e68cf81b9a",
+      "candidateHash": "ca4173989045f81f14033b4aa515e56ba008ec3940709521ff16b93e06ca9951",
+      "previousSourceContentHash": "b71b86420077f2feb142d2cd74d860350d482f649de54f363764f70fe82e7860",
+      "currentSourceContentHash": "6d9f010a524983f1503ef2c23ece87f0fa282b3ba9d42281a27756433ae484f7",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/164/892/0120/2.jpg",
+      "extractionAttemptId": "xat_8e70591062ea28408a4236b5",
+      "labelAssetId": "lbl_23a036518a25f4db5254b66d",
+      "labelContentSha256": "aef00476ed9bfbe133fe3222c7ad9d8e456a4983c56c4413c0aab2e9931e5422",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_03b986f3d67c9cc1dcfcf0af",
+      "replacementDecisionId": "evd_reattest_4a2c16a5706014408fd3b20e",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08901491100106:19986023:0",
+      "sourceRecordId": "src_172aa4008c2f96e04e170114",
+      "productId": "prd_0a9230410cc2feda5904fe0c",
+      "candidateHash": "916e2743783f35cecc10752d090ac063ead0a44e9caf2927750b957ef0224e46",
+      "previousSourceContentHash": "cc5d6dfc1b1c299e6c3bab09b08869ce1597aebc03d56209f78d76717f831ebb",
+      "currentSourceContentHash": "4344d3db147ad4fa76f3f7b327504b8a0b654afe7061c37d127f1fe107225cd8",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/149/110/0106/3.jpg",
+      "extractionAttemptId": "xat_c590d53ccad5b658feac5ab6",
+      "labelAssetId": "lbl_16fd55be13d3d71cf4aac664",
+      "labelContentSha256": "cf5bcd9ab0a7263933f337010ee19245d605dfb47da0916ff239e84d10b3e1b4",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_03c75be0f43ea2b6c35b8baa",
+      "replacementDecisionId": "evd_reattest_31a0f97013dc7bc18e58de35",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08904422700901:19741269:0",
+      "sourceRecordId": "src_b870a882879b2bc52577d792",
+      "productId": "prd_160d66ffc81d9986f2b91eb5",
+      "candidateHash": "54b2234a2dbcf443afe60ca9886899ed7fe50d9887837cbbdba9dba06fb5a5a2",
+      "previousSourceContentHash": "bed2bc6ea0e91fe0e7a17226ffb24e6ec579b9450884ddcde3c673bd0cfaf92c",
+      "currentSourceContentHash": "ef3820c65f0413b656b70045503ab56c607eb1bd4a902daddbc55f30de60673f",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/442/270/0901/2.jpg",
+      "extractionAttemptId": "xat_ae316b9dce43112195156f99",
+      "labelAssetId": "lbl_d5d372e836b8581a4d5dcb46",
+      "labelContentSha256": "e796d75ffab394826857e437e949b4322c8acf9b9fd058fce8223492716de02f",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_044c2ec9ca57e4f3859e7ab8",
+      "replacementDecisionId": "evd_reattest_cf7d47048f5e1bb5efc39a04",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08901537007123:15509319:0",
+      "sourceRecordId": "src_8ab4d5cf2aef9593950ddc0c",
+      "productId": "prd_d63bb094258c3a8e31d262ca",
+      "candidateHash": "3a301d9f7d6ff7f1adab1caf45c19b406f98d1b0cb98f59d5fa79a1317548a36",
+      "previousSourceContentHash": "acf09b2652cef3377e5bc24b885b45cae219c71cedea7526638c3d88ec3a696d",
+      "currentSourceContentHash": "696dfd574027e95b6d4230d603770034a2675449fe6587a31cbca7d9782914a4",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/153/700/7123/5.jpg",
+      "extractionAttemptId": "xat_e543adc29c7e6885bd4c1544",
+      "labelAssetId": "lbl_d1cae4bc7e6e9f5fa41c2455",
+      "labelContentSha256": "2f48487f7b3b586dbd51c997d324c6cb1c4f41288ca8aa3de95333228c109afc",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_04f2acb94b930b10ff8d306c",
+      "replacementDecisionId": "evd_reattest_37815e9706e9eb2aa58469e6",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "00840222000026:17357746:0",
+      "sourceRecordId": "src_540f054e367e6b564706284c",
+      "productId": "prd_2c18db933abf237e951711fa",
+      "candidateHash": "be5c084bef22053956d543707b4f4c0b9db18d487068474759b18b2fda416f89",
+      "previousSourceContentHash": "6c236180240d8630c571abf918a91b040f8143a78c17ad90993aeda7dcd3fc0b",
+      "currentSourceContentHash": "6ced54abf03aedcfae5516e768e9e7e5e6b70784800bf8d4b411a8bc100b067b",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/084/022/200/0026/2.jpg",
+      "extractionAttemptId": "xat_2a13faf1223fcae4736bba6a",
+      "labelAssetId": "lbl_17ab2f944e4d6735517374f6",
+      "labelContentSha256": "15db1c8ff150105d997318d91f573c3adc34af56796c5f4d1802412e53517bec",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_059edf2cdb83071d2e84a6f6",
+      "replacementDecisionId": "evd_reattest_181664db7082a9c539fd0be8",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08908000258723:11054965:0",
+      "sourceRecordId": "src_3023198ca88987ade94311d4",
+      "productId": "prd_ae40f1b85b7f3a7f913cdaac",
+      "candidateHash": "1a0b5c0d7f887fcf56e86b52b5720fa11ba87fedcdb216d629adb68b8c5d67c0",
+      "previousSourceContentHash": "385a5006cfaa33ec0c831bf0453f097b3bf0b07cf1cf6685239ac123f4bc2c05",
+      "currentSourceContentHash": "16ad05dd763d64adced34bbfb6490793e62c5d8cdfa29edeac956155b2847b7b",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/800/025/8723/2.jpg",
+      "extractionAttemptId": "xat_3e649aa9326b8d1f9d6ec122",
+      "labelAssetId": "lbl_434c7877559ad54f271e2a5f",
+      "labelContentSha256": "449b63853433f97e7fcf39e1da0aaf9cb8db60716b5c9d4f5d7dec468c69c4d0",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_073c8265a3b1ae735bc175f4",
+      "replacementDecisionId": "evd_reattest_34646ce7dd6e53405c93b1f0",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906021123105:17821096:0",
+      "sourceRecordId": "src_b92673a9280fe214d4c14e07",
+      "productId": "prd_63909ecb76509863bdd3e33e",
+      "candidateHash": "2358939a8982b9c14418af126ea50fd6ab7378387e6c8f1273c28aef9d55039f",
+      "previousSourceContentHash": "b1668609b5763e9b40efbbc4ae19563ce175194974fc1cfe18ec4de81013e30d",
+      "currentSourceContentHash": "0ba3d4037b88423bf1be7480b38d8f2eb2356172c630dcfb279e9e4b7cec50ad",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/602/112/3105/3.jpg",
+      "extractionAttemptId": "xat_ea781538ab19a135baa7f157",
+      "labelAssetId": "lbl_fe33442179684f24826501a0",
+      "labelContentSha256": "ee4c59a14c8e858ea48edca2ec04817ed1a5a5363380d9baffab48c3e4b02e10",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_079e3a67787acc039f760c0d",
+      "replacementDecisionId": "evd_reattest_7b0c66a75e07d34706159fb8",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08908001105460:11046416:0",
+      "sourceRecordId": "src_de010275052628f0c5507a05",
+      "productId": "prd_0f20e6cbd12baf8afc4ada28",
+      "candidateHash": "a4167f1eef16ac33fea66c0911ce8eaad2f105319d2b32d5862b82f86117307e",
+      "previousSourceContentHash": "3486e6fc4c38948b8634dbf8dd53deb72b7b0e13c70c095b02bce8f210b615ae",
+      "currentSourceContentHash": "cbbad618b9e0e13d8fc1fa516a81a9b7065a668754a8867894335555e6e1444c",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/800/110/5460/3.jpg",
+      "extractionAttemptId": "xat_b106bbb731e9d7ee02bda6d9",
+      "labelAssetId": "lbl_8fb906bea1abe8e9c866d0f6",
+      "labelContentSha256": "0c956dea6863b03b0dc7c2ada6a0bdeadfff772a6974858337e9e560061475e3",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_08d955f935161b3451419f38",
+      "replacementDecisionId": "evd_reattest_4d447e7d5ce260c739420ace",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906163832484:13061747:0",
+      "sourceRecordId": "src_914e684ea4a9eab6b85a08e9",
+      "productId": "prd_c7e23afb335b035442561210",
+      "candidateHash": "a26c3c2a0c8218f8ed77d1388834beaf01392534eacbef130104e3a54537eb35",
+      "previousSourceContentHash": "375227878d6ca0d4d7ffbb5a48f7670b155630d11e7361c829ac8976013794cf",
+      "currentSourceContentHash": "939f964c32791a86d50557b150b38ed7bcde55ada9de8eae47c81d75e3d17193",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/616/383/2484/2.jpg",
+      "extractionAttemptId": "xat_15319e34e9ec1aafe8fd80d4",
+      "labelAssetId": "lbl_73d70eca8b81f86449c8179b",
+      "labelContentSha256": "fd6d5f4768ea2ccea3522d295d74b0e48e2bf0ecb0e43a9b20e831ba8b353f9f",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_09b4a00604a426d27acb5df7",
+      "replacementDecisionId": "evd_reattest_1b116f2729e8d3b8e8a2e12a",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906002080014:18045490:1",
+      "sourceRecordId": "src_3832d48511b4de6ec070ac1c",
+      "productId": "prd_caed4930e0dd34593523e6ce",
+      "candidateHash": "415d0417c2672af42bd5fabc03ec88e312a577b2c553a7d87b82487935183dd1",
+      "previousSourceContentHash": "8d24e3c9805af4137481fc6dd81779256c8b2e1d03ed195a9f01a61437a352d6",
+      "currentSourceContentHash": "f4c1de4bd075719dd9d1879168cf0d2bac8daf91ab32688d280d5a83344340ec",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/600/208/0014/3.jpg",
+      "extractionAttemptId": "xat_2e2423917a28a08fb9850b69",
+      "labelAssetId": "lbl_77ad5a96599b53342b45c3d0",
+      "labelContentSha256": "8d2579d1614bcdc46408af48f045ea012b5778ab1f48a0de298100b765fa9d3d",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_0f6df67b576a17cce64f81a8",
+      "replacementDecisionId": "evd_reattest_69278457c540c233130026b0",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08908010900070:18437826:0",
+      "sourceRecordId": "src_967a361b1cce06c0ada853b2",
+      "productId": "prd_ef279ac53548d7c5cd49ef85",
+      "candidateHash": "a2f5d9f6d8c2d9e42c06ed09831d3d8a0f62a68b786c685d955afd62279e6c5e",
+      "previousSourceContentHash": "d7a3ba9aeb8700d2922f76aa0c5dbedf93c2437e3b135847853b5e2ae22ebda2",
+      "currentSourceContentHash": "73cb6fa4465786b10caf5e7e9ecd5243320750830cd7239ba07b1871d3cc7187",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/801/090/0070/9.jpg",
+      "extractionAttemptId": "xat_a1ee4be881e0963e06dc5fcf",
+      "labelAssetId": "lbl_e7d6522c2f51ef5d65999e32",
+      "labelContentSha256": "3cc3627d0979edf81790348e1965661bc22e75aba8c26d244b41a2f66cd3eaa1",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_11e1a1772690981206405cc2",
+      "replacementDecisionId": "evd_reattest_c9522dfec513695d2f317300",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906011830068:15069883:0",
+      "sourceRecordId": "src_945abec791e1e2506c07a91d",
+      "productId": "prd_2e9aff7c7ba14649e5104bb7",
+      "candidateHash": "339693488d649068a372e7f50d99c49e62d9010c2a9f3eabe4c260dcfaae1eed",
+      "previousSourceContentHash": "d94213b5e46378787853db49becaaf089265696f8c04e677ab14af6099cfcb8b",
+      "currentSourceContentHash": "482cc7f3df876ec07aa2bd0a69acd237d67e9bc319b0ea57e7124c236cd6de97",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/601/183/0068/2.jpg",
+      "extractionAttemptId": "xat_d32edd4997a0eb9dedc30a90",
+      "labelAssetId": "lbl_87d3891f735598eb5a53c00a",
+      "labelContentSha256": "4c757bc48f78cce589c8306939e293bf8f71386093783d4659c752d41ef0d183",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_1433dd45ee3d82db43fb5b57",
+      "replacementDecisionId": "evd_reattest_84b8319ec3c429195cab1115",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08902901001730:10018588:0",
+      "sourceRecordId": "src_bc32fe227de14ba7a6f0ff14",
+      "productId": "prd_7c85c18f14577cd2f184893e",
+      "candidateHash": "5d10c32c1e9642e07e658c57cd6139449351913f864682d0703e80e457dddca0",
+      "previousSourceContentHash": "d446e7c909cf793b1587a97483f07355c6e222a0dd3be8512910be09f2ad7655",
+      "currentSourceContentHash": "584e4e692d8ca2c0455c853a446fa763b4ff381fa3bdea9bf26cfa27929e01a7",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/290/100/1730/2.jpg",
+      "extractionAttemptId": "xat_17851e37477742a30e2d98a8",
+      "labelAssetId": "lbl_376a0164f29335c995a45310",
+      "labelContentSha256": "6a27e26418d086ecfc2178e9d8879b8f09f2d58a69efa173b17b49b4def5cb4d",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_15b95c783c71d5f51c3dc2e1",
+      "replacementDecisionId": "evd_reattest_e458ea429457a52334c2487c",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906021925716:10214678:0",
+      "sourceRecordId": "src_834ce3ff681660a6e2e03c62",
+      "productId": "prd_9eb3a3387feb4f51f408844d",
+      "candidateHash": "a98a7fba964801f650222aa7ad9344f40467a4872a055010ce0be6b179df8ea3",
+      "previousSourceContentHash": "4ff849f3c7229c3d242e4ffce317133f485efdda3beadfd8525e6ecc15e4078a",
+      "currentSourceContentHash": "4e68a69e0c00a33061e3211d82cd0a158762d1add00b37e9f84348bc2d565ba2",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/602/192/5716/2.jpg",
+      "extractionAttemptId": "xat_592183c3c2065ab67b63180a",
+      "labelAssetId": "lbl_420384b16f9e9f6bb15553ae",
+      "labelContentSha256": "6310a69c259d81f5cc00da8d6fe06e1a8fc47c4d0fe357ad84e28aee8256d492",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_18409b81eadb8f1ab3cd3c48",
+      "replacementDecisionId": "evd_reattest_9f20c6365e58b96395b44131",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08902901223804:10713634:0",
+      "sourceRecordId": "src_693db5caf0556316b8186bfc",
+      "productId": "prd_f613c88d17fcaa0eed3d456b",
+      "candidateHash": "8c2e24ad870a8ebba14b86629879d35076edaa9a0e51b8d9eabc68c9bab2cee0",
+      "previousSourceContentHash": "b037972b010d403c8eaa7c607bd27fbd7f8a5c133b8701a71124d2af821e0abd",
+      "currentSourceContentHash": "4c58668ca6613e9313ef6f70f2a48e471a5e3dc8b7df62b867aafc61854e393b",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/290/122/3804/2.jpg",
+      "extractionAttemptId": "xat_895cc66c4f73e143572ff459",
+      "labelAssetId": "lbl_0f5c387f6e9cfeeea7d06277",
+      "labelContentSha256": "1c90484d46a039b03f89e1b9e50b5afd63ebb7e6d5be9d8520137e9dc7282222",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_19f0a32b27cab774f47ca19f",
+      "replacementDecisionId": "evd_reattest_b1384e23d0ccb1a1695744a0",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906135090713:8807432:0",
+      "sourceRecordId": "src_0ce559c939c89282d1ea65f5",
+      "productId": "prd_9f851c35aeee5d7333a95caa",
+      "candidateHash": "4732d276b87aa05294a4d434738ffadf93b02373d1033ccbe1bfaf2bab60a54f",
+      "previousSourceContentHash": "531af1e3b8425d8f8b8c5e01b9c588dd3820b86c44e479687118a3ff1b3dd45d",
+      "currentSourceContentHash": "8c1fc9d5b078abe8ea6607725bfe49b228ed819b3836ea263b6cf5f9a36cc595",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/613/509/0713/1.jpg",
+      "extractionAttemptId": "xat_233e80c439eff0587527d44a",
+      "labelAssetId": "lbl_0b3ee4b84636ec1e13715fbc",
+      "labelContentSha256": "c4d7dd73d04d27ab6bc1632553be9fab3605e4a1b77cdf26450ef14c4f92ddf1",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_1de65f00d0e2ceb7c31197f1",
+      "replacementDecisionId": "evd_reattest_0811ff7a13e44711d8b3ec52",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906009011301:10661180:0",
+      "sourceRecordId": "src_f9d5aec3f5b8657990067b9f",
+      "productId": "prd_ce0caf5f3dc4c3253ff34d94",
+      "candidateHash": "46a8eda6fc8a27a0de1c557b1dba7468baf01f8845d39da832ce8b45f699526a",
+      "previousSourceContentHash": "13b188ea820ee92b2a83820279abb761e219748388ac42313271590cffcdeb8e",
+      "currentSourceContentHash": "4bbe4203f5380d8bdb51e306c27c039c69c45edb3abc17af7caaf73230faf765",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/600/901/1301/4.jpg",
+      "extractionAttemptId": "xat_1ca7231edce77698643f347d",
+      "labelAssetId": "lbl_92c627f239e2be80158f5d3d",
+      "labelContentSha256": "9ea39654b4762a6ccca1d8bb7d88a02e39409056a11d7f0f948ff8a49fd3c67e",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_24f2d17d5bd7822502f6b7ef",
+      "replacementDecisionId": "evd_reattest_604d3dec2538b36cd1b3d7bc",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "00701098222618:10801112:0",
+      "sourceRecordId": "src_b3c787b7f8a0b946d8097c66",
+      "productId": "prd_563af1b6061e65771ee85e4f",
+      "candidateHash": "8895fe912d1e1960efdebbaf93d349ef633ff4bf2da5b4c77a7b8d12edadef34",
+      "previousSourceContentHash": "3a43f2048225685fb9163f80778a4834d9b2d9909f6a7d617f91ea125f199750",
+      "currentSourceContentHash": "0a8df9ea3906d00c06e5b384df7417938e73546609b822b4386f4bb5d17141f2",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/070/109/822/2618/2.jpg",
+      "extractionAttemptId": "xat_1d5bad4863e3e4ead3805b9a",
+      "labelAssetId": "lbl_2f835b1841c3f2bdeda65f2e",
+      "labelContentSha256": "191bd8906b0135e5f45bf24d61c5b51571694714ac949834461ae7d093513940",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_297646ae2e0bda6d90a48355",
+      "replacementDecisionId": "evd_reattest_00ed034ae23a2e3ee8590a89",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906069413305:9187652:0",
+      "sourceRecordId": "src_6313bc9eacf964529239fb94",
+      "productId": "prd_ddb384865d57cbe3b7f22154",
+      "candidateHash": "3aed1c7812767af6c10f5ef77afeb40a1eaffe019f95b5430b604d7263aafc57",
+      "previousSourceContentHash": "a5aca0062c2d0ded530501a311a796cff090f42af0b49c1f28393dd9e7af39c2",
+      "currentSourceContentHash": "8ed8b1d307e2f31921dcb1bf494188492fae08e3640447959b64ce61bae194ba",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/606/941/3305/2.jpg",
+      "extractionAttemptId": "xat_10637e68baa5fd62c7ce4d79",
+      "labelAssetId": "lbl_c2f1a70d743cbed4febbe84d",
+      "labelContentSha256": "01022b9f0cfd4c3082bb6b00422a1a29be5b07b0252b894fd427d477ed5007ba",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_29c6e420ab6b22ffec36b5a4",
+      "replacementDecisionId": "evd_reattest_26c21102926b7c2a587785ce",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906016350141:15758421:0",
+      "sourceRecordId": "src_4bb539ead21946f550d0a674",
+      "productId": "prd_09d6c529403392df251a7dfb",
+      "candidateHash": "7d1e379575260d025ca3a5ffc5df4d8041bc45967d1d7987956f1a73c68f3066",
+      "previousSourceContentHash": "7288914f070a81abae6a5adb8df2675fde7ba50b0b360eab2110e28d910539dc",
+      "currentSourceContentHash": "7fd20210239a61a1d59af645a93ee002cb449d614411d903a3f863c241987765",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/601/635/0141/2.jpg",
+      "extractionAttemptId": "xat_86ba30188a11ea754261b46d",
+      "labelAssetId": "lbl_82e57f29134f187ca9924fb1",
+      "labelContentSha256": "e9d6427015f9f5c0308363bf3919ae5f8d298b2ce7db50534053845753e33a33",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_2a02fdb5f38f544100741e71",
+      "replacementDecisionId": "evd_reattest_bedeafbc0c1c6c2b249224b6",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "00692058015732:14679078:0",
+      "sourceRecordId": "src_2a51b4734c5cf7909a6df885",
+      "productId": "prd_d3c46e3c096eb60403a194b4",
+      "candidateHash": "37f8d254a55a4b6213bf94dc36552e92dc4aa24535f07832226452e4786201d8",
+      "previousSourceContentHash": "b400f03229c9e962102d17174eed7931a1c15027d9d82c3d689fd4d86633254f",
+      "currentSourceContentHash": "0e3f69206d39ddaa0852eb6c44ce7d5b4942f17b90da3f9fd7279fa76e8b905d",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/069/205/801/5732/2.jpg",
+      "extractionAttemptId": "xat_b61ee0e95336982249545852",
+      "labelAssetId": "lbl_74ad52852e1a777b051356a8",
+      "labelContentSha256": "b130b42d59f1f5ecd6b2cb2ba2f15cc8e42e7824709c4c44e9e80fadc8b17d39",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_2dbe90bd97c9df4e7ac3c092",
+      "replacementDecisionId": "evd_reattest_ab32c69cffbfb5774bead8b3",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906177761084:17841140:0",
+      "sourceRecordId": "src_685b5d0f6a4fcfc81cbaaeb3",
+      "productId": "prd_254e4729109b4da8098ab889",
+      "candidateHash": "988c9b19a12c98ba7332ebe81c708d0a9c21a9aaae695152ef969a2d875f5982",
+      "previousSourceContentHash": "a87bdbc4148525109a320038bf1aa5dbd814e4d390c9031f46167c131bde8b7d",
+      "currentSourceContentHash": "1bf7ebcd82b124d1875a0d209ad64ccdff25ea09f557e3d8a9c94379eeef547c",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/617/776/1084/3.jpg",
+      "extractionAttemptId": "xat_e4b5970617ffa10979a703bd",
+      "labelAssetId": "lbl_bcfeace6a6b8267d0addd6ad",
+      "labelContentSha256": "4f6cd448a38fa77a3996692c5012cc5b3e992378c43aa3ca0ce52108cbfb0cec",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_2ffab49e09832be9add89f2a",
+      "replacementDecisionId": "evd_reattest_a244101d8e9d1fcc54dae7e0",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08902901001778:8487728:0",
+      "sourceRecordId": "src_6f0b84396aa94dde0629af61",
+      "productId": "prd_241357dd285bb1c37c81528a",
+      "candidateHash": "0487f6f9eaa95c781aa2f4ef3c561bb5d8dec5989c352e13f2c9e83347fee987",
+      "previousSourceContentHash": "d011e0b184a45baeba8342888c885695aa3fb366eeb2250d1a4441596c720a56",
+      "currentSourceContentHash": "e52bff0d9808275b514cbdc0b449b1bfe011f5879130e2572dbeaa792e27bac8",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/290/100/1778/1.jpg",
+      "extractionAttemptId": "xat_bdda798805d1b22c72b7e460",
+      "labelAssetId": "lbl_f7bbe13fd49ac3585dcefa67",
+      "labelContentSha256": "5f3c8e47cabf7b889fc3a37f68e12c40fe0bfcebca69d35b4439cdbf9c54a208",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_385c32238c65a659320409f9",
+      "replacementDecisionId": "evd_reattest_c374a6a29343448512276f5c",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08904089995498:19073192:0",
+      "sourceRecordId": "src_5c86c1e61d9973a4daa65762",
+      "productId": "prd_7b010487bf8bb5c7157b27f0",
+      "candidateHash": "0026acfdda13af2307e5d0d01679020a7623f9b8a8ed817d27616fd2654443cd",
+      "previousSourceContentHash": "4ef7fb7906d3a760f798f48acc98e6165af252fdd1949e119d789371ef3cf8d2",
+      "currentSourceContentHash": "3277d9a40aec7d3dc684f8090f4ca9251aaa3198608fbca2a5bf632806e5ad65",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/408/999/5498/1.jpg",
+      "extractionAttemptId": "xat_082e70fb72c12b098f939b71",
+      "labelAssetId": "lbl_384803446e3b1891f82262b1",
+      "labelContentSha256": "e184fb4d5100d706d505700225d13d1719f7038db7db279a56349347f365bb67",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_3917c5dfb69c7b1ee55cbcdc",
+      "replacementDecisionId": "evd_reattest_e2c448df92f43d60921b143c",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906177760971:15343232:0",
+      "sourceRecordId": "src_dd2da68581e24317665477cf",
+      "productId": "prd_11a3361fe0cf8e57b18bef02",
+      "candidateHash": "4335efd68b846ae678278e82eb41011e0e0129d20e5ebb879352a2a960ffc906",
+      "previousSourceContentHash": "32419d565af3ee85571135f3844d44880786c4fa798efba62477b53d90588e23",
+      "currentSourceContentHash": "e49f687aff7b2a5f74aa363ff0b2dc063d962fbec47e064539a51aa869281695",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/617/776/0971/1.jpg",
+      "extractionAttemptId": "xat_db07e555cee8b1fa112d0df3",
+      "labelAssetId": "lbl_4e2182b090e781f708934165",
+      "labelContentSha256": "cc09ea429607530f33463aa42a407bf8f158e5453f5d3c539b9ab1bceafe26be",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_3c7b45d4bcbf0377ddeb9f72",
+      "replacementDecisionId": "evd_reattest_7cf2724c956eddc8c83b85bb",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08901220600372:15475446:0",
+      "sourceRecordId": "src_a0a1ba6573323e23046bc4a1",
+      "productId": "prd_dfcc1d42a603b17524d7bf70",
+      "candidateHash": "b51b8eef5b28c7642dfb56e77ff8085bad072c6023f76bbce28b3873d41b5a80",
+      "previousSourceContentHash": "8f114265fa1836c72b514f653d5c22c2ab32abe9602111577d1851abf91e13f3",
+      "currentSourceContentHash": "38bf343231438d61b77442ef308c3194a294d88a40aa4b1f3c2c073e76a77883",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/122/060/0372/2.jpg",
+      "extractionAttemptId": "xat_45cd656df371e0449bcc2934",
+      "labelAssetId": "lbl_5a8b2a7acc311d5824f3660f",
+      "labelContentSha256": "2cd1183ea2a0c8a59cf3bce932a4c3d6c5b1e112b0aa057f05faa4113cbb3eae",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_3e8c9f8872943efeb3b7e46b",
+      "replacementDecisionId": "evd_reattest_fc086ab5e08255ef92d40e8c",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08901030521218:15883664:0",
+      "sourceRecordId": "src_5faf31d504932532c1943559",
+      "productId": "prd_b4805f24e1c3ca4b45742fa0",
+      "candidateHash": "6e196e089269254a2ebeebb2127db0d44e2eabc3deaecc584d076d708da02bec",
+      "previousSourceContentHash": "8bfc9f0d8e4107acb986e85f95f2965a2e08ff0ebf41c751eb347c7b604b1233",
+      "currentSourceContentHash": "0e5f20b7ebceb29787d4463a92912b442f0ab47adc929ed58765c1ce0a1fc39f",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/103/052/1218/3.jpg",
+      "extractionAttemptId": "xat_bfd956b5a6d4aaeac64a6269",
+      "labelAssetId": "lbl_227cce2d18c92009cf77563f",
+      "labelContentSha256": "30b5fbda0b97f214d8db84bba2e41ced9e14b4530003e7c2f41ed749f10ed80a",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_46bd309ea779101cf2901338",
+      "replacementDecisionId": "evd_reattest_28cfe48f9c14fe8ff9d672cc",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "00726684792160:15986464:0",
+      "sourceRecordId": "src_bd6d9503413902127c03b975",
+      "productId": "prd_a7a5d22e3d5a642d4fbefcad",
+      "candidateHash": "1124e7658cc5582370f6fad56b696f84a2c9a2c350c88cf425f7649680e01db3",
+      "previousSourceContentHash": "c2ea703ce211d91254b6bcca316b1c495257956cbbc2d796213cde83c4599c3e",
+      "currentSourceContentHash": "ff939e7e59d20ab8d79c5aa24b04aa4c72a7078e930502f6dbf82a2aeefef3a6",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/072/668/479/2160/4.jpg",
+      "extractionAttemptId": "xat_dba290ed706d4edb199503b0",
+      "labelAssetId": "lbl_19b3146c1510c04f5b954930",
+      "labelContentSha256": "32d294991a9961fd3b3d86c02c3b9e9b6ff27a08d7d6233a603f13624c3b9a16",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_4c9d8d6ba7b9dc7af405e466",
+      "replacementDecisionId": "evd_reattest_4435fda5f17c1f4a297d1243",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08904335601951:10470488:0",
+      "sourceRecordId": "src_fd25acef2e750c68fe203a58",
+      "productId": "prd_6f512f3befbcc59e8816c64f",
+      "candidateHash": "5313cae69a055c67fe7a97fa2835e7ab23eecab951922f65f98ac8cbf1379d43",
+      "previousSourceContentHash": "a64cac7a8c9216c332129a85c2ac4bc04bf814fc617ba4c1ea3d18d247aa8780",
+      "currentSourceContentHash": "3c2e3eed335eb3cbe0a06dcdc432fe7b191121019303d65b71097e14e3d27276",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/433/560/1951/1.jpg",
+      "extractionAttemptId": "xat_321dfee3d7f1f541be463664",
+      "labelAssetId": "lbl_e9272658cee0ad9838765a8a",
+      "labelContentSha256": "79ba6c25644a1cb1cf931ddc3caadd29ce35aa583faee8938dc35b966763dabe",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_4ec7346bfc5ad4db3c5eb385",
+      "replacementDecisionId": "evd_reattest_9d0d709e535bf210c77553ec",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906059637605:20101125:0",
+      "sourceRecordId": "src_debf3ffc4141248d4e6a36fa",
+      "productId": "prd_037821978a2ce626fbee0b7f",
+      "candidateHash": "08b35a7bacefd3f4280aa7e30a247ba07366f4585f4d87b848f6e075e021ffe8",
+      "previousSourceContentHash": "758d04e21072f64ecf4f96ec64d2c3d6f984abc8fba27e14c07ae83fd0248fb4",
+      "currentSourceContentHash": "59d1ae5736d96c0ec8c7de2d063b417f6496c3e9cdee6890035e076d2a13b6de",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/605/963/7605/2.jpg",
+      "extractionAttemptId": "xat_2f6f391e70f25992bb716fe3",
+      "labelAssetId": "lbl_7b5a598aaa35be8949de7706",
+      "labelContentSha256": "503ad66425b41c10ecf7b46b400e83432bb98e128f4586fa05494b595ae6d9c6",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_4f0601034e4bd4cd3a507dae",
+      "replacementDecisionId": "evd_reattest_cb8fea682ae037f498206664",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906081122421:10973646:0",
+      "sourceRecordId": "src_a9baa442cef468e80272a923",
+      "productId": "prd_8f75ac27988ddce68bd841ae",
+      "candidateHash": "a9d6c4c4376bbe2d2a118b747542a8d56011321e2df1878610202f82540c3c00",
+      "previousSourceContentHash": "29baf6b3a8562b8c9de027a02055b4b75cbd080b3af5d0aae511431ea7c51875",
+      "currentSourceContentHash": "6330708237c82c64b8cb49c5d1c86961eda472db8b028182cf64767b030d2928",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/608/112/2421/2.jpg",
+      "extractionAttemptId": "xat_6512b1dd30cba55f103216d7",
+      "labelAssetId": "lbl_d29ab3db8a65860e22138ce7",
+      "labelContentSha256": "7da06d66fa5e4fa6d1c69c63d6beff42002e48b1bb4209c1d6e19edaa8e21b5d",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_4f320ebea3d602abe2676f91",
+      "replacementDecisionId": "evd_reattest_63072727c7abf5724645586e",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08908000581470:17726441:0",
+      "sourceRecordId": "src_c3abc00c785cc0202a508968",
+      "productId": "prd_4fe1d33f792a6e79420aac6c",
+      "candidateHash": "04a54bb0a3480ea20b2e8005595eb3a9d602463182f26b47283ab8520d18fbd2",
+      "previousSourceContentHash": "fab33ef5945d7d6eebda9199f91554d58a27ece45f339c26788dd84a28fc32be",
+      "currentSourceContentHash": "8c49fc67b0e135817f319627401d1766f5931b247dfa6ad46fe5602a71189d55",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/800/058/1470/2.jpg",
+      "extractionAttemptId": "xat_5c44871eaaf779fd27d890b2",
+      "labelAssetId": "lbl_52ce0c2b82823f1896614914",
+      "labelContentSha256": "e516e96359170d5219b4db9d6b7c7b6b7caefba25166f6f825ae621d8e7f5d65",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_5018ca618fd58e32ccd0390f",
+      "replacementDecisionId": "evd_reattest_92e84ce5a35c27444577dc49",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08111100921842:17652100:0",
+      "sourceRecordId": "src_97eec29cf4a5b74032d4ab57",
+      "productId": "prd_406b7abf79bff0e9e7107fcc",
+      "candidateHash": "cd620954ef2962df79f115994a39c55eaecad5327dd8fe95107eeb5c135119ad",
+      "previousSourceContentHash": "7d5035ac323f37439476c51e8d729669154acd6b2bcbad3bbfbca22965836b2c",
+      "currentSourceContentHash": "85e564fcfa616f23d7ce13dbf78d9298300a0bcfd91ca3d3c75247a9487a4ded",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/811/110/092/1842/1.jpg",
+      "extractionAttemptId": "xat_6bf2e91df49cf5a913e95dc9",
+      "labelAssetId": "lbl_7be175266166e2c683c73b01",
+      "labelContentSha256": "721642c3b3b56d131cec99ca2e82b0f5e682948e7ac2c93929e74ca29d2ac848",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_5019295e6397f9205921b192",
+      "replacementDecisionId": "evd_reattest_7feb01ee3d89793f5afdf5fb",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906143891678:10165494:0",
+      "sourceRecordId": "src_ad1e3c495ed52df89df4680b",
+      "productId": "prd_1b8cae26d725bcd117672be8",
+      "candidateHash": "8b8680f4aae9fe69b6c1f4ad064866b78dab50367200db21e7a4064ee937d458",
+      "previousSourceContentHash": "9acce4e1663d97de2150076b3fdb93582ee4ca11749a7f3b9ccd33123d2ff202",
+      "currentSourceContentHash": "0fe2d9d532ffd1265f2ec682fe3513ba07e9e358ff27e8e30bddd7d228499c83",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/614/389/1678/1.jpg",
+      "extractionAttemptId": "xat_6b3daa3844b384890322cde0",
+      "labelAssetId": "lbl_15061215de0b2028a02c0983",
+      "labelContentSha256": "139b5c5dff319bfaca8ac5e524473dd37ed7fb060ef99a73ed20dcf615ad9a5d",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_594350fd65585f7d934ceab6",
+      "replacementDecisionId": "evd_reattest_5f1a4cb4a0c2570fa3125b59",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "00946455040003:19928512:0",
+      "sourceRecordId": "src_98ca4cd531c4d229bc767591",
+      "productId": "prd_4b31709a306ec1bc2da1ab6f",
+      "candidateHash": "65bb22ce0a6b5e7b9ec3c38a9fbc930381214c398af9a94049c279fb6d40c789",
+      "previousSourceContentHash": "9a1763810b13697e720815b0d9da3304c55e77b8336e32e3a69b72d3654bc118",
+      "currentSourceContentHash": "8e1d0fa8394f1bd2535b93c4bc7fc6af056b6d6b74cbdbe5c576fbafbcfca700",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/094/645/504/0003/1.jpg",
+      "extractionAttemptId": "xat_2f769677af0f52cec4e6dba3",
+      "labelAssetId": "lbl_26b7a9406345147d91b3f8a7",
+      "labelContentSha256": "b51f61d36488d566ee2f683026e09dca919d0b05bde7b2a98dfd58e1f73c01d7",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_5b6cd731168f0210bed2a5dc",
+      "replacementDecisionId": "evd_reattest_f7cd756e287572ddcc386cfe",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08901207051173:17957970:0",
+      "sourceRecordId": "src_37336908130c80e515472b28",
+      "productId": "prd_42ac3cef1c3eb5b87b66bc29",
+      "candidateHash": "800eb10f28ef1ca0a1096f95254f73e3f502b084ca90db2063209bf8a68555f9",
+      "previousSourceContentHash": "5ec4f0197ecb6a3bafcfd3a1bf4a07bdd305767f4630e1b22e1bf53dbefc3171",
+      "currentSourceContentHash": "f40bf7e1152fc29a007eb1bb600ab39b10af09cf0a245b2a14c1d7f3775d249e",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/120/705/1173/2.jpg",
+      "extractionAttemptId": "xat_8812fe388b03f0c014cf9043",
+      "labelAssetId": "lbl_7086a3f2243051fc5181cd3e",
+      "labelContentSha256": "cdbb6367c4c0732d88f92da1eb072d773b0d6016a93bff53a4fefd172d4f6a18",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_5cd20d46a64760a31e1c4045",
+      "replacementDecisionId": "evd_reattest_5fa375431b53da65a447b50d",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08904238426842:14615306:0",
+      "sourceRecordId": "src_d0525e7111a2c68b28fc6055",
+      "productId": "prd_e0aa93f87f40f2e41d901d88",
+      "candidateHash": "9948c3bf7212e49c74ad3f898f330279f4eb1612da86cca2025a67b87a7c9d4f",
+      "previousSourceContentHash": "1cbe253481d67b193ebff563a0b3af9decd398cb2172ddeaaac5feb9aaec7bb4",
+      "currentSourceContentHash": "704880b24467da13594de11dcc896753efba4d01ac46ff8ae0a31c91b32646e2",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/423/842/6842/2.jpg",
+      "extractionAttemptId": "xat_1aaf6b12a26e7d794556c346",
+      "labelAssetId": "lbl_242b3c2253216048bc454aaf",
+      "labelContentSha256": "8de4137c19fa62fccc34638ee295bc441b4dc3aca31da14417604db3bd48cbcc",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_6022c0c34dbded8f1d6ba007",
+      "replacementDecisionId": "evd_reattest_bc4b0e7863c2e41c81900c5f",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906045141499:11097957:0",
+      "sourceRecordId": "src_281efa905076dee2468f3b9c",
+      "productId": "prd_1738e0ada9e312a9ca9ac16a",
+      "candidateHash": "bfb1aa70c63b038241d529bbd0264f57ed43233dc7c22b8a85f0ea2a2b695856",
+      "previousSourceContentHash": "45b127c9dd8b5a8bc106fb5275cdb82ef68aa2469c9099b816e1b479aa83dafd",
+      "currentSourceContentHash": "69a0863538450750abdabd0c6c252fa91c1f4302040002599468b5372e4098ad",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/604/514/1499/2.jpg",
+      "extractionAttemptId": "xat_6c8c08621dfc8bc8f5718ec3",
+      "labelAssetId": "lbl_fce70943f0a5ae08fccc0b12",
+      "labelContentSha256": "2772c5965afe77860ff4f0be4acd541e256ecab3468fdf497b60e4e88b0df4a6",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_61f48023a0ee30b690d031e1",
+      "replacementDecisionId": "evd_reattest_87af6310e1fcd263e18e3137",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08904155829528:15926840:0",
+      "sourceRecordId": "src_9368f88cb6bdbca173e231a1",
+      "productId": "prd_b72fbab2db403b3b4d0c1e0c",
+      "candidateHash": "cec8b93f26176b7b1ed0781119aeb6df860775ba0d70a17d149795db1b5ae0e2",
+      "previousSourceContentHash": "4d084c1de8e01ed2123190f30da879e6146d2ffce141b8815b0ad4a33dbda590",
+      "currentSourceContentHash": "c94bb28f2cad664afb64e796ebc75baa04312314dc78b26349e695b84855032f",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/415/582/9528/2.jpg",
+      "extractionAttemptId": "xat_ffe8540421de96ada7bd951d",
+      "labelAssetId": "lbl_27191a4679dab48c0b18f185",
+      "labelContentSha256": "e5c4eac527a762d18c3f5a13c0c84092814dcc326b4dd7f5e7a0ab57d6ea54ab",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_6f07e4092bd32bb943580929",
+      "replacementDecisionId": "evd_reattest_8020449b6ef8026f74f08647",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08904011316001:18816036:0",
+      "sourceRecordId": "src_4b18efb10f7f11d46f39ca68",
+      "productId": "prd_0ebb6c19c50842727d5ee573",
+      "candidateHash": "bbc98e9858791dd4182ef3a563eb6097e47481418b76380eb4b707e46c1f9bb2",
+      "previousSourceContentHash": "53a72fec1627a366e8503bceadbf6813214ac18959a0b82c5fd0c1cd3e8507d9",
+      "currentSourceContentHash": "c750e5cc0e12b8bd9615926104a1db5c8e9c446f0f2c0d8892509f7e8b3c093e",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/401/131/6001/2.jpg",
+      "extractionAttemptId": "xat_dc26ee0a7dbb62217f7a3209",
+      "labelAssetId": "lbl_a48df394777470c142a9c363",
+      "labelContentSha256": "7d31363c65f9244821586218d6f843e7f93d4b427047ba0b69a057dce7958ffa",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_78562d61acb795987af67c88",
+      "replacementDecisionId": "evd_reattest_f3d3412e8079ec81510a935b",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08904335605225:19460331:0",
+      "sourceRecordId": "src_017a4916143f4a399f4cb38f",
+      "productId": "prd_d2f8aff34bf4ab7ee90a005b",
+      "candidateHash": "d423315c5d3a365d67f42438e5388c3d49c4a4203b53978868e91913b6700082",
+      "previousSourceContentHash": "0abc2482e25057658122ffd1dbe4fcb01ee793253f8e1d8f2b83f279649d7cfd",
+      "currentSourceContentHash": "a325a13a5310b9dfdded6d270151f2f9f071635ceae2cade7b6c8dddd8cfff50",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/433/560/5225/2.jpg",
+      "extractionAttemptId": "xat_08bd21b0c3ad21fb36926e4d",
+      "labelAssetId": "lbl_15dcdac55f49a4abdb18a12d",
+      "labelContentSha256": "6164e3f1e6885560ecfd420381ba4bf8d96a2c0fcebb7fa48e8d271f2df0698a",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_837db21411a899143c73f003",
+      "replacementDecisionId": "evd_reattest_79ed861608285052c3f521de",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906137051910:19000440:0",
+      "sourceRecordId": "src_c36af6dd96476955987c1818",
+      "productId": "prd_16039ee7f0018116433ae8ef",
+      "candidateHash": "8199a7e1cbb47295ca3c332abc330fc78878bf453ddfb604284c73cbe0c2fa8d",
+      "previousSourceContentHash": "8bfc4648c26a8e2bf7a84cea9000c79e261fbe3245e50da44dc124814621c4ab",
+      "currentSourceContentHash": "ae73496e3aa9ecc5a1322dc7c6f387dc55c9b10c20485a6eca444f881174334f",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/613/705/1910/2.jpg",
+      "extractionAttemptId": "xat_8d0ad3ab3ce0f07cfdcffa00",
+      "labelAssetId": "lbl_b87214aa12bda2e6c3b1933d",
+      "labelContentSha256": "6d70916bf4f56620cc0b6a4422a036dfc9f0e5f19979bfcedd0f49e0d3e030f5",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_84b32ceb66a4efa3083d9413",
+      "replacementDecisionId": "evd_reattest_f4ce950db96875941043bd96",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08902901225914:20284201:0",
+      "sourceRecordId": "src_c70897570d4b6ff205bf74d1",
+      "productId": "prd_46b3220436eba9a37e7eeff9",
+      "candidateHash": "032fac92e053c2a034bec7a38584837f4f6f7b0676f06fe773388cafe48b62a1",
+      "previousSourceContentHash": "ae4da0430f7ff6b1ae361954155706f14c63bc58a89740b55c39c7bf1b506f91",
+      "currentSourceContentHash": "76d69ef38f3c76a7463ca976077af9ea493da6d4ce48da279ecaeb0500db4149",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/290/122/5914/2.jpg",
+      "extractionAttemptId": "xat_41f3463bfdfbb42c798b907c",
+      "labelAssetId": "lbl_5a8ccde82062380ff4b4aea4",
+      "labelContentSha256": "612cd68666b976bf55def960d00a38eeb1cb83868c89e7bc7d064d319bdfa353",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_8c603b1ce5eeee46967dd66a",
+      "replacementDecisionId": "evd_reattest_2524e8261814bcf354e97a27",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906008350470:8532681:0",
+      "sourceRecordId": "src_7210cceab290553ca208cbfc",
+      "productId": "prd_ba7b248304352b525eed5b8a",
+      "candidateHash": "b99917c256fe7499e8a61f5008af48db7a435c07fb2733540fad5ad6521ee834",
+      "previousSourceContentHash": "eff8995dfe4ac9bcd83de1a4a9d312ef688ebbd22e6125b0e1526d6b0cc550f7",
+      "currentSourceContentHash": "a37fadfc7164ee75ab37aea4a753da5ca70d325f53f4a50cacf6f418f9c0927d",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/600/835/0470/3.jpg",
+      "extractionAttemptId": "xat_61630a488d544bac4edfe67c",
+      "labelAssetId": "lbl_9af0e3f5d761df31fa6a731c",
+      "labelContentSha256": "1a11325f30f41f4410266ab84ec92cd9b53564c9b634d6be13699f2e33d39ba7",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_8f1796dd090d16b93341d33d",
+      "replacementDecisionId": "evd_reattest_0ffada5bbfe7abab6a58db39",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906020581876:16783905:0",
+      "sourceRecordId": "src_b7da5e03de97d35709d7e933",
+      "productId": "prd_e7609ca9ec4d7f92c82a6487",
+      "candidateHash": "ee838111e8f5749bea7170cfd106bb6fab20bb4a173cf0e7439bade64ccb2ed9",
+      "previousSourceContentHash": "582291c9370ccce087dd73848ff1f08b250a44bb300d590c56f4355b706be9ac",
+      "currentSourceContentHash": "9508d6f8c76595fa94398aa0d8691c3b37808126e9c17485d9ad1b6e424bfbd5",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/602/058/1876/1.jpg",
+      "extractionAttemptId": "xat_03b17f20d6baf8b7cc05365a",
+      "labelAssetId": "lbl_e76de06e08a7aba265ff153d",
+      "labelContentSha256": "469d9c310b51e5a32b76d0bd241129791174ae241ca3832adc47ca59c361d375",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_91d89c30e75aad64dd7b4b0a",
+      "replacementDecisionId": "evd_reattest_e63e7371c4b013dd4edf7c4e",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08904293725041:8912082:0",
+      "sourceRecordId": "src_979a7c20debe04ea5535ce6e",
+      "productId": "prd_5954a961f27d0a3e66c7c95c",
+      "candidateHash": "033474eebb04d9d8ef7108f89ec95d2435d29c08ebe90d5aa21c0ab57333d61e",
+      "previousSourceContentHash": "4bba659e0d9cac494171ee14644a102be3a8c5fbac3daa70d16cd217a9b4dd3f",
+      "currentSourceContentHash": "baf77c82b2a542f6c980954881edfdc23046fcf141d3644951734525a6ca68b3",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/429/372/5041/1.jpg",
+      "extractionAttemptId": "xat_4f8603f3eee3231afc3cf597",
+      "labelAssetId": "lbl_417f55f68c0bb65bf0bd93ab",
+      "labelContentSha256": "c45b7c835eb7679cbde48f5ca3ca07b617f7cde54b5d494a2e5b4704803fa44c",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_949cf024b36e753661475404",
+      "replacementDecisionId": "evd_reattest_ec90cc401dfad52f5cb15d74",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08939112781762:19232928:0",
+      "sourceRecordId": "src_5497523a5c3e735f6ab8237b",
+      "productId": "prd_d28c9a08181b011648d6c825",
+      "candidateHash": "16cfc5310ee6e613bf50b7fec6169789919a19850a2d98b3a1080c012c7755c5",
+      "previousSourceContentHash": "ae73c0d0ac4e946826d7644eb8140e6c70b8fc17ace3871a76831021258ea145",
+      "currentSourceContentHash": "a3a970d37f00d360be248e13f5108fd3c3bc14efdd27901a5de2227c7db86dd3",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/893/911/278/1762/2.jpg",
+      "extractionAttemptId": "xat_07f992bd9fb92213f98b02b1",
+      "labelAssetId": "lbl_dad362f78d5e118312a6aad8",
+      "labelContentSha256": "87f14e75c2cf3d3d1a6cd81d44d687c7046e1c4e32113f0f7b3af2984f84e9cc",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_977ffa1f07413a2e3f465577",
+      "replacementDecisionId": "evd_reattest_d614efafffb1267f380fee49",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08901088000345:8240012:0",
+      "sourceRecordId": "src_9796994545096dc926f38aa4",
+      "productId": "prd_cafcf06ecc48f42bb5af3475",
+      "candidateHash": "df86be636c0b770afd2fc9b15ff50c07385d49b269a8fd0bc07d83ac4a342f34",
+      "previousSourceContentHash": "62c647e7a8d113201e1b982ff0a8e4128ebe3d8f3e16c1235169693e2aa26431",
+      "currentSourceContentHash": "443cf46c7df3072f3df9dc6a936ba448a9ddf66524940b722d430e97c194b4e6",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/108/800/0345/5.jpg",
+      "extractionAttemptId": "xat_02504a3d69b9917bcde5553e",
+      "labelAssetId": "lbl_ba5ea69087d12afe5f4deb49",
+      "labelContentSha256": "5c32ab8278eda97568c9533348a7132af51e6617b7a57e18e07d2929bcd92252",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_981c5b0bbdf202b133303896",
+      "replacementDecisionId": "evd_reattest_df8680e6143f11247b15c041",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08901262110242:17087077:0",
+      "sourceRecordId": "src_2cf71762d5c280237e06ca7d",
+      "productId": "prd_ee0fdee838bd60a4d1305d49",
+      "candidateHash": "ebcfa8d30e637a7455139aa4c2f8eb112d8c22f6f9775aac89c8915aa3fb2186",
+      "previousSourceContentHash": "4d095740586de122f0a045fff1b7a5d692251b2b1f88c515634855df038d457b",
+      "currentSourceContentHash": "e8e953b000a0cdb8548a8e9b867dfd551cc8e9edfefeaa7b88499d38b4780515",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/126/211/0242/2.jpg",
+      "extractionAttemptId": "xat_4a2e23cc78d3970543cbdd01",
+      "labelAssetId": "lbl_73cb01a9dfdd6c4a285948d5",
+      "labelContentSha256": "592b68ae88a04489e558eaaa68fa95bfd6b156c686724329331f1a9115df7abc",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_99235f67ebf990d6c6a7fb79",
+      "replacementDecisionId": "evd_reattest_33182c424a94a627b7155281",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08901262150811:15538354:0",
+      "sourceRecordId": "src_e86fcab7ef920c3cde46418c",
+      "productId": "prd_d744cf293dd2fe240a96ddf5",
+      "candidateHash": "b221ada88668499c2499d67afa6ccb937ad366d2815ffe4f2b3e9ddbd28c6275",
+      "previousSourceContentHash": "9c85c0247bbea134c2429c589bbb6a62adc3dfc89afca456935c9bf13fcaa069",
+      "currentSourceContentHash": "08075b1bc432e672f85dfdfa6b6725982f2c8103fd4021ad7d71fdf568d4fee4",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/126/215/0811/3.jpg",
+      "extractionAttemptId": "xat_d85dfff496f6fed93d6c8e62",
+      "labelAssetId": "lbl_27a355426c16028fcdd17312",
+      "labelContentSha256": "35909032efd4f88f4b2f0ed69087f542035ecafdbe47f4c07cfd3b488a0e0e1a",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_9c8ce5bfd525a0d9fdd77636",
+      "replacementDecisionId": "evd_reattest_27ebc84183d1442775342914",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08901747001546:12603252:0",
+      "sourceRecordId": "src_c309d6eb12a25f8227247f0f",
+      "productId": "prd_fb895769e3b419327ebabdce",
+      "candidateHash": "2b600c736ade6d90c1c76184559492f63d08966b32918825575ad3c0630e4afb",
+      "previousSourceContentHash": "3fe026b20b34ccc722388b57c6e318289947209fc6fc1e84b22e4726d1b4f0de",
+      "currentSourceContentHash": "d8b68369430ecb8a87748653dd0a27e66e6b12e507b214926e3a6a3e36c984c8",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/174/700/1546/2.jpg",
+      "extractionAttemptId": "xat_13d7236e756e9af3402033a7",
+      "labelAssetId": "lbl_891a5d2fe65f083824efac71",
+      "labelContentSha256": "511fd875dffa7430d218e34c5366fab1a52109704cd621fd3fedec488ccd814a",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_9d67c2f37162c2e2825da681",
+      "replacementDecisionId": "evd_reattest_f729ba119c2adc0b4e542a3c",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906035030918:10661490:0",
+      "sourceRecordId": "src_95b7011bc16facb3cd616861",
+      "productId": "prd_1678b44a5c8cc8fc5acd8961",
+      "candidateHash": "f97fe572b2a59562735711f669210844eb42d2d193bc09683cc624e4ef9c1b68",
+      "previousSourceContentHash": "ea6bd3687b39a16c2a849e05d4c8b6de68335701b61d1a16f3ce04d7d1d8e453",
+      "currentSourceContentHash": "67159e3a1802e657b2149989e01e81d0d946b5c758d9746e1b2806c2f63e5a8e",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/603/503/0918/3.jpg",
+      "extractionAttemptId": "xat_ae2b629ee9b3398cabe2a3b3",
+      "labelAssetId": "lbl_648c820246423fce97c98bdf",
+      "labelContentSha256": "35616a0487343c671f7026713250207bbd2a4e672c5daacc30b941c0debf2a08",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_9df9b8db3fd874fad3e3d878",
+      "replacementDecisionId": "evd_reattest_f4a7637ac95bf3a5f37e7ddf",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08890084192508:17822764:0",
+      "sourceRecordId": "src_7d48a0cd3ac1dee0505873db",
+      "productId": "prd_d5eb1ed261228e5b834be4bf",
+      "candidateHash": "374c41da8c31bff36eacdc0ba8ca60cc3eb3eac28e3345ec6b2c5a886d3ba1cc",
+      "previousSourceContentHash": "b4094d764418675ff132e883428b28c0f6a309aa05aa787bd2bd3af4ee542c61",
+      "currentSourceContentHash": "543fb02b8b9f2071e87ac082e01cdf25d5cff0b71bfc25cacd2581d869f1f60f",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/889/008/419/2508/2.jpg",
+      "extractionAttemptId": "xat_42b8c32fce924e5982de3c9d",
+      "labelAssetId": "lbl_596f500dccb001b4edf083f5",
+      "labelContentSha256": "6dacc72d22992e36e870edc53383e3846834ae1bb9207d2f8f2f0792e4bb4f8b",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_a02257b745c1d85920b3ca1e",
+      "replacementDecisionId": "evd_reattest_5592be0b7ef258c706ad565a",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08908000581050:20166255:0",
+      "sourceRecordId": "src_b3361d5f42f4649706e9d264",
+      "productId": "prd_1482f700f44c29cc6fad479c",
+      "candidateHash": "ca72ed4df1ed77cc4fb4f7e7333e948f990775f1cd2a5167dc6fecad2fbaba01",
+      "previousSourceContentHash": "da9777f9061065f55234e0add777ad7ad3fc9f91558f37276c365d646fdf280f",
+      "currentSourceContentHash": "bb7ca954622d19306668c07feece51b90d608b5cfbd3a6d9ba7fcf2034e0608d",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/800/058/1050/3.jpg",
+      "extractionAttemptId": "xat_de5621e93c11652d9b20b88a",
+      "labelAssetId": "lbl_c77c1a2cb46cc55a6e8cbbd2",
+      "labelContentSha256": "719f16c8d8ae6353d90950a50954973e1e0750a06522e619ff9e35388009dd5a",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_a87966fb967ecfb4cbc28802",
+      "replacementDecisionId": "evd_reattest_6d077d96eeb1a5bb72da9036",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906055441503:18818047:0",
+      "sourceRecordId": "src_97a82487ac57747268295ce9",
+      "productId": "prd_1f17946c7e10237f93a55661",
+      "candidateHash": "15ac5d9a65035465689c2932021b37310fd86125e5d4d29c9983a658d5c1c57f",
+      "previousSourceContentHash": "550a0d65fdc043773368c9caac3b98b02fac9cbb32cf268e6ab0a7d2f3a96114",
+      "currentSourceContentHash": "c22427d4668a4369722785c21a12e4b620d2a9e680a13b27c5961f67c3dc9ca8",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/605/544/1503/3.jpg",
+      "extractionAttemptId": "xat_4560cbe25416a73183f35a61",
+      "labelAssetId": "lbl_0e557e0c92cd9e25b75e9383",
+      "labelContentSha256": "96f9c2b68be9c742e3d17522178721b1ce3fe4ae0cc0079eb90f6a450dea3f65",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_ae4a3bfe16c1127bd20975cc",
+      "replacementDecisionId": "evd_reattest_9e9c4994e00742e82b5b2283",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08908005072690:9662209:0",
+      "sourceRecordId": "src_1bad7a8db8c85b0f3e2d1bb4",
+      "productId": "prd_4dc31959cf0cad5982733eec",
+      "candidateHash": "e30b7f6274d6d7e9d8bb63fa0f9ff51937c590565bf6891a43600ac6d6bec777",
+      "previousSourceContentHash": "6d7dffc231e57a6aedac9e94556b7dd9c01443babe89222e225252436b4dfb2e",
+      "currentSourceContentHash": "cf450b86a91a5fea194c4c9a7691119195002c3e2996ff1e817986b2eda9e43a",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/800/507/2690/3.jpg",
+      "extractionAttemptId": "xat_ab5999a3ae2aa0976cdb74d1",
+      "labelAssetId": "lbl_ca33760cd29088daf30d732f",
+      "labelContentSha256": "1264b20703af5e8bae4cc0529628ed920cad5bb72eea97edc65d33ed0266298d",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_ae7877d5bca0fe60fc16e667",
+      "replacementDecisionId": "evd_reattest_d4b496c85fb5f9a1803db870",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906045140614:9320463:0",
+      "sourceRecordId": "src_91c8e3cf15bb4577a817092c",
+      "productId": "prd_aa464cec8b3168fae427c33e",
+      "candidateHash": "a66e621361822c3da686dc467c1412082ce44b834f52e8662a4b229d6dafaa02",
+      "previousSourceContentHash": "25b8467b2b780f79fdf36b47fccaab46d5979faeee67091f3c518b05a59c3f4a",
+      "currentSourceContentHash": "2ad53da962c40ee2458c1bb7b13596e0297368576a06ab1b01b34e35b9fd2620",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/604/514/0614/3.jpg",
+      "extractionAttemptId": "xat_91cca763b2c6de1053c34f0b",
+      "labelAssetId": "lbl_f3c15698b8c0018fcb2327fd",
+      "labelContentSha256": "3782c11e6d0020e2caba4b5b9712e4d8f0ae26e73735b265bb126cf136e8d3be",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_b9953c3b683f06e27aa74d58",
+      "replacementDecisionId": "evd_reattest_07f19687265b69d72ca3b19a",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08901058903522:12980888:0",
+      "sourceRecordId": "src_e6dc2a38804260953a6b3636",
+      "productId": "prd_2e8efe762567fae717ff9946",
+      "candidateHash": "ed21293ca8e6c300b1ba305f408852cbdc5616b6618e5c3bbb4bc6c290abad43",
+      "previousSourceContentHash": "254d2c5a796535b13739ab39e2809541f1eaf358aa8a579cd62cffcffbcadec6",
+      "currentSourceContentHash": "64dc0b760a08100c2f1a9a22c699620d2d22ed82af80919009ef2c82581a3b81",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/105/890/3522/2.jpg",
+      "extractionAttemptId": "xat_7e583760d2f545d8707f7407",
+      "labelAssetId": "lbl_d63312b354644e5b8a72ad35",
+      "labelContentSha256": "ff395dcc98e0c361fa140e3fb70f60beee16f3004ef16e00afae68424f7a2684",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_c07ef2aef5f1f1a913ad2924",
+      "replacementDecisionId": "evd_reattest_5364bb978230492a4d912fb5",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906011831713:17259475:0",
+      "sourceRecordId": "src_d8f28d1f34b7c637b1fc0bec",
+      "productId": "prd_61517dc131df59c616c6ba4e",
+      "candidateHash": "561e94b6d820ecfda12c3c58fe820d0d073a890a5e9c096b2dc7fac7ebad7b02",
+      "previousSourceContentHash": "8da3e5718f9d02477e9d9dd30a67f7b0c3e4c8dc76411e53e96f57503e8ccea5",
+      "currentSourceContentHash": "3be37aeaa0f187140bf0e7bb340421b68c31b38248e1b31a9ac3931ff1e67907",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/601/183/1713/2.jpg",
+      "extractionAttemptId": "xat_024866bff6b277e45545a87b",
+      "labelAssetId": "lbl_687c10e507d6803d9e9070db",
+      "labelContentSha256": "f8db67c2e7d24522a9fe52578809838fd5371a8169edc6f8131c1294cd670e69",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_c2d20a95c9f97a6c4569b054",
+      "replacementDecisionId": "evd_reattest_dfd6c911a806f0379f150c6c",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08904083300809:20000295:0",
+      "sourceRecordId": "src_48ad425238dc30050471710b",
+      "productId": "prd_3399d3f535237af439e94887",
+      "candidateHash": "4cbcabcf5f340997c07215cabfb88d704bded7f9ae0e84fc951c8938c016efee",
+      "previousSourceContentHash": "ac07fc7286189aaeaea5c55ce0ee1ac496504bae72325ea17e7ac24cc4b36997",
+      "currentSourceContentHash": "5953d1d630e5cbfcf80c09d3aae17ec1b79dc76ce147afda79c3d5685e6f369c",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/408/330/0809/2.jpg",
+      "extractionAttemptId": "xat_2cc3f7ef83d4b5ec8850ade4",
+      "labelAssetId": "lbl_484a92eaccac1aa8b4cb2799",
+      "labelContentSha256": "60ce53bf9d53bb0d05c72c8e8012fd721f0d089c8cc9f4f6d3be841536233603",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_c707e36ba104b435267909e6",
+      "replacementDecisionId": "evd_reattest_37712699f2eccf0ae6d5176e",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08904083322856:18319429:0",
+      "sourceRecordId": "src_a40935ae72e77c3398f1dca7",
+      "productId": "prd_4200569bdb1e50a69b64d16a",
+      "candidateHash": "0adb8033b1a6b79d9fa4dceec68921ab2179def230e87d01cebc128738f91b20",
+      "previousSourceContentHash": "a553b88f605d7fa19e8603f194457a64dbd26e477ada8d9e4fa0bb4b3b3541e3",
+      "currentSourceContentHash": "40f804e761b9c574583ea232b36e2f63b1132492a81ea500e6242bb4d2a7b444",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/408/332/2856/1.jpg",
+      "extractionAttemptId": "xat_55e103f98d491ac950f67da8",
+      "labelAssetId": "lbl_4a0d4c28c3cb19a381e6d5cb",
+      "labelContentSha256": "88439cb540441281e6c5d49c30b94108268097f52cff52445c0993c0bca7432e",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_d4731be1e276543649597e45",
+      "replacementDecisionId": "evd_reattest_b391b19aba6c9f2baa59afa8",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906081126900:20215559:0",
+      "sourceRecordId": "src_516a0c47940b98792bc36262",
+      "productId": "prd_fab6845cf86237a4752ac70d",
+      "candidateHash": "9ce0d1a182690db60fd7b84161b5312484e13890ab6c065b6716001cd30e85a6",
+      "previousSourceContentHash": "664c97bf502f73c8ae23ea62644a4130698b5d21d62871727a8169884dc0ccae",
+      "currentSourceContentHash": "d84b589d3fd4257e1488e4cf4322108d49941775fe828591ed0ba37c321e2fde",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/608/112/6900/3.jpg",
+      "extractionAttemptId": "xat_5c7d1dc5a44e9ac5be49ff25",
+      "labelAssetId": "lbl_958c95bad4f271e8495b1b4e",
+      "labelContentSha256": "40db1d435bbf409615118cc826a80d984c5384d6c21982cc261f3fa99a483d49",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_f560547bf02e2ffb8286abcc",
+      "replacementDecisionId": "evd_reattest_c0185f5be1b1aaeb357cf28c",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08908002787023:8560444:0",
+      "sourceRecordId": "src_d5ff1011ff7d290e12580ff6",
+      "productId": "prd_13bad06b0359d30d46725045",
+      "candidateHash": "2c6d6197a67c4a62276f775c68d2051a500ceb98ab58c1559d797a34118a5bb5",
+      "previousSourceContentHash": "60a0b345e131d49edfbc369878853540337b4d0ebd30223f4e1ce178a9a38666",
+      "currentSourceContentHash": "2f314b6f3fc0f94c6675fb8758cd5080d4d6d69050144ce9493ba96427c67976",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/800/278/7023/2.jpg",
+      "extractionAttemptId": "xat_495079511a67f11d5ebe6706",
+      "labelAssetId": "lbl_53e17270bc819f246b21fdd0",
+      "labelContentSha256": "34161e668f64340ad0019d87f7866abb2ebcf1e63ef671b6e089cc870e03a2d5",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    },
+    {
+      "predecessorDecisionId": "evd_rev_fc6f6785761894b32b2f7d5a",
+      "replacementDecisionId": "evd_reattest_94a8444782166513db60e267",
+      "sourceId": "open_food_facts_robotoff_ingredients",
+      "sourceRecordKey": "08906019776092:19509141:0",
+      "sourceRecordId": "src_a7bdf6d07d3a81f2ed38cf58",
+      "productId": "prd_993dcc5625ad11ca414b1da2",
+      "candidateHash": "888938edc26cbf99d781b51db695e9ae1f138853f6f3b0bb5e03c9dd0886350f",
+      "previousSourceContentHash": "04453b582e1dd8cd704c308151e833c503bad68a6b1b347506de7a0e5a5d0a99",
+      "currentSourceContentHash": "520c2588e2c15443276ebd971956a71d2d42b71eb1f79f7505405b9427aca44c",
+      "evidenceUrl": "https://images.openfoodfacts.org/images/products/890/601/977/6092/3.jpg",
+      "extractionAttemptId": "xat_3b0257df9d8754bafd1f97be",
+      "labelAssetId": "lbl_ab0ee323440dc5c22596341f",
+      "labelContentSha256": "43384d3b6de798d6334a4fd037502fc4c05a67645c808007b42b92db53c7ba00",
+      "predecessorBundles": [
+        {
+          "bundleId": "review-2e577fd180832df5bc94",
+          "ledgerSha256": "2e577fd180832df5bc94cf0b480eed50e23d73338b4bd5522b73e2175266f337"
+        }
+      ]
+    }
+  ]
+}

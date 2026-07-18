@@ -1,0 +1,110 @@
+---
+title: Operations
+description: Scheduled jobs, publication gates, deployment, and the runbooks that hold them together.
+---
+
+# Operations
+
+Production operations are deliberately manual and gated. Producers run on
+schedule or dispatch and never touch D1; publication is always a separate,
+explicitly confirmed workflow; deployment is manual after preflight gates.
+
+## Scheduled jobs
+
+Two workflows run on a weekly cron. Everything else is `workflow_run`-triggered
+from a successful source-sync, or manual dispatch.
+
+| Cron | Workflow | Purpose |
+| --- | --- | --- |
+| Mon 02:23 UTC | `source-sync` | Stream official Open Food Facts TSV, stage products, emit exclusion ledger |
+| Mon 03:19 UTC | `official-brand-discovery` | Crawl configured official brand sitemaps into discovery records |
+
+The cron schedules live in the workflow files under
+[`.github/workflows/`](../../.github/workflows/). Code is authoritative for
+schedules; this table is a navigation aid.
+
+## Workflow chain
+
+```
+source-sync (cron Mon 02:23 UTC)
+   │  workflow_run: completed
+   ├──► enrich-open-food-facts
+   ├──► extract-robotoff          (nutrition candidates)
+   └──► extract-robotoff-ingredients
+                                        │
+                                        ▼  checksummed artifacts in GitHub Actions storage
+                                        │
+   publish-catalog               (manual dispatch + confirm)  ◄── reviewed snapshot
+   publish-enrichment            (manual dispatch + confirm)
+   publish-reviewed-evidence     (manual dispatch + confirm)  ◄── review-decisions/ bundle
+   publish-robotoff-candidates   (manual dispatch + confirm)  ◄── candidate artifact
+   publish-guarded-reviewed-labels (manual dispatch + confirm) ◄── exact successor bundle
+   publish-automatic-evidence    (manual dispatch + confirm)  ◄── successful producer run
+```
+
+Per-job reference: [jobs/](jobs/README.md).
+
+## Publication gates
+
+Every publication workflow enforces the same gate pattern, with a narrower or
+broader authority boundary depending on the path:
+
+1. **Dispatch from `main` only.**
+2. **Explicit confirmation input** (type the exact phrase).
+3. **Exact run / artifact / SHA / hash pinning** for the upstream producer
+   output.
+4. **Portable checksum + source/cohort accounting revalidation.**
+5. **Pending-migration refusal** (the fresh-evidence path cannot apply
+   migrations; only `publish-catalog` can).
+6. **Idempotent D1 import** with exact pre/post state and live health/catalog
+   checks retained for 90 days.
+7. **No success claim on failure.** The same checksummed artifact remains
+   replayable after investigation.
+
+The fresh-evidence publication path has a deliberately narrower authority
+boundary than reviewed catalog publication:
+
+- Open Food Facts values remain unverified community evidence.
+- Robotoff records remain review-only candidates with no selected facts.
+- Existing verified rows cannot be overwritten; verified counts cannot
+  increase.
+- DataKart, retailer offers/ratings, review decisions, and Worker deployment
+  are excluded.
+
+See [publication runbook](runbooks/publication.md) for the step-by-step
+procedure.
+
+## Deployment
+
+The production topology is one Worker (`protein-index`), one D1 database
+(`protein-index`), and one private R2 bucket (`protein-index-labels`).
+
+```bash
+pnpm release:preflight
+pnpm run deploy
+```
+
+`pnpm run deploy` runs the fleet deploy guard before tests, build, Worker
+startup profiling, Wrangler dry run, and the strict deployment. Roll back
+Worker code with `wrangler deployments rollback`; catalog corrections are
+republished as new evidence-preserving runs instead of deleting the audit
+trail.
+
+Deployment is manual. `main` should stay releasable and green, but it is not an
+automatic production trigger. See the fleet standard at `../AGENTS.md`.
+
+## Runbooks
+
+- [Publication](runbooks/publication.md) — publish reviewed evidence or a
+  reviewed catalog snapshot to production D1.
+- [Extraction](runbooks/extraction.md) — recover from a failed or partial
+  label extraction run.
+- [Drift audit](runbooks/drift-audit.md) — run the read-only reviewed-decision
+  drift audit before publication.
+
+## See also
+
+- [Evidence pipeline](../architecture/evidence-pipeline.md) for what each
+  workflow produces.
+- [Decision log](../architecture/decisions/README.md) ADR-003 for why producer
+  and publication are separated.

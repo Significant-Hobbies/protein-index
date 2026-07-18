@@ -86,7 +86,7 @@ jobs:
               status: 'routing',
             }, null, 2));
             const routes = Object.freeze({
-              'Source sync': Object.freeze({ source: 'open_food_facts', adapterVersion: 'off-bulk-v3', artifactPrefix: 'open-food-facts-snapshot' }),
+              'Source sync': Object.freeze({ source: 'open_food_facts', adapterVersion: 'off-bulk-v6', artifactPrefix: 'open-food-facts-snapshot' }),
               'Enrich Open Food Facts evidence': Object.freeze({ source: 'open_food_facts_api', adapterVersion: 'off-api-enrichment-v6', artifactPrefix: 'open-food-facts-enrichment' }),
               'Extract label evidence with Robotoff': Object.freeze({ source: 'open_food_facts_robotoff', adapterVersion: 'robotoff-api-v8', artifactPrefix: 'robotoff-label-candidates' }),
               'Extract ingredient label evidence': Object.freeze({ source: 'open_food_facts_robotoff_ingredients', adapterVersion: 'robotoff-ingredients-api-v3', artifactPrefix: 'robotoff-ingredient-candidates' }),

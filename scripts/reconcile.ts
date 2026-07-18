@@ -696,7 +696,7 @@ export async function emitImportSql(input: {
       const offerId = stableId("off", `${offer.retailer}:${offer.retailerListingId}:${offer.pincode ?? ""}:${offer.seller ?? ""}:${offer.observedAt}`);
       await write(
         output,
-        `INSERT INTO offers (id, product_id, source_record_id, retailer, retailer_listing_id, pincode, seller, mrp, selling_price, available, url, observed_at) VALUES (${sql(offerId)}, ${productIdSql}, ${sql(sourceRecordId)}, ${sql(offer.retailer)}, ${sql(offer.retailerListingId)}, ${sql(offer.pincode)}, ${sql(offer.seller)}, ${sql(offer.mrp)}, ${offer.sellingPrice}, ${sql(offer.available)}, ${sql(offer.url)}, ${sql(offer.observedAt)}) ON CONFLICT(retailer, retailer_listing_id, pincode, seller, observed_at) DO UPDATE SET product_id = excluded.product_id, source_record_id = excluded.source_record_id, mrp = excluded.mrp, selling_price = excluded.selling_price, available = excluded.available, url = excluded.url;`,
+        `INSERT INTO offers (id, product_id, source_record_id, retailer, retailer_listing_id, pincode, seller, mrp, selling_price, available, url, observed_at) VALUES (${sql(offerId)}, ${productIdSql}, ${sql(sourceRecordId)}, ${sql(offer.retailer)}, ${sql(offer.retailerListingId)}, ${sql(offer.pincode)}, ${sql(offer.seller)}, ${sql(offer.mrp)}, ${offer.sellingPrice}, ${sql(offer.available)}, ${sql(offer.url)}, ${sql(offer.observedAt)}) ON CONFLICT(id) DO UPDATE SET product_id = excluded.product_id, source_record_id = excluded.source_record_id, mrp = excluded.mrp, selling_price = excluded.selling_price, available = excluded.available, url = excluded.url;`,
       );
     }
     for (const rating of product.ratings) {

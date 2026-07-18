@@ -194,7 +194,7 @@ async function writeAutomaticArtifact(input: {
     sourceLicenseUrl: "https://opendatacommons.org/licenses/odbl/1-0/",
     sourceRetentionNotes: "Automatic publication test fixture",
     adapterVersion: source === "open_food_facts"
-      ? "off-bulk-v3"
+      ? "off-bulk-v6"
       : source === "open_food_facts_api"
         ? "off-api-enrichment-v6"
         : source === "open_food_facts_robotoff"
@@ -1865,6 +1865,16 @@ describe("Reviewed evidence bundles", () => {
 });
 
 describe("Open Food Facts bulk staging", () => {
+  it("classifies common protein-branded snack formats without burying them in other food", () => {
+    for (const name of ["Protein Puffs", "High Protein Millet Wafer", "Protein Makhana", "Protein Crisps", "Protein Snack Mix"]) {
+      const staged = normalizeOpenFoodFactsRecord({ ...indiaProduct, product_name: name }).staged;
+      expect(staged?.category).toBe("protein_snack");
+    }
+    expect(normalizeOpenFoodFactsRecord({ ...indiaProduct, product_name: "Protein Soya Chunks" }).staged?.category).toBe("soy_product");
+    expect(normalizeOpenFoodFactsRecord({ ...indiaProduct, product_name: "Protein Idly Ready Mix" }).staged?.category).toBe("breakfast");
+    expect(normalizeOpenFoodFactsRecord({ ...indiaProduct, product_name: "Protein Drink Mix" }).staged?.category).toBe("ready_to_drink");
+  });
+
   it("pins automatic publication to the exact workflow, artifact, branch, run, and head SHA", () => {
     expect(automaticPublicationContract(automaticInput())).toMatchObject({
       workflowName: "Source sync",

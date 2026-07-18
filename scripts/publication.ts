@@ -53,7 +53,7 @@ const MULTI_PREDICTION_SOURCES = new Set([
 ]);
 
 export const CURRENT_PUBLICATION_ADAPTER_VERSIONS: Readonly<Record<string, string>> = Object.freeze({
-  open_food_facts: "off-bulk-v3",
+  open_food_facts: "off-bulk-v6",
   open_food_facts_api: "off-api-enrichment-v6",
   open_food_facts_robotoff: "robotoff-api-v8",
   open_food_facts_robotoff_ingredients: "robotoff-ingredients-api-v3",

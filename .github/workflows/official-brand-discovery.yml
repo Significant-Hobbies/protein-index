@@ -1,0 +1,84 @@
+name: Official brand discovery
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "19 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  catalog:
+    name: ${{ matrix.name }} catalog snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - source: the_whole_truth_india
+            name: The Whole Truth
+            directory: the-whole-truth
+          - source: yoga_bar_india
+            name: Yoga Bar
+            directory: yoga-bar
+          - source: oziva_india
+            name: OZiva
+            directory: oziva
+          - source: muscleblaze_india
+            name: MuscleBlaze
+            directory: muscleblaze
+          - source: max_protein_india
+            name: Max Protein
+            directory: max-protein
+          - source: the_health_factory_india
+            name: The Health Factory
+            directory: the-health-factory
+          - source: nakpro_india
+            name: Nakpro Nutrition
+            directory: nakpro
+          - source: naturaltein_india
+            name: Naturaltein
+            directory: naturaltein
+          - source: asitis_india
+            name: AS-IT-IS Nutrition
+            directory: asitis
+          - source: beastlife_india
+            name: Beastlife
+            directory: beastlife
+          - source: bgreen_india
+            name: BGreen
+            directory: bgreen
+          - source: snackible_india
+            name: Snackible
+            directory: snackible
+          - source: lofoods_india
+            name: Lo! Foods
+            directory: lofoods
+          - source: protein_chef_india
+            name: Protein Chef
+            directory: protein-chef
+          - source: superyou_india
+            name: SuperYou
+            directory: superyou
+          - source: fitfeast_india
+            name: FitFeast
+            directory: fitfeast
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm data:brand-discover config/official-brand-sources.json ${{ matrix.source }} .data/official-brand/${{ matrix.directory }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: official-brand-${{ matrix.directory }}-${{ github.run_id }}
+          path: .data/official-brand/${{ matrix.directory }}
+          if-no-files-found: error
+          retention-days: 14

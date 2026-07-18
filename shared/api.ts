@@ -17,6 +17,8 @@ export interface ApiErrorBody {
   };
 }
 
+export type NutritionEvidenceStatus = EvidenceStatus | "machine_verified";
+
 export interface CatalogProduct {
   id: string;
   gtin: string | null;
@@ -32,7 +34,8 @@ export interface CatalogProduct {
   marketedReasons: string[];
   nutritionallyProteinDense: boolean | null;
   nutritionReasons: string[];
-  nutritionStatus: EvidenceStatus;
+  nutritionStatus: NutritionEvidenceStatus;
+  nutritionEvidenceAuthority: "human_reviewed_label" | "authoritative_source" | "machine_verified_label" | "first_party_structured_source" | "community" | null;
   nutritionEvidenceUrl: string | null;
   nutritionEvidenceKind: "label" | "source" | null;
   ingredientStatus: EvidenceStatus;
@@ -168,11 +171,14 @@ export interface CoverageResponse {
     nutritionLabelImages: number;
     extractionCandidates: number;
     verifiedNutrition: number;
+    machineVerifiedNutrition: number;
     unverifiedNutrition: number;
     conflictingNutrition: number;
     unverifiedIngredients: number;
     verifiedIngredients: number;
     marketedProtein: number;
+    proteinBranded: number;
+    proteinBrandedWithUsableNutrition: number;
     nutritionallyProteinDense: number;
     terminalUnavailableNutrition: number;
     terminalUnavailableIngredients: number;

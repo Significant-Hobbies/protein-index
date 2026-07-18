@@ -1,4 +1,13 @@
+---
+title: Data sources and trust
+description: Open Food Facts bootstrap, GS1 India DataKart status, hosted publication policy, and the evidence policy that binds them.
+---
+
 # Data sources and trust
+
+> This page was moved from its previous location (the old `SOURCES.md` at the
+> docs root; git rename history preserved). Its content is unchanged; the
+> README links to it at its new path.
 
 Protein Index separates source completeness from nutrition accuracy. Finishing
 an import means every record in that configured source was considered; it does

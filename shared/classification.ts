@@ -2,7 +2,7 @@ import type { NutritionEvidence, ProteinClassification } from "./types";
 import { normalizeText } from "./gtin";
 import { hasProteinEnergyConflict } from "./nutrition";
 
-export const CLASSIFIER_VERSION = "protein-v1";
+export const CLASSIFIER_VERSION = "protein-v3";
 const MARKETED_TERMS = [
   "protein",
   "high protein",
@@ -16,12 +16,15 @@ const MARKETED_TERMS = [
 ] as const;
 
 export function classifyProtein(input: {
+  brand?: string;
   name: string;
   categories: string;
   labels: string;
   nutrition: NutritionEvidence;
 }): ProteinClassification {
-  const text = normalizeText(`${input.name} ${input.categories} ${input.labels}`);
+  // Community category tags help discovery, but they are not packaging evidence.
+  // Branding must be supported by the product name or explicit label.
+  const text = normalizeText(`${input.brand ?? ""} ${input.name} ${input.labels}`);
   const marketedReasons = MARKETED_TERMS.filter((term) => text.includes(normalizeText(term)));
   const nutritionReasons: string[] = [];
   let nutritionallyDense: boolean | null = null;
