@@ -8,7 +8,7 @@ import { normalizeGtin, normalizeText, parseQuantity } from "../../shared/gtin";
 import { emptyNutrition, hasNutritionErrors, validateNutrition } from "../../shared/nutrition";
 import type { SourceManifest, StagedOffer, StagedProduct } from "../../shared/types";
 
-export const OFFICIAL_BRAND_SITEMAP_ADAPTER_VERSION = "official-brand-sitemap-v18";
+export const OFFICIAL_BRAND_SITEMAP_ADAPTER_VERSION = "official-brand-sitemap-v19";
 export const OFFICIAL_BRAND_USER_AGENT = "ProteinIndexCatalogBot/1.0";
 export const DEFAULT_MAX_PRODUCT_PAGES = 2_000;
 export const DEFAULT_MAX_SITEMAP_DEPTH = 3;
@@ -188,13 +188,19 @@ function fullResolutionLabelImage(value: string | undefined, pageUrl: string): s
   return url.toString();
 }
 
+function isLogoImage(image: string, attributes: Record<string, string>): boolean {
+  const filename = new URL(image).pathname.split("/").at(-1) ?? "";
+  const description = [filename, attributes.alt, attributes.title, attributes["data-alt"], attributes["aria-label"], attributes["data-media-alt"]].filter(Boolean).join(" ");
+  return /(?:^|[\s_.-])logo(?:[\s_.-]|$)/i.test(description);
+}
+
 function labelledPageImage(html: string, pageUrl: string, pattern: RegExp): string | null {
   for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
     const attributes = microdataAttributes(match[0]);
     const description = [attributes.alt, attributes.title, attributes["data-alt"], attributes["aria-label"], attributes["data-media-alt"]].filter(Boolean).join(" ");
     if (!pattern.test(description)) continue;
     const image = fullResolutionLabelImage(attributes.src ?? attributes["data-src"] ?? attributes["data-zoom-image"], pageUrl);
-    if (image) return image;
+    if (image && !isLogoImage(image, attributes)) return image;
   }
   return null;
 }
@@ -238,7 +244,7 @@ function sectionLabelledPageImage(html: string, pageUrl: string, pattern: RegExp
     if (!imageMatch) continue;
     const image = microdataAttributes(imageMatch[0]);
     const url = fullResolutionLabelImage(image.src ?? image["data-src"] ?? image["data-zoom-image"], pageUrl);
-    if (url) return url;
+    if (url && !isLogoImage(url, image)) return url;
   }
   return null;
 }

@@ -19,6 +19,7 @@ const nutritionTablePage = `${microdataPage}<p>Nutrition facts</p><p>| Nutrient 
 const nutritionLabelTablePage = `${microdataPage}<p>Nutrition Label | PER 100g | PER 40g<br><strong>Calories</strong> | 422kcal | 169kcal<br><strong>Protein</strong> | 27g | 11g<br>Carbohydrate | 48g | 19g<br>Total Fat | 9g | 4g</p>`;
 const multipleNutritionTablesPage = `${nutritionTablePage}<p>| Nutrient | Per 100g | Per 40g |<br>| --- | --- | --- |<br>| Energy | 500 kcal | 200 kcal |<br>| Protein | 20 g | 8 g |</p>`;
 const configuredNutritionImagePage = `${page}<img src="https://cdn.example/nivalues_45.png?v=1&width=100" alt="">`;
+const nutritionLogoBeforeLabelPage = `${page}<img src="https://cdn.example/nutrition-logo.png" alt="Nutrition logo"><img src="https://cdn.example/puffs-nutrition.jpg" alt="Nutrition facts panel">`;
 const muscleBlazeHighlightsPage = `${microdataPage}<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"data":{"results":{"nut_info_grp":[{"val":"26 g","dis_nm":"Protein"},{"val":"140.08","dis_nm":"Kcal"},{"val":"74.0","dis_nm":"Protein % per Serving"}]}}}}}</script>`;
 
 describe("official brand sitemap discovery", () => {
@@ -82,6 +83,11 @@ describe("official brand sitemap discovery", () => {
     expect(product).toMatchObject({ name: "Acme Whey Protein", flavour: "Chocolate • 1 kg", netQuantityGrams: 1000, nutritionImageUrl: "https://cdn.example/whey-nutrition.jpg", ingredientImageUrl: "https://cdn.example/whey-ingredients.jpg", offers: [{ sellingPrice: 999, available: true }], nutrition: { status: "missing" } });
     expect(product?.rawEvidence).toHaveProperty("productMicrodata.name", "Acme Whey Protein");
     expect(product?.rawEvidence).toHaveProperty("labels.nutritionImageUrl", "https://cdn.example/whey-nutrition.jpg");
+  });
+
+  it("skips a nutrition-logo asset and retains the actual label image", () => {
+    const product = stagedOfficialBrandProduct({ source, pageUrl: "https://brand.example/products/puffs", html: nutritionLogoBeforeLabelPage, observedAt: "2026-07-18T00:00:00.000Z" });
+    expect(product?.nutritionImageUrl).toBe("https://cdn.example/puffs-nutrition.jpg");
   });
 
   it("accepts page-bound Shopify product metadata without using a storefront JSON endpoint", () => {
