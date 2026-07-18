@@ -18,6 +18,6 @@
 
 ## 4. Verification and release
 
-- [ ] 4.1 Run a local rehearsal from the latest complete official-brand artifacts and inspect exact deltas.
-- [ ] 4.2 Run focused tests, full `pnpm check`, OpenSpec validation, and workflow syntax checks.
-- [ ] 4.3 Publish only the reviewed complete cohort, then verify live API coverage and product lookup without claiming market completeness.
+- [x] 4.1 Run a local rehearsal from the latest complete official-brand artifacts and inspect exact deltas.
+- [x] 4.2 Run focused tests, full `pnpm check`, OpenSpec validation, and workflow syntax checks.
+- [x] 4.3 Publish only the reviewed complete cohort, then verify live API coverage and product lookup without claiming market completeness.
