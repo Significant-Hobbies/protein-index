@@ -1,0 +1,2225 @@
+{
+  "schemaVersion": 1,
+  "manifestSha256": "da1f355d9b34619378a6fcd1604156fcf1136de0d2e965a390243a5145522872",
+  "adapterVersion": "machine-label-v9",
+  "cases": [
+    {
+      "id": "teriyaki-qualifier-rejection",
+      "errors": [],
+      "artifact": {
+        "schemaVersion": 1,
+        "adapterVersion": "machine-label-v9",
+        "image": {
+          "path": "teriyaki-label.jpg",
+          "contentSha256": "2041a97e2170e86fac072ea7dbb2e055a9a3d851e659ad3b76bda4d793aad055",
+          "byteLength": 3530271
+        },
+        "generatedAt": "2026-07-18T16:56:47.206Z",
+        "vision": {
+          "engine": "macos_vision",
+          "version": "VNRecognizeTextRequest.accurate",
+          "lines": [
+            {
+              "text": "sauce with sugar, dark soy sauce,",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.16255874063383888,
+                "y": 0.7673709834799427,
+                "width": 0.5022408217980117,
+                "height": 0.045849338410392626
+              }
+            },
+            {
+              "text": "ginger, lime and mirin rice wine",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.16046027424051762,
+                "y": 0.7377997094106505,
+                "width": 0.4798526662998099,
+                "height": 0.05902296777755489
+              }
+            },
+            {
+              "text": "Contains Alcohol",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.17194053311816068,
+                "y": 0.7039291842463444,
+                "width": 0.2561475360204304,
+                "height": 0.043068530067564836
+              }
+            },
+            {
+              "text": "SERVING Suitable straight from the",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.16585136288854352,
+                "y": 0.6639922850937389,
+                "width": 0.5225438112935061,
+                "height": 0.04093186249808667
+              }
+            },
+            {
+              "text": "bottle, or for a more intense flavour",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.16577451882292502,
+                "y": 0.6362103571767145,
+                "width": 0.5246834729714368,
+                "height": 0.04584657199799069
+              }
+            },
+            {
+              "text": "marinate overnight.",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.16983622048227487,
+                "y": 0.6159889481444328,
+                "width": 0.29966326113100406,
+                "height": 0.034959134601411423
+              }
+            },
+            {
+              "text": "NUTRITION Typical values per 100g:",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.17211648352338277,
+                "y": 0.5856186132188463,
+                "width": 0.5219320872473339,
+                "height": 0.03456052522810671
+              }
+            },
+            {
+              "text": "Energy 733kJ/173kcal • Fat 0.5g,",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.17351746400657508,
+                "y": 0.5545714273572564,
+                "width": 0.47430629831142523,
+                "height": 0.04114266804286415
+              }
+            },
+            {
+              "text": "of which saturates <0.1g • Carbohydrate",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.17368743822286345,
+                "y": 0.5333351157731631,
+                "width": 0.5480037467189567,
+                "height": 0.037165202791728746
+              }
+            },
+            {
+              "text": "40.1g, of which sugars 35.3g ;",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.17586553860699045,
+                "y": 0.5062567234851278,
+                "width": 0.4410500904870412,
+                "height": 0.036934640672471764
+              }
+            },
+            {
+              "text": "Fibre <0.5g • Protein 1.9g • Salt 2.90g.",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.1774943565374516,
+                "y": 0.4820926253727461,
+                "width": 0.5247175832274099,
+                "height": 0.04053092759753041
+              }
+            },
+            {
+              "text": "STORAGE Store in a cool, dry place.",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.1795536811189814,
+                "y": 0.4537036870457902,
+                "width": 0.5188033896148521,
+                "height": 0.038716335145253966
+              }
+            },
+            {
+              "text": "Once opened, refrigerate and eat within",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.18104550262890198,
+                "y": 0.41898405951814277,
+                "width": 0.5418838420242229,
+                "height": 0.056998907573639346
+              }
+            },
+            {
+              "text": "4 weeks.",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.17997649269527238,
+                "y": 0.40445281761756524,
+                "width": 0.11568158265774842,
+                "height": 0.032596966576954656
+              }
+            },
+            {
+              "text": "Made in the UK. SC6333",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.18604650355196423,
+                "y": 0.3793604650351907,
+                "width": 0.37209303921492637,
+                "height": 0.026162790873693997
+              }
+            },
+            {
+              "text": "© M&S plc PO Box 3339",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.18568417242775687,
+                "y": 0.3494670236064815,
+                "width": 0.36102512904575895,
+                "height": 0.03293178573487299
+              }
+            },
+            {
+              "text": "CH99 9QS United Kingdom",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.18587109675086555,
+                "y": 0.3274944121682797,
+                "width": 0.39950044823702047,
+                "height": 0.030140025275094184
+              }
+            },
+            {
+              "text": "M&S (Ireland) Ltd",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.18800693264321222,
+                "y": 0.28525218902328897,
+                "width": 0.2437595387615224,
+                "height": 0.03965956445724239
+              }
+            },
+            {
+              "text": "PO Box 13022",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.18876421886621025,
+                "y": 0.2620349364288046,
+                "width": 0.20068026345873635,
+                "height": 0.0400823600708492
+              }
+            },
+            {
+              "text": "Dublin 2 Ireland",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.19096108734869371,
+                "y": 0.23733479981666838,
+                "width": 0.22398495547985903,
+                "height": 0.04127879748268737
+              }
+            },
+            {
+              "text": "06kcal",
+              "confidence": 0.30000001192092896,
+              "boundingBox": {
+                "x": 0.12245967128628106,
+                "y": 0.19129085560035353,
+                "width": 0.0675675629307984,
+                "height": 0.04407605292305117
+              }
+            },
+            {
+              "text": "marksandspencer.com",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.19378730755041615,
+                "y": 0.20801955941518557,
+                "width": 0.32261548723493305,
+                "height": 0.04273439967443071
+              }
+            },
+            {
+              "text": "0024 90",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7093023175474632,
+                "y": 0.20348837574431344,
+                "width": 0.02131784529913039,
+                "height": 0.14244185553656685
+              }
+            },
+            {
+              "text": "your Rl",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.1298579667457326,
+                "y": 0.16284922663895318,
+                "width": 0.0609359589834062,
+                "height": 0.040697676794869575
+              }
+            },
+            {
+              "text": "305 g e",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.1808879803772721,
+                "y": 0.1366996895364756,
+                "width": 0.2439563488834119,
+                "height": 0.08612504459562753
+              }
+            },
+            {
+              "text": "e 13kcal",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.12012318029878459,
+                "y": 0.12362217191422531,
+                "width": 0.07558139922126893,
+                "height": 0.054917967508709586
+              }
+            },
+            {
+              "text": "CAP ON",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.29186004214302375,
+                "y": 0.11533873955133123,
+                "width": 0.08320319463336279,
+                "height": 0.019665271516830174
+              }
+            },
+            {
+              "text": "BOTTLE Recycle",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.24316968482627221,
+                "y": 0.08472214381360765,
+                "width": 0.1911842911331742,
+                "height": 0.043013848955669065
+              }
+            }
+          ]
+        },
+        "model": {
+          "model": "qwen3-vl:32b-instruct",
+          "digest": "c9a60b1a1a13df1d07bf83fbb04662847c533646554e6d94dff6dbd5c6d736ae",
+          "promptHash": "04743196eedb12182e35bc7c9e19b3fe16bbc6ca38946968135c2238eaad269a",
+          "raw": "{\n  \"basis\": \"per_100g\",\n  \"calories_kcal\": 173,\n  \"protein_g\": 1.9,\n  \"carbohydrate_g\": 40.1,\n  \"sugars_g\": 35.3,\n  \"fat_g\": 0.5,\n  \"saturated_fat_g\": 0.1,\n  \"fibre_g\": 0.5,\n  \"sodium_mg\": null,\n  \"ingredients_raw\": \"sauce with sugar, dark soy sauce, ginger, lime and mirin rice wine\",\n  \"unreadable_fields\": [\n    \"sodium_mg\"\n  ]\n}",
+          "basis": "per_100g",
+          "nutrition": {
+            "calories": 173,
+            "proteinGrams": 1.9,
+            "carbohydrateGrams": 40.1,
+            "sugarGrams": 35.3,
+            "fatGrams": 0.5,
+            "saturatedFatGrams": 0.1,
+            "fibreGrams": 0.5,
+            "sodiumMg": null
+          },
+          "ingredientsRaw": "sauce with sugar, dark soy sauce, ginger, lime and mirin rice wine",
+          "unreadableFields": [
+            "sodium_mg"
+          ]
+        },
+        "nutrition": {
+          "accepted": true,
+          "reasons": [],
+          "basis": "per_100g",
+          "nutrition": {
+            "calories": 173,
+            "proteinGrams": 1.9,
+            "carbohydrateGrams": null,
+            "sugarGrams": 35.3,
+            "fatGrams": 0.5,
+            "saturatedFatGrams": null,
+            "fibreGrams": null,
+            "sodiumMg": null
+          },
+          "ingredientsRaw": null
+        },
+        "ingredients": {
+          "accepted": false,
+          "reasons": [
+            "ingredient_declaration_incomplete",
+            "ingredient_text_edge_clipped"
+          ],
+          "basis": "unknown",
+          "nutrition": null,
+          "ingredientsRaw": null
+        }
+      }
+    },
+    {
+      "id": "standard-per-100g-table",
+      "errors": [],
+      "artifact": {
+        "schemaVersion": 1,
+        "adapterVersion": "machine-label-v9",
+        "image": {
+          "path": "55d06997a4d52b900dc4a72cb1e09134408bb024100cf45c9e6b91c14ace9d99.jpg",
+          "contentSha256": "55d06997a4d52b900dc4a72cb1e09134408bb024100cf45c9e6b91c14ace9d99",
+          "byteLength": 36171
+        },
+        "generatedAt": "2026-07-18T16:57:04.591Z",
+        "vision": {
+          "engine": "macos_vision",
+          "version": "VNRecognizeTextRequest.accurate",
+          "lines": [
+            {
+              "text": "NUTRITIONAL INFORMATION (Approximate values)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.06667910432827971,
+                "y": 0.912506482845514,
+                "width": 0.8723432367498224,
+                "height": 0.07557476758956905
+              }
+            },
+            {
+              "text": "No. of Servings per pack 40 (Approx.), Serving Measure: 1 cap (25 g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.06183048835369511,
+                "y": 0.8635297286909047,
+                "width": 0.8821940855546432,
+                "height": 0.06330594539642331
+              }
+            },
+            {
+              "text": "NUTRIENTS",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07937626157050696,
+                "y": 0.8143798690845498,
+                "width": 0.21056565371426667,
+                "height": 0.04624026298522943
+              }
+            },
+            {
+              "text": "ẠỊPer 100 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.4659090905513468,
+                "y": 0.8000000000925926,
+                "width": 0.19318181818181818,
+                "height": 0.04999999999999993
+              }
+            },
+            {
+              "text": "Per Serve % RDA-",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.704545453715035,
+                "y": 0.8050000001730769,
+                "width": 0.2272727272727273,
+                "height": 0.04500000000000004
+              }
+            },
+            {
+              "text": "Energy (kcal)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07327821457292995,
+                "y": 0.7436587545598552,
+                "width": 0.23987104675986554,
+                "height": 0.04959260225296025
+              }
+            },
+            {
+              "text": "312",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5227272724431817,
+                "y": 0.7450000001875,
+                "width": 0.07954545454545459,
+                "height": 0.04500000000000004
+              }
+            },
+            {
+              "text": "4",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.8124999997159091,
+                "y": 0.75000000035,
+                "width": 0.02840909090909094,
+                "height": 0.03499999999999992
+              }
+            },
+            {
+              "text": "Protein (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07289892583929841,
+                "y": 0.6912700430456042,
+                "width": 0.2009805115786466,
+                "height": 0.046088776588439906
+              }
+            },
+            {
+              "text": "53",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.534090908838384,
+                "y": 0.6900000002222222,
+                "width": 0.05681818181818177,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "Carbohydrate (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07373465141318979,
+                "y": 0.6293912554669499,
+                "width": 0.3013943325389515,
+                "height": 0.05121748924255376
+              }
+            },
+            {
+              "text": "30.2",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5170454542424242,
+                "y": 0.6350000001333334,
+                "width": 0.09090909090909094,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "Total Sugars (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07283293549370852,
+                "y": 0.5738597602981615,
+                "width": 0.28066507252779876,
+                "height": 0.05190376996994017
+              }
+            },
+            {
+              "text": "2.9",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5227272724431818,
+                "y": 0.5800000001818182,
+                "width": 0.07386363636363635,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "Added Sugars (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07287214083658554,
+                "y": 0.5169093447167303,
+                "width": 0.30887200615622773,
+                "height": 0.05379887342453005
+              }
+            },
+            {
+              "text": "Dietary Fibre (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07946245187820468,
+                "y": 0.45963220127970106,
+                "width": 0.2842569134452126,
+                "height": 0.05073559761047364
+              }
+            },
+            {
+              "text": "Total Fat (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.0778288839487344,
+                "y": 0.40694583689829233,
+                "width": 0.2192638570612127,
+                "height": 0.04993591308593748
+              }
+            },
+            {
+              "text": "Saturated Fat (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.0784479982754224,
+                "y": 0.34944568751383687,
+                "width": 0.2975891069932417,
+                "height": 0.05398495674133297
+              }
+            },
+            {
+              "text": "Trans Fat (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07885810428128615,
+                "y": 0.29252584941055715,
+                "width": 0.2229656089435924,
+                "height": 0.05494830131530759
+              }
+            },
+            {
+              "text": "15.5",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5113636360795455,
+                "y": 0.4650000001607143,
+                "width": 0.09090909090909094,
+                "height": 0.04499999999999993
+              }
+            },
+            {
+              "text": "1.0",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5227272728693181,
+                "y": 0.41000000056249997,
+                "width": 0.06818181818181823,
+                "height": 0.04500000000000004
+              }
+            },
+            {
+              "text": "0.3",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5227272724690083,
+                "y": 0.3550000001818182,
+                "width": 0.06818181818181812,
+                "height": 0.039999999999999925
+              }
+            },
+            {
+              "text": "0.1",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5227272724173554,
+                "y": 0.30000000018181827,
+                "width": 0.06818181818181812,
+                "height": 0.039999999999999925
+              }
+            },
+            {
+              "text": "13",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7897727269570706,
+                "y": 0.4650000002222222,
+                "width": 0.05681818181818188,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "0.4",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7840909088068183,
+                "y": 0.4100000001666666,
+                "width": 0.06818181818181812,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "0.3",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7784090910227274,
+                "y": 0.35500000045,
+                "width": 0.06818181818181812,
+                "height": 0.04499999999999993
+              }
+            },
+            {
+              "text": "1.3",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7784090906250001,
+                "y": 0.30000000022499984,
+                "width": 0.06818181818181823,
+                "height": 0.04500000000000004
+              }
+            },
+            {
+              "text": "Cholesterol (mg)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07850342972462876,
+                "y": 0.241875785449715,
+                "width": 0.29152209108526056,
+                "height": 0.04829637527465824
+              }
+            },
+            {
+              "text": "Sodium (mg)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07791183587986404,
+                "y": 0.18770363509747423,
+                "width": 0.23559767549688165,
+                "height": 0.05107977390289309
+              }
+            },
+            {
+              "text": "441.1",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.4999999997159091,
+                "y": 0.19500000011764707,
+                "width": 0.10795454545454547,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "Calcium (mg)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07839400416641483,
+                "y": 0.13650287665991856,
+                "width": 0.2413238828832453,
+                "height": 0.048086557388305695
+              }
+            },
+            {
+              "text": "405",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5170454542613636,
+                "y": 0.14000000015384617,
+                "width": 0.07386363636363635,
+                "height": 0.039999999999999925
+              }
+            },
+            {
+              "text": "Iron (mg)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07954545410353536,
+                "y": 0.08500000012500009,
+                "width": 0.17045454545454544,
+                "height": 0.04500000000000004
+              }
+            },
+            {
+              "text": "22.4",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5055866726471583,
+                "y": 0.08983201278570208,
+                "width": 0.09109938144683838,
+                "height": 0.040335974693298304
+              }
+            },
+            {
+              "text": "10",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7784090906250001,
+                "y": 0.14500000024999993,
+                "width": 0.05681818181818188,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "29",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7784090906250001,
+                "y": 0.09500000019444443,
+                "width": 0.051136363636363646,
+                "height": 0.03500000000000003
+              }
+            },
+            {
+              "text": "-Recommended Dietary Allowance for Average Adult per day.",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07954545425505057,
+                "y": 0.03500000001666659,
+                "width": 0.8068181818181819,
+                "height": 0.04500000000000004
+              }
+            }
+          ]
+        },
+        "model": {
+          "model": "qwen3-vl:32b-instruct",
+          "digest": "c9a60b1a1a13df1d07bf83fbb04662847c533646554e6d94dff6dbd5c6d736ae",
+          "promptHash": "04743196eedb12182e35bc7c9e19b3fe16bbc6ca38946968135c2238eaad269a",
+          "raw": "{\n  \"basis\": \"per_100g\",\n  \"calories_kcal\": 312,\n  \"protein_g\": 53,\n  \"carbohydrate_g\": 30.2,\n  \"sugars_g\": 2.9,\n  \"fat_g\": 1.0,\n  \"saturated_fat_g\": 0.3,\n  \"fibre_g\": 15.5,\n  \"sodium_mg\": 441.1,\n  \"ingredients_raw\": null,\n  \"unreadable_fields\": []\n}",
+          "basis": "per_100g",
+          "nutrition": {
+            "calories": 312,
+            "proteinGrams": 53,
+            "carbohydrateGrams": 30.2,
+            "sugarGrams": 2.9,
+            "fatGrams": 1,
+            "saturatedFatGrams": 0.3,
+            "fibreGrams": 15.5,
+            "sodiumMg": 441.1
+          },
+          "ingredientsRaw": null,
+          "unreadableFields": []
+        },
+        "nutrition": {
+          "accepted": true,
+          "reasons": [],
+          "basis": "per_100g",
+          "nutrition": {
+            "calories": 312,
+            "proteinGrams": 53,
+            "carbohydrateGrams": 30.2,
+            "sugarGrams": 2.9,
+            "fatGrams": 1,
+            "saturatedFatGrams": 0.3,
+            "fibreGrams": 15.5,
+            "sodiumMg": 441.1
+          },
+          "ingredientsRaw": null
+        },
+        "ingredients": {
+          "accepted": false,
+          "reasons": [
+            "ingredient_declaration_incomplete",
+            "ingredient_text_edge_clipped"
+          ],
+          "basis": "unknown",
+          "nutrition": null,
+          "ingredientsRaw": null
+        }
+      }
+    },
+    {
+      "id": "complete-ingredients-and-nutrition",
+      "errors": [],
+      "artifact": {
+        "schemaVersion": 1,
+        "adapterVersion": "machine-label-v9",
+        "image": {
+          "path": "cda8aa2d032f02e1bc4ad13e3147cde85d836840de4279abc23b30e67211e737.jpg",
+          "contentSha256": "cda8aa2d032f02e1bc4ad13e3147cde85d836840de4279abc23b30e67211e737",
+          "byteLength": 34138
+        },
+        "generatedAt": "2026-07-18T16:57:21.834Z",
+        "vision": {
+          "engine": "macos_vision",
+          "version": "VNRecognizeTextRequest.accurate",
+          "lines": [
+            {
+              "text": "Ingredients: Milk Solids & Vinegar",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.05914882774264773,
+                "y": 0.8592682226056554,
+                "width": 0.8947826131184896,
+                "height": 0.08077722549438482
+              }
+            },
+            {
+              "text": "NUTRITIONAL INFORMATION (Approx)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.05916902677568108,
+                "y": 0.7983949644715356,
+                "width": 0.875237528483073,
+                "height": 0.06338540077209476
+              }
+            },
+            {
+              "text": "4 Servings per pack",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.06584073177193588,
+                "y": 0.7566707780326287,
+                "width": 0.32823300679524736,
+                "height": 0.03877097845077504
+              }
+            },
+            {
+              "text": "Serving size 50 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07254959407226098,
+                "y": 0.7187765023817128,
+                "width": 0.2747512054443359,
+                "height": 0.03385675191879267
+              }
+            },
+            {
+              "text": "AMOUNT PER 100 g*",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.08666666633908046,
+                "y": 0.6600000000387931,
+                "width": 0.3933333333333334,
+                "height": 0.04499999999999993
+              }
+            },
+            {
+              "text": "Energy (kcal)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.06644281989708593,
+                "y": 0.6091654742286348,
+                "width": 0.22711435953776038,
+                "height": 0.03666905164718626
+              }
+            },
+            {
+              "text": "203.8",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.40666666633333337,
+                "y": 0.6150000001153846,
+                "width": 0.09999999999999998,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "Protein (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.0666666663333333,
+                "y": 0.5700000000535714,
+                "width": 0.1866666666666667,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "25.0",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.413333333,
+                "y": 0.5750000001041666,
+                "width": 0.08000000000000002,
+                "height": 0.025000000000000133
+              }
+            },
+            {
+              "text": "Total Fat (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.059938494030882125,
+                "y": 0.524787883816215,
+                "width": 0.2134563446044922,
+                "height": 0.035424232482910156
+              }
+            },
+            {
+              "text": "9.0",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.4199999996666667,
+                "y": 0.530000000125,
+                "width": 0.06666666666666665,
+                "height": 0.02499999999999991
+              }
+            },
+            {
+              "text": "Saturated Fat (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.06666666633333333,
+                "y": 0.4850000000357143,
+                "width": 0.28,
+                "height": 0.029999999999999916
+              }
+            },
+            {
+              "text": "<6.1",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.4199999996666667,
+                "y": 0.48500000016666667,
+                "width": 0.07333333333333336,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "Trans Fat (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.06666666625,
+                "y": 0.44000000007291673,
+                "width": 0.21333333333333332,
+                "height": 0.03500000000000003
+              }
+            },
+            {
+              "text": "0.0",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.41999999970370366,
+                "y": 0.44500000013888885,
+                "width": 0.06666666666666671,
+                "height": 0.025000000000000022
+              }
+            },
+            {
+              "text": "Cholesterol (mg)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.0726160464983673,
+                "y": 0.39768371063904695,
+                "width": 0.274639409383138,
+                "height": 0.03616303205490112
+              }
+            },
+            {
+              "text": "24.0",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.413333333,
+                "y": 0.4050000001041667,
+                "width": 0.08000000000000002,
+                "height": 0.025000000000000022
+              }
+            },
+            {
+              "text": "Carbohydrates (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07333333300000001,
+                "y": 0.36000000003409083,
+                "width": 0.29333333333333333,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "5.7",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.42666666633333333,
+                "y": 0.36500000015625,
+                "width": 0.053333333333333344,
+                "height": 0.025000000000000022
+              }
+            },
+            {
+              "text": "Total Sugars (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07317974053368119,
+                "y": 0.31436347251504315,
+                "width": 0.25364051818847655,
+                "height": 0.03627305507659917
+              }
+            },
+            {
+              "text": "5.7",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.42666666633333333,
+                "y": 0.32000000018749997,
+                "width": 0.053333333333333344,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "Added Sugars (g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.06666666634126983,
+                "y": 0.27500000003571434,
+                "width": 0.2866666666666667,
+                "height": 0.029999999999999916
+              }
+            },
+            {
+              "text": "0.0",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.42666666629166666,
+                "y": 0.27500000018750004,
+                "width": 0.06,
+                "height": 0.029999999999999916
+              }
+            },
+            {
+              "text": "Sodium (mg)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07333333297777778,
+                "y": 0.23500000005,
+                "width": 0.21333333333333332,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "125",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.4199999998333334,
+                "y": 0.2350000002499999,
+                "width": 0.06,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "Calcium (mg)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07333333298924731,
+                "y": 0.19000000005645168,
+                "width": 0.21333333333333332,
+                "height": 0.03499999999999992
+              }
+            },
+            {
+              "text": "529",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.42,
+                "y": 0.19500000037499998,
+                "width": 0.06666666666666671,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "50 g*",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6000000004666666,
+                "y": 0.66000000045,
+                "width": 0.11333333333333329,
+                "height": 0.04500000000000004
+              }
+            },
+            {
+              "text": "101.9",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6066666663333333,
+                "y": 0.6150000000961539,
+                "width": 0.08666666666666667,
+                "height": 0.025000000000000022
+              }
+            },
+            {
+              "text": "12.5",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6199999996296297,
+                "y": 0.5700000001666667,
+                "width": 0.06666666666666665,
+                "height": 0.029999999999999916
+              }
+            },
+            {
+              "text": "4.5",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6200000001111111,
+                "y": 0.5300000005,
+                "width": 0.05999999999999994,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "3.1",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6199999996666666,
+                "y": 0.48000000021875,
+                "width": 0.053333333333333344,
+                "height": 0.03500000000000003
+              }
+            },
+            {
+              "text": "0.0",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6199999996666666,
+                "y": 0.44500000013888885,
+                "width": 0.06000000000000005,
+                "height": 0.025000000000000022
+              }
+            },
+            {
+              "text": "12.0",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6133333329666667,
+                "y": 0.4050000001249999,
+                "width": 0.07333333333333325,
+                "height": 0.025000000000000022
+              }
+            },
+            {
+              "text": "2.9",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6199999996666666,
+                "y": 0.3600000002142858,
+                "width": 0.06000000000000005,
+                "height": 0.029999999999999916
+              }
+            },
+            {
+              "text": "2.9",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6199999996666666,
+                "y": 0.3200000001562501,
+                "width": 0.053333333333333344,
+                "height": 0.025000000000000022
+              }
+            },
+            {
+              "text": "0.0",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6133333330416667,
+                "y": 0.28000000015625004,
+                "width": 0.06000000000000005,
+                "height": 0.025000000000000022
+              }
+            },
+            {
+              "text": "62.5",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6066666663333332,
+                "y": 0.23500000015,
+                "width": 0.08000000000000007,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "264.5",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6000000006666666,
+                "y": 0.1950000005,
+                "width": 0.09333333333333338,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "% RDA*",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7599999996515152,
+                "y": 0.6600000000909091,
+                "width": 0.15333333333333332,
+                "height": 0.039999999999999925
+              }
+            },
+            {
+              "text": "5.1%",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7999999996666667,
+                "y": 0.6100000001249999,
+                "width": 0.08000000000000007,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "6.7%",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7933333329393939,
+                "y": 0.5300000001136365,
+                "width": 0.08666666666666678,
+                "height": 0.02499999999999991
+              }
+            },
+            {
+              "text": "13.8%",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7933333328888889,
+                "y": 0.48500000016666667,
+                "width": 0.09333333333333338,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "0.0%",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.793333333,
+                "y": 0.4450000000961538,
+                "width": 0.08666666666666678,
+                "height": 0.025000000000000022
+              }
+            },
+            {
+              "text": "0.0%",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7866666661666667,
+                "y": 0.27500000018750004,
+                "width": 0.09333333333333327,
+                "height": 0.029999999999999916
+              }
+            },
+            {
+              "text": "<3.1%",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.78,
+                "y": 0.2350000002499999,
+                "width": 0.09333333333333327,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "Issai",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.20000000141666666,
+                "y": 0.11000000081249994,
+                "width": 0.18000000000000002,
+                "height": 0.06499999999999995
+              }
+            },
+            {
+              "text": "Lic. No. 10017042003191 8",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.07333333299509803,
+                "y": 0.07000000002205875,
+                "width": 0.45999999999999996,
+                "height": 0.030000000000000027
+              }
+            },
+            {
+              "text": "904083 300106",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5533333330666667,
+                "y": 0.07000000029999998,
+                "width": 0.36,
+                "height": 0.030000000000000027
+              }
+            }
+          ]
+        },
+        "model": {
+          "model": "qwen3-vl:32b-instruct",
+          "digest": "c9a60b1a1a13df1d07bf83fbb04662847c533646554e6d94dff6dbd5c6d736ae",
+          "promptHash": "04743196eedb12182e35bc7c9e19b3fe16bbc6ca38946968135c2238eaad269a",
+          "raw": "{\n  \"basis\": \"per_100g\",\n  \"calories_kcal\": 203.8,\n  \"protein_g\": 25.0,\n  \"carbohydrate_g\": 5.7,\n  \"sugars_g\": 5.7,\n  \"fat_g\": 9.0,\n  \"saturated_fat_g\": 6.1,\n  \"fibre_g\": null,\n  \"sodium_mg\": 125,\n  \"ingredients_raw\": \"Milk Solids & Vinegar\",\n  \"unreadable_fields\": []\n}",
+          "basis": "per_100g",
+          "nutrition": {
+            "calories": 203.8,
+            "proteinGrams": 25,
+            "carbohydrateGrams": 5.7,
+            "sugarGrams": 5.7,
+            "fatGrams": 9,
+            "saturatedFatGrams": 6.1,
+            "fibreGrams": null,
+            "sodiumMg": 125
+          },
+          "ingredientsRaw": "Milk Solids & Vinegar",
+          "unreadableFields": []
+        },
+        "nutrition": {
+          "accepted": true,
+          "reasons": [],
+          "basis": "per_100g",
+          "nutrition": {
+            "calories": 203.8,
+            "proteinGrams": 25,
+            "carbohydrateGrams": 5.7,
+            "sugarGrams": null,
+            "fatGrams": 9,
+            "saturatedFatGrams": 6.1,
+            "fibreGrams": null,
+            "sodiumMg": 125
+          },
+          "ingredientsRaw": null
+        },
+        "ingredients": {
+          "accepted": true,
+          "reasons": [],
+          "basis": "unknown",
+          "nutrition": null,
+          "ingredientsRaw": "Milk Solids & Vinegar"
+        }
+      }
+    },
+    {
+      "id": "vertical-table-cropped-ingredients",
+      "errors": [],
+      "artifact": {
+        "schemaVersion": 1,
+        "adapterVersion": "machine-label-v9",
+        "image": {
+          "path": "label.jpg",
+          "contentSha256": "1239a37fa24f273e380e1569d95dcd254a9ceaa93ab40b8ae50d8a3806124820",
+          "byteLength": 563618
+        },
+        "generatedAt": "2026-07-18T16:57:57.759Z",
+        "vision": {
+          "engine": "macos_vision",
+          "version": "VNRecognizeTextRequest.accurate",
+          "lines": [
+            {
+              "text": "INGREDIENTS: Casein, Sucrose, Precooked Rice Flour, Edble Vegetatle Fr Cn",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.04917560607120281,
+                "y": 0.8364439756796597,
+                "width": 0.8910534582405447,
+                "height": 0.16458174111186608
+              }
+            },
+            {
+              "text": "Solids, Bengal Gram, Raising Agent [500(ii)), Natural Colour (150 c) Emusfie (",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.04883327984998494,
+                "y": 0.7919976574534622,
+                "width": 0.8921080972546729,
+                "height": 0.15932009750989418
+              }
+            },
+            {
+              "text": "Vitamins, Acidity Regulator (525) and Antioxidant (304).",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.0483854111199646,
+                "y": 0.7955487930026575,
+                "width": 0.6660476399359302,
+                "height": 0.09100735831480566
+              }
+            },
+            {
+              "text": "CONTAINS PERMITTED NATURAL COLOUR AND ADDED ARTIFICIAL FURRNE",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.04646986316762068,
+                "y": 0.7085101220738936,
+                "width": 0.8937186838310455,
+                "height": 0.1438281897342566
+              }
+            },
+            {
+              "text": "SUBSTANCES (VANILLA).",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.04764791649408713,
+                "y": 0.7291657904085767,
+                "width": 0.3059856379143545,
+                "height": 0.05154105577230128
+              }
+            },
+            {
+              "text": "Contains: Soy.",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.04774346234630596,
+                "y": 0.6958473024045142,
+                "width": 0.16191798058625695,
+                "height": 0.03378031030788109
+              }
+            },
+            {
+              "text": "APPROXIMATE COMPOSITION (per 100 g)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.048759627601284626,
+                "y": 0.6383122521226918,
+                "width": 0.5278026188645407,
+                "height": 0.0598911315556101
+              }
+            },
+            {
+              "text": "Protein (mainly Casein)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.0461962555265879,
+                "y": 0.6079776559058875,
+                "width": 0.253595976071937,
+                "height": 0.03762824419144739
+              }
+            },
+            {
+              "text": "30.00 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.3904914950060421,
+                "y": 0.5968198122182728,
+                "width": 0.09707369759818102,
+                "height": 0.04270034910661891
+              }
+            },
+            {
+              "text": "L-Arginine",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.06090446512681597,
+                "y": 0.5731169120851897,
+                "width": 0.11074920903856511,
+                "height": 0.032454700495100464
+              }
+            },
+            {
+              "text": "1.14 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.4057132110796983,
+                "y": 0.5613231731771633,
+                "width": 0.07968429315870057,
+                "height": 0.03700748639615625
+              }
+            },
+            {
+              "text": "Total Fat",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.0479651171602647,
+                "y": 0.5393442630379367,
+                "width": 0.08866278924674631,
+                "height": 0.027868851371433467
+              }
+            },
+            {
+              "text": "14.00 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.3863142866410394,
+                "y": 0.5183370102839397,
+                "width": 0.09815231216288056,
+                "height": 0.0438743711931433
+              }
+            },
+            {
+              "text": "Polyunsaturated Fatty Acids",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.05737361995705254,
+                "y": 0.4885529681535805,
+                "width": 0.3269098228383287,
+                "height": 0.05078733642738953
+              }
+            },
+            {
+              "text": "1.12 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.4026661974316828,
+                "y": 0.48275296683457747,
+                "width": 0.07842863385922438,
+                "height": 0.03690220527498156
+              }
+            },
+            {
+              "text": "Monounsaturated Fatty Acids 5.88 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.06020681844270152,
+                "y": 0.4437282017741364,
+                "width": 0.42037739263516716,
+                "height": 0.05147791725530615
+              }
+            },
+            {
+              "text": "Saturated Fatty Acids",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.05880579108075652,
+                "y": 0.41377048958091645,
+                "width": 0.24007545899007926,
+                "height": 0.04301577782913635
+              }
+            },
+            {
+              "text": "7.00 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.3996306341068922,
+                "y": 0.40375414410575605,
+                "width": 0.08135853526748227,
+                "height": 0.03805888405901647
+              }
+            },
+            {
+              "text": "Trans Fatty Acids",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.060484474890533275,
+                "y": 0.38223247041145436,
+                "width": 0.18562830274350176,
+                "height": 0.03179275502643408
+              }
+            },
+            {
+              "text": "0.00 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.39682205300122275,
+                "y": 0.36450887231116724,
+                "width": 0.08276682702180377,
+                "height": 0.03904278821781848
+              }
+            },
+            {
+              "text": "Cholesterol",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.0721101735469928,
+                "y": 0.3464338924505008,
+                "width": 0.1273370457586841,
+                "height": 0.02975245238292823
+              }
+            },
+            {
+              "text": "0.00 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.39609319420584493,
+                "y": 0.3273106763733219,
+                "width": 0.08144095233667681,
+                "height": 0.036820470737060185
+              }
+            },
+            {
+              "text": "Carbohydrate",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5456601522326442,
+                "y": 0.5805421043728292,
+                "width": 0.15372734426337975,
+                "height": 0.05077351506048511
+              }
+            },
+            {
+              "text": "48.00",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7742126639602017,
+                "y": 0.5722311107024172,
+                "width": 0.05328340619523941,
+                "height": 0.033866450092381095
+              }
+            },
+            {
+              "text": "Total Sugar",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5556029570772023,
+                "y": 0.5486699732263222,
+                "width": 0.1298919214266483,
+                "height": 0.05214169970928284
+              }
+            },
+            {
+              "text": "30.00",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7757673137633293,
+                "y": 0.5401915622126721,
+                "width": 0.04984373912633022,
+                "height": 0.03003868283961597
+              }
+            },
+            {
+              "text": "Added Sugar",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5589707226965923,
+                "y": 0.515709170297149,
+                "width": 0.14199871883214077,
+                "height": 0.0482371484809242
+              }
+            },
+            {
+              "text": "30.00",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7735285997672673,
+                "y": 0.5102271780429026,
+                "width": 0.05031914131663673,
+                "height": 0.030248815363103643
+              }
+            },
+            {
+              "text": "Vitamin C",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5437798916823755,
+                "y": 0.49062426720076935,
+                "width": 0.11311060468727185,
+                "height": 0.0367258370943534
+              }
+            },
+            {
+              "text": "45.00 mg",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7656735587565994,
+                "y": 0.468276474041011,
+                "width": 0.08351774304826687,
+                "height": 0.045680107649450186
+              }
+            },
+            {
+              "text": "Nicotinamide",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5411805011515882,
+                "y": 0.4516569982131867,
+                "width": 0.14454418253675805,
+                "height": 0.03765952320124011
+              }
+            },
+            {
+              "text": "12.00 mg",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7679455497902293,
+                "y": 0.43616066731127545,
+                "width": 0.07773393114036486,
+                "height": 0.04017737417510059
+              }
+            },
+            {
+              "text": "Riboflavin",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5404099620566206,
+                "y": 0.4186055055264335,
+                "width": 0.11118373692592731,
+                "height": 0.02839486495308252
+              }
+            },
+            {
+              "text": "1.26 mg",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7762575553110526,
+                "y": 0.39950129084061103,
+                "width": 0.06947814192727342,
+                "height": 0.03963837353451283
+              }
+            },
+            {
+              "text": "Thiamine Hydrochloride 1.06 mg",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5398302191392171,
+                "y": 0.3672383310170396,
+                "width": 0.3011819001670196,
+                "height": 0.04334861644800159
+              }
+            },
+            {
+              "text": "Energy Value",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5386865664036826,
+                "y": 0.3380618756848165,
+                "width": 0.14190396638674152,
+                "height": 0.03278760696431238
+              }
+            },
+            {
+              "text": "438.00 kcal",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7455881031198728,
+                "y": 0.33747096716153824,
+                "width": 0.09312611874018872,
+                "height": 0.02669741011105664
+              }
+            },
+            {
+              "text": "USES: THREPTIN supplies vital protein of high biological value and is, therefore, vatud",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.042696922846393044,
+                "y": 0.2541939218191329,
+                "width": 0.8386195530401213,
+                "height": 0.07091696366019862
+              }
+            },
+            {
+              "text": "for those who, due to illness or faulty dietary habits, do not take sufficient amount pras",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.0425810326104116,
+                "y": 0.21264481563403936,
+                "width": 0.840111705744378,
+                "height": 0.07129611139712133
+              }
+            },
+            {
+              "text": "dally. THREPTIN is easily digested and well tolerated. It suplies adequate cacores wor",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.04281927831021399,
+                "y": 0.17732702779719955,
+                "width": 0.8441450172495618,
+                "height": 0.06564064679252612
+              }
+            },
+            {
+              "text": "efficient utilization of the protein.",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.04069904479061522,
+                "y": 0.14659595267235648,
+                "width": 0.3389465474636756,
+                "height": 0.058122303174889645
+              }
+            },
+            {
+              "text": "MADE WITH ASSURANCE IN INDIA",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.04202597875703345,
+                "y": 0.09026005901718259,
+                "width": 0.40984184051228456,
+                "height": 0.06316022408024291
+              }
+            },
+            {
+              "text": "NET WEIGHT 275 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.6942564384103869,
+                "y": 0.05293983834350635,
+                "width": 0.19988897804901973,
+                "height": 0.055948853021553835
+              }
+            },
+            {
+              "text": "\"GLUTEN FREE\"",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.04032897697693332,
+                "y": 0.058721843670777374,
+                "width": 0.1831073760986328,
+                "height": 0.04862482525771472
+              }
+            }
+          ]
+        },
+        "model": {
+          "model": "qwen3-vl:32b-instruct",
+          "digest": "c9a60b1a1a13df1d07bf83fbb04662847c533646554e6d94dff6dbd5c6d736ae",
+          "promptHash": "04743196eedb12182e35bc7c9e19b3fe16bbc6ca38946968135c2238eaad269a",
+          "raw": "{\n  \"basis\": \"per_100g\",\n  \"calories_kcal\": 438.0,\n  \"protein_g\": 30.0,\n  \"carbohydrate_g\": 48.0,\n  \"sugars_g\": 30.0,\n  \"fat_g\": 14.0,\n  \"saturated_fat_g\": 7.0,\n  \"fibre_g\": null,\n  \"sodium_mg\": null,\n  \"ingredients_raw\": \"Casein, Sucrose, Precooked Rice Flour, Edible Vegetable Fat (Solid), Bengal Gram, Raising Agent [500(ii)], Natural Colour (150 c), Emulsifier (E472e), Vitamins, Acidity Regulator (525) and Antioxidant (304).\",\n  \"unreadable_fields\": [\n    \"Edible Vegetable Fat (Solid)\",\n    \"Emulsifier (E472e)\"\n  ]\n}",
+          "basis": "per_100g",
+          "nutrition": {
+            "calories": 438,
+            "proteinGrams": 30,
+            "carbohydrateGrams": 48,
+            "sugarGrams": 30,
+            "fatGrams": 14,
+            "saturatedFatGrams": 7,
+            "fibreGrams": null,
+            "sodiumMg": null
+          },
+          "ingredientsRaw": "Casein, Sucrose, Precooked Rice Flour, Edible Vegetable Fat (Solid), Bengal Gram, Raising Agent [500(ii)], Natural Colour (150 c), Emulsifier (E472e), Vitamins, Acidity Regulator (525) and Antioxidant (304).",
+          "unreadableFields": [
+            "Edible Vegetable Fat (Solid)",
+            "Emulsifier (E472e)"
+          ]
+        },
+        "nutrition": {
+          "accepted": true,
+          "reasons": [],
+          "basis": "per_100g",
+          "nutrition": {
+            "calories": 438,
+            "proteinGrams": 30,
+            "carbohydrateGrams": 48,
+            "sugarGrams": 30,
+            "fatGrams": 14,
+            "saturatedFatGrams": 7,
+            "fibreGrams": null,
+            "sodiumMg": null
+          },
+          "ingredientsRaw": null
+        },
+        "ingredients": {
+          "accepted": false,
+          "reasons": [
+            "ingredient_extractor_disagreement",
+            "ingredient_text_edge_clipped"
+          ],
+          "basis": "unknown",
+          "nutrition": null,
+          "ingredientsRaw": null
+        }
+      }
+    },
+    {
+      "id": "per-100ml-table",
+      "errors": [],
+      "artifact": {
+        "schemaVersion": 1,
+        "adapterVersion": "machine-label-v9",
+        "image": {
+          "path": "69d60c5d209716b57d6f3ffe277677a012d5fea46f6a138decb262c2274a454f.jpg",
+          "contentSha256": "69d60c5d209716b57d6f3ffe277677a012d5fea46f6a138decb262c2274a454f",
+          "byteLength": 36152
+        },
+        "generatedAt": "2026-07-18T16:58:13.993Z",
+        "vision": {
+          "engine": "macos_vision",
+          "version": "VNRecognizeTextRequest.accurate",
+          "lines": [
+            {
+              "text": "Nutritional Facts*",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.12162162129233663,
+                "y": 0.9100000000348101,
+                "width": 0.5472972972972973,
+                "height": 0.05500000000000005
+              }
+            },
+            {
+              "text": "Serve Size: 200ml",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.1216216208614865,
+                "y": 0.8600000000833333,
+                "width": 0.3648648648648648,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "Total Serving: 5",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5269136940951561,
+                "y": 0.849586336665332,
+                "width": 0.2975239624848237,
+                "height": 0.04582732677459711
+              }
+            },
+            {
+              "text": "Amt. per 100ml",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.1216216212767455,
+                "y": 0.8000000000416667,
+                "width": 0.33108108108108103,
+                "height": 0.039999999999999925
+              }
+            },
+            {
+              "text": "% RDA per Serve",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.5316779121086833,
+                "y": 0.789054654927617,
+                "width": 0.36864744650351033,
+                "height": 0.053633675575256445
+              }
+            },
+            {
+              "text": "Energy 25 kcal",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.12070255819071156,
+                "y": 0.7383521617269244,
+                "width": 0.2987079620361328,
+                "height": 0.04880622386932376
+              }
+            },
+            {
+              "text": "2.5",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7702702699324324,
+                "y": 0.7400000001818181,
+                "width": 0.08783783783783783,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "Protein 1.7 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.11486486447734498,
+                "y": 0.6900000000661765,
+                "width": 0.2770270270270271,
+                "height": 0.04500000000000004
+              }
+            },
+            {
+              "text": "6.3",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.770270269963145,
+                "y": 0.6900000001818183,
+                "width": 0.08108108108108114,
+                "height": 0.039999999999999925
+              }
+            },
+            {
+              "text": "Carbohydrate 0.3 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.12062437274337676,
+                "y": 0.6379106220253865,
+                "width": 0.39376959929595123,
+                "height": 0.04624011993408206
+              }
+            },
+            {
+              "text": "0.5",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7702702699324324,
+                "y": 0.6350000001666667,
+                "width": 0.08108108108108114,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "Total Sugars 0.2 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.12058816187969618,
+                "y": 0.5836967087262408,
+                "width": 0.38017894126273494,
+                "height": 0.04991932868957516
+              }
+            },
+            {
+              "text": "Added Sugars 0 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.15540540502252248,
+                "y": 0.53500000005,
+                "width": 0.3445945945945946,
+                "height": 0.04500000000000004
+              }
+            },
+            {
+              "text": "Total Fat 1.9 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.11330202139087095,
+                "y": 0.48419538005841734,
+                "width": 0.3141651669064084,
+                "height": 0.049655394554138144
+              }
+            },
+            {
+              "text": "Saturated Fat 0.2 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.15456105620068966,
+                "y": 0.43183362162257954,
+                "width": 0.38652368493982264,
+                "height": 0.046337690353393524
+              }
+            },
+            {
+              "text": "Trans Fat 0.1 g",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.1537695762221594,
+                "y": 0.384404286710053,
+                "width": 0.30014958252777924,
+                "height": 0.045915560722351034
+              }
+            },
+            {
+              "text": "5.7",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7635135128378379,
+                "y": 0.4850000003999999,
+                "width": 0.08108108108108114,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "1.8",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7635135131756757,
+                "y": 0.4350000001458334,
+                "width": 0.08108108108108103,
+                "height": 0.03499999999999992
+              }
+            },
+            {
+              "text": "10",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7770270267267267,
+                "y": 0.3900000001666668,
+                "width": 0.06756756756756754,
+                "height": 0.029999999999999916
+              }
+            },
+            {
+              "text": "Cholesterol 0 mg",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.15378707986846862,
+                "y": 0.333971620044775,
+                "width": 0.32780020945780985,
+                "height": 0.045509223937988286
+              }
+            },
+            {
+              "text": "Sodium 10.3 mg",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.10696013581949101,
+                "y": 0.28375494818172553,
+                "width": 0.340301513671875,
+                "height": 0.04515874862670899
+              }
+            },
+            {
+              "text": "1.0",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7567567564189189,
+                "y": 0.2850000001458334,
+                "width": 0.08108108108108114,
+                "height": 0.03500000000000003
+              }
+            },
+            {
+              "text": "Calcium 112.5 mg",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.10618078405434786,
+                "y": 0.22877754798091188,
+                "width": 0.37590328422752584,
+                "height": 0.05518711090087891
+              }
+            },
+            {
+              "text": "22.5",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7297297293693693,
+                "y": 0.23000000013333333,
+                "width": 0.10810810810810811,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "Vitamin A 60 mcg",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.10623179089133956,
+                "y": 0.17867060433768966,
+                "width": 0.36166113776129644,
+                "height": 0.053818316459655846
+              }
+            },
+            {
+              "text": "12",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7635135131756756,
+                "y": 0.1800000002222223,
+                "width": 0.07432432432432434,
+                "height": 0.039999999999999925
+              }
+            },
+            {
+              "text": "Vitamin D 1.8 mcg",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.11409993368930066,
+                "y": 0.14332594156513212,
+                "width": 0.3664322414913693,
+                "height": 0.0391805243492126
+              }
+            },
+            {
+              "text": "23",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.7635135131756757,
+                "y": 0.13000000020000002,
+                "width": 0.06756756756756754,
+                "height": 0.040000000000000036
+              }
+            },
+            {
+              "text": "* Approximate Values. %RDA Values based on",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.10739500333094318,
+                "y": 0.09300165396327686,
+                "width": 0.6769612286541913,
+                "height": 0.04222906112670899
+              }
+            },
+            {
+              "text": "2000kcal diet for adult men. (RDA as per ICMR",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.10717026564904385,
+                "y": 0.0626441622139774,
+                "width": 0.6908858531230204,
+                "height": 0.04381577491760258
+              }
+            },
+            {
+              "text": "NIN 2020)",
+              "confidence": 1,
+              "boundingBox": {
+                "x": 0.10810810755308878,
+                "y": 0.04500000010714289,
+                "width": 0.1554054054054054,
+                "height": 0.030000000000000027
+              }
+            }
+          ]
+        },
+        "model": {
+          "model": "qwen3-vl:32b-instruct",
+          "digest": "c9a60b1a1a13df1d07bf83fbb04662847c533646554e6d94dff6dbd5c6d736ae",
+          "promptHash": "04743196eedb12182e35bc7c9e19b3fe16bbc6ca38946968135c2238eaad269a",
+          "raw": "{\n  \"basis\": \"per_100ml\",\n  \"calories_kcal\": 25,\n  \"protein_g\": 1.7,\n  \"carbohydrate_g\": 0.3,\n  \"sugars_g\": 0.2,\n  \"fat_g\": 1.9,\n  \"saturated_fat_g\": 0.2,\n  \"fibre_g\": null,\n  \"sodium_mg\": 10.3,\n  \"ingredients_raw\": null,\n  \"unreadable_fields\": []\n}",
+          "basis": "per_100ml",
+          "nutrition": {
+            "calories": 25,
+            "proteinGrams": 1.7,
+            "carbohydrateGrams": 0.3,
+            "sugarGrams": 0.2,
+            "fatGrams": 1.9,
+            "saturatedFatGrams": 0.2,
+            "fibreGrams": null,
+            "sodiumMg": 10.3
+          },
+          "ingredientsRaw": null,
+          "unreadableFields": []
+        },
+        "nutrition": {
+          "accepted": true,
+          "reasons": [],
+          "basis": "per_100ml",
+          "nutrition": {
+            "calories": 25,
+            "proteinGrams": 1.7,
+            "carbohydrateGrams": 0.3,
+            "sugarGrams": 0.2,
+            "fatGrams": 1.9,
+            "saturatedFatGrams": 0.2,
+            "fibreGrams": null,
+            "sodiumMg": 10.3
+          },
+          "ingredientsRaw": null
+        },
+        "ingredients": {
+          "accepted": false,
+          "reasons": [
+            "ingredient_declaration_incomplete",
+            "ingredient_text_edge_clipped"
+          ],
+          "basis": "unknown",
+          "nutrition": null,
+          "ingredientsRaw": null
+        }
+      }
+    }
+  ],
+  "passed": true
+}

@@ -209,6 +209,7 @@ async function extractCommand(): Promise<void> {
   const limit = rawLimit === null ? (mode === "sample" ? 100 : null) : Number(rawLimit);
   if (limit !== null && (!Number.isInteger(limit) || limit <= 0)) throw new Error("--limit must be a positive integer.");
   const minimumIntervalMs = Number(option("minimum-interval-ms") ?? "1100");
+  const requestTimeoutMs = Number(option("request-timeout-ms") ?? "30000");
   const confidenceThreshold = Number(option("confidence-threshold") ?? "0.85");
   const outputDirectory = option("output") ?? (source === "robotoff-ingredients" ? ".data/robotoff-ingredients" : ".data/robotoff");
   const result = source === "robotoff-ingredients"
@@ -219,6 +220,7 @@ async function extractCommand(): Promise<void> {
       mode,
       limit,
       minimumIntervalMs,
+      requestTimeoutMs,
       confidenceThreshold,
       maximumAttempts: Number(option("maximum-attempts") ?? "4"),
       retryBaseMs: Number(option("retry-base-ms") ?? "1500"),
@@ -231,6 +233,7 @@ async function extractCommand(): Promise<void> {
       mode,
       limit,
       minimumIntervalMs,
+      requestTimeoutMs,
       confidenceThreshold,
       progress: (message) => process.stderr.write(`${message}\n`),
     });

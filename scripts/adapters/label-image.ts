@@ -262,12 +262,19 @@ function declaredLength(value: string | null, maximumBytes: number): number | nu
   return length;
 }
 
+export const DEFAULT_LABEL_IMAGE_MAXIMUM_ATTEMPTS = 2;
+
+function retryableHttpStatus(status: number): boolean {
+  return status === 429 || status === 503 || status >= 500;
+}
+
 export async function downloadHttpsLabelImage(options: {
   url: string;
   fetcher?: LabelImageFetchLike;
   maximumBytes?: number;
   maximumChunks?: number;
   timeoutMilliseconds?: number;
+  maximumAttempts?: number;
   userAgent?: string;
   now?: () => Date;
 }): Promise<DownloadedLabelImage> {
@@ -275,6 +282,7 @@ export async function downloadHttpsLabelImage(options: {
   const maximumBytes = options.maximumBytes ?? DEFAULT_LABEL_IMAGE_MAX_BYTES;
   const maximumChunks = options.maximumChunks ?? DEFAULT_LABEL_IMAGE_MAX_CHUNKS;
   const timeoutMilliseconds = options.timeoutMilliseconds ?? DEFAULT_LABEL_IMAGE_TIMEOUT_MS;
+  const maximumAttempts = options.maximumAttempts ?? DEFAULT_LABEL_IMAGE_MAXIMUM_ATTEMPTS;
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
     throw new RangeError("Label image maximumBytes must be a positive safe integer.");
   }
@@ -284,33 +292,62 @@ export async function downloadHttpsLabelImage(options: {
   if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds < 1) {
     throw new RangeError("Label image timeoutMilliseconds must be a positive safe integer.");
   }
+  if (!Number.isInteger(maximumAttempts) || maximumAttempts < 1 || maximumAttempts > 4) {
+    throw new RangeError("Label image maximumAttempts must be between 1 and 4.");
+  }
 
   const fetcher = options.fetcher ?? fetch;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMilliseconds);
+  // Retry only the request + response-status check. Stream reading is a single
+  // attempt once a valid response body is in hand. Retryable conditions are
+  // 429/503/5xx and request timeouts; all other errors throw immediately.
+  let response: Response | null = null;
+  let lastError: unknown = null;
+  let controller = new AbortController();
+  let timeout = setTimeout(() => controller.abort(), timeoutMilliseconds);
   try {
-    let response: Response;
-    try {
-      response = await fetcher(requested, {
-        headers: {
-          // Prefer formats the pinned local vision model decodes reliably. A
-          // generic image fallback still permits sources that have no PNG/JPEG.
-          Accept: "image/png,image/jpeg,image/*;q=0.8",
-          ...(options.userAgent ? { "User-Agent": options.userAgent } : {}),
-        },
-        redirect: "follow",
-        signal: controller.signal,
-      });
-    } catch {
-      if (controller.signal.aborted) {
-        throw new LabelImageHashError("request_timeout", `Label image request exceeded ${timeoutMilliseconds} milliseconds.`);
+    for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+      try {
+        try {
+          response = await fetcher(requested, {
+            headers: {
+              // Prefer formats the pinned local vision model decodes reliably. A
+              // generic image fallback still permits sources that have no PNG/JPEG.
+              Accept: "image/png,image/jpeg,image/*;q=0.8",
+              ...(options.userAgent ? { "User-Agent": options.userAgent } : {}),
+            },
+            redirect: "follow",
+            signal: controller.signal,
+          });
+        } catch {
+          if (controller.signal.aborted) {
+            throw new LabelImageHashError("request_timeout", `Label image request exceeded ${timeoutMilliseconds} milliseconds.`);
+          }
+          throw new LabelImageHashError("fetch_failed", "Label image request failed before a response was received.");
+        }
+        if (!response.ok) {
+          await response.body?.cancel().catch(() => undefined);
+          const status = response.status;
+          throw new LabelImageHashError("http_error", `Label image returned HTTP ${status}.`);
+        }
+        break;
+      } catch (error) {
+        lastError = error;
+        const retryable = error instanceof LabelImageHashError && error.code === "request_timeout"
+          || (error instanceof LabelImageHashError && error.code === "http_error"
+            && retryableHttpStatus(Number(/HTTP (\d+)/.exec(error.message)?.[1] ?? 0)));
+        if (!retryable || attempt >= maximumAttempts) throw error;
+        // Full jitter backoff between retry attempts. Reset the abort controller
+        // so the next attempt gets a fresh timeout window.
+        clearTimeout(timeout);
+        const ceiling = Math.min(500 * (2 ** (attempt - 1)), 4_000);
+        await new Promise<void>((resolve) => setTimeout(resolve, Math.floor(Math.random() * (ceiling + 1))));
+        response = null;
+        controller = new AbortController();
+        timeout = setTimeout(() => controller.abort(), timeoutMilliseconds);
       }
-      throw new LabelImageHashError("fetch_failed", "Label image request failed before a response was received.");
     }
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => undefined);
-      throw new LabelImageHashError("http_error", `Label image returned HTTP ${response.status}.`);
-    }
+    if (!response) throw lastError instanceof Error ? lastError : new LabelImageHashError("fetch_failed", "Label image request failed without a response.");
+
     const effective = parseHttpsUrl(response.url || requested.toString(), "invalid_redirect");
     const mediaType = imageMediaType(response.headers.get("content-type"));
     const expectedLength = declaredLength(response.headers.get("content-length"), maximumBytes);

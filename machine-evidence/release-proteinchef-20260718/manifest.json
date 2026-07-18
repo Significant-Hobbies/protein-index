@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "kind": "machine_evidence_release",
+  "releaseManifestSha256": "5ff562178582f6affadabebdc123c02cff9abae4cd5a3d515e8e280b00f09a2f",
+  "adapterVersion": "machine-label-v9",
+  "outcomeCount": 3,
+  "acceptedCount": 3,
+  "accepted": [
+    {
+      "candidateId": "mlc_340624b579c0bafa772aa10c",
+      "productId": "prd_6c24d8300864c03661ffa764",
+      "sourceRecordId": "src_44c324333dcdcd083c6c1d24",
+      "labelAssetId": "lbl_d66b8eb9c368f34222a36257",
+      "sourceContentHash": "076ec0dab1a16ac7faa3282591952d2a0e3161493be6a826f27d21fe7485a4f6",
+      "labelContentSha256": "214c235cf4e1b3978226eeadf0357de26f88b1b9cd16322316f936f9c446fc7a",
+      "basis": "per_100g",
+      "calories": 589,
+      "proteinGrams": 12.9
+    },
+    {
+      "candidateId": "mlc_6dbc837d99db09708da29703",
+      "productId": "prd_34b51e839a7474c40f99791c",
+      "sourceRecordId": "src_7c0f7c21500db2462bbea9c5",
+      "labelAssetId": "lbl_a04b0e643ce38e5004298cd3",
+      "sourceContentHash": "c3ff392e36b9f14c04d9d38fbfd2b7de7ca4dc2503bf12d11983e3ddac01032a",
+      "labelContentSha256": "214c235cf4e1b3978226eeadf0357de26f88b1b9cd16322316f936f9c446fc7a",
+      "basis": "per_100g",
+      "calories": 589,
+      "proteinGrams": 12.9
+    },
+    {
+      "candidateId": "mlc_ab92dc81a0d2d7ebfcfc4d7a",
+      "productId": "prd_61a2fac816e80007e6c2471f",
+      "sourceRecordId": "src_550ee3aae07a39173f32b3c9",
+      "labelAssetId": "lbl_8ea501d485ac58f2fedcce59",
+      "sourceContentHash": "9ed5fa73f328c14a8dd55d66d89dbafe2a720fca2beed603407e6ec2564fe367",
+      "labelContentSha256": "9fb28fd92755cb4eb2f1e88df3c1fa47a3e572b1324ae5b903d9d9508339fedf",
+      "basis": "per_100g",
+      "calories": 378,
+      "proteinGrams": 26.1
+    }
+  ],
+  "inputs": {
+    "outcomes": "machine-outcomes.jsonl",
+    "candidates": "machine-candidates.jsonl",
+    "benchmark": "report.json"
+  }
+}

@@ -74,7 +74,7 @@ export interface MachinePublicationBatch {
   outcomeCount: number;
   acceptedCount: number;
   releaseManifestSha256: string;
-  accepted: Array<{ candidateId: string; productId: string; labelAssetId: string; sourceContentHash: string; labelContentSha256: string }>;
+  accepted: Array<{ candidateId: string; productId: string; sourceRecordId: string; labelAssetId: string; sourceContentHash: string; labelContentSha256: string; basis: "per_100g" | "per_100ml"; calories: number; proteinGrams: number }>;
 }
 
 /** Builds a local-only, immutable SQL batch. Every accepted fact rebinds to its exact current source and label. */
@@ -83,7 +83,9 @@ export function emitMachinePublicationBatch(
   benchmark: BenchmarkReport,
   eligibleCandidateIds?: ReadonlySet<string>,
 ): { sql: string; manifest: MachinePublicationBatch } {
-  const accepted = outcomes.filter((outcome) => outcome.status === "accepted" && (eligibleCandidateIds === undefined || eligibleCandidateIds.has(outcome.candidate.id)));
+  const accepted = outcomes.filter((outcome) => (outcome.status === "accepted" || outcome.status === "cached")
+    && outcome.artifact?.nutrition.accepted === true
+    && (eligibleCandidateIds === undefined || eligibleCandidateIds.has(outcome.candidate.id)));
   if (accepted.length === 0) throw new Error("Machine publication batch contains no accepted label outcomes.");
   const adapterVersion = accepted[0]?.artifact?.adapterVersion;
   if (!adapterVersion) throw new Error("Accepted machine outcome is missing its artifact.");
@@ -99,7 +101,7 @@ export function emitMachinePublicationBatch(
   if (duplicateProducts.size > 0) throw new Error(`Machine publication refuses conflicting accepted labels for ${[...duplicateProducts].join(", ")}.`);
   const chosen = [...accepted].sort((left, right) => left.candidate.id.localeCompare(right.candidate.id)).filter((outcome, index, values) => values.findIndex((other) => other.labelAsset?.productId === outcome.labelAsset?.productId) === index);
   const releaseManifestSha256 = hash({ adapterVersion, benchmark: { adapterVersion: benchmark.adapterVersion, cases: benchmark.cases.length }, accepted: chosen.map((outcome) => ({ candidateId: outcome.candidate.id, productId: outcome.candidate.productId, sourceContentHash: outcome.candidate.sourceContentHash, labelContentSha256: outcome.labelAsset!.contentSha256, artifact: hash(outcome.artifact) })) });
-  const manifest: MachinePublicationBatch = { schemaVersion: 1, adapterVersion, outcomeCount: outcomes.length, acceptedCount: chosen.length, releaseManifestSha256, accepted: chosen.map((outcome) => ({ candidateId: outcome.candidate.id, productId: outcome.candidate.productId, labelAssetId: outcome.labelAsset!.id, sourceContentHash: outcome.candidate.sourceContentHash, labelContentSha256: outcome.labelAsset!.contentSha256 })) };
+  const manifest: MachinePublicationBatch = { schemaVersion: 1, adapterVersion, outcomeCount: outcomes.length, acceptedCount: chosen.length, releaseManifestSha256, accepted: chosen.map((outcome) => ({ candidateId: outcome.candidate.id, productId: outcome.candidate.productId, sourceRecordId: outcome.candidate.subjectSourceRecordId, labelAssetId: outcome.labelAsset!.id, sourceContentHash: outcome.candidate.sourceContentHash, labelContentSha256: outcome.labelAsset!.contentSha256, basis: outcome.artifact!.nutrition.basis as "per_100g" | "per_100ml", calories: outcome.artifact!.nutrition.nutrition!.calories!, proteinGrams: outcome.artifact!.nutrition.nutrition!.proteinGrams! })) };
   const statements = chosen.map((outcome) => `${labelAssetSql(outcome.labelAsset!)}${emitMachineNutritionSql({ productId: outcome.candidate.productId, sourceRecordId: outcome.candidate.subjectSourceRecordId, sourceContentHash: outcome.candidate.sourceContentHash, labelAssetId: outcome.labelAsset!.id, sourceImageRevision: outcome.candidate.label.sourceImageRevision, releaseManifestSha256, artifact: outcome.artifact! })}`);
   return { sql: statements.join(""), manifest };
 }

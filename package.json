@@ -31,6 +31,7 @@
     "data:brand-import-sql": "tsx scripts/emit-official-brand-import.ts",
     "data:machine-publish-sql": "tsx scripts/machine-publication.ts",
     "data:machine-publish-batch": "tsx scripts/machine-publication.ts batch",
+    "data:machine-release": "tsx scripts/create-machine-release-bundle.ts",
     "data:machine-benchmark": "tsx scripts/machine-label-benchmark.ts",
     "data:seed": "tsx scripts/sync.ts seed",
     "data:coverage": "tsx scripts/sync.ts coverage",

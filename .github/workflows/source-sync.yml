@@ -56,8 +56,14 @@ jobs:
           curl_args=(
             --fail
             --location
-            --retry 5
-            --retry-all-errors
+            # Retry only on connection refused, timeout, or transient network
+            # errors — NOT on every HTTP status. A 4xx (e.g. 404 moved export)
+            # must fail fast instead of amplifying into five retries. Three
+            # attempts with a five-second delay keeps the 600 MB download
+            # resilient without masking genuine upstream errors.
+            --retry 3
+            --retry-connrefused
+            --retry-delay 5
             --connect-timeout 30
             --user-agent "protein-index/0.1 (+https://github.com/${GITHUB_REPOSITORY}; source-sync)"
             --dump-header .data/source/response-headers.txt

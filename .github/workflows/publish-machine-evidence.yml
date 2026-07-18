@@ -1,0 +1,173 @@
+name: Publish machine-verified evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_path:
+        description: Checksummed machine-evidence release directory under machine-evidence/
+        required: true
+        type: string
+      expected_manifest_sha256:
+        description: SHA-256 of the release manifest.json
+        required: true
+        type: string
+      confirm_production_publication:
+        description: Type PUBLISH_MACHINE_EVIDENCE_TO_PRODUCTION exactly
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protein-index-production-publication
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+    steps:
+      - id: gate
+        shell: bash
+        env:
+          CONFIRM: ${{ inputs.confirm_production_publication }}
+          PATH_INPUT: ${{ inputs.release_path }}
+          MANIFEST_SHA256: ${{ inputs.expected_manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$CONFIRM" == "PUBLISH_MACHINE_EVIDENCE_TO_PRODUCTION" ]]
+          [[ "$PATH_INPUT" =~ ^machine-evidence/release-[a-z0-9-]+$ ]]
+          [[ "$MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          echo "approved=true" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: authorize
+    if: needs.authorize.outputs.approved == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      RELEASE_PATH: ${{ inputs.release_path }}
+      EXPECTED_MANIFEST_SHA256: ${{ inputs.expected_manifest_sha256 }}
+      LIVE_BASE_URL: https://protein.significanthobbies.com
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild and pin the exact local release bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$RELEASE_PATH/manifest.json"
+          test "$(sha256sum "$RELEASE_PATH/manifest.json" | awk '{print $1}')" = "$EXPECTED_MANIFEST_SHA256"
+          (cd "$RELEASE_PATH" && sha256sum --check checksums.sha256)
+          mkdir -p .data/machine-publication
+          pnpm data:machine-publish-batch "$RELEASE_PATH/outcomes.jsonl" .data/machine-publication/import.sql .data/machine-publication/manifest.json "$RELEASE_PATH/benchmark.json" "$RELEASE_PATH/candidates.jsonl"
+          cmp "$RELEASE_PATH/import.sql" .data/machine-publication/import.sql
+          jq -e '.schemaVersion == 1 and .kind == "machine_evidence_release" and .acceptedCount > 0 and (.accepted | length) == .acceptedCount' "$RELEASE_PATH/manifest.json" >/dev/null
+
+      - name: Require protected publication credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]]
+
+      - name: Refuse pending production migrations
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 migrations list protein-index --remote | tee .data/machine-publication/migrations.txt
+          if grep -q "Migrations to be applied" .data/machine-publication/migrations.txt; then
+            echo "::error::Machine-evidence publication refuses pending migrations."
+            exit 1
+          fi
+
+      - name: Verify exact current source bindings before any write
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' > .data/machine-publication/source-state.sql
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile(`${process.env.RELEASE_PATH}/manifest.json`, 'utf8'));
+          const quote = (value) => `'${value.replaceAll("'", "''")}'`;
+          const accepted = manifest.accepted;
+          if (!Array.isArray(accepted) || accepted.length === 0 || accepted.some((item) => !/^[a-z][a-z0-9_]{2,63}$/.test(item.sourceRecordId) || !/^[a-z][a-z0-9_]{2,63}$/.test(item.productId) || !/^[a-f0-9]{64}$/.test(item.sourceContentHash))) throw new Error('Machine release source binding is malformed');
+          console.log(`SELECT id, product_id, content_hash FROM source_records WHERE id IN (${accepted.map((item) => quote(item.sourceRecordId)).join(',')});`);
+          NODE
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json --command "$(< .data/machine-publication/source-state.sql)" > .data/machine-publication/source-state.json
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile(`${process.env.RELEASE_PATH}/manifest.json`, 'utf8'));
+          const state = JSON.parse(await readFile('.data/machine-publication/source-state.json', 'utf8'))[0]?.results ?? [];
+          const rows = new Map(state.map((row) => [row.id, row]));
+          if (manifest.accepted.some((item) => rows.get(item.sourceRecordId)?.product_id !== item.productId || rows.get(item.sourceRecordId)?.content_hash !== item.sourceContentHash)) throw new Error('Current source identity or hash differs from the machine release');
+          NODE
+
+      - name: Publish the idempotent machine evidence import
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler d1 execute protein-index --remote --yes --file "$RELEASE_PATH/import.sql" 2>&1 | tee .data/machine-publication/publication.log
+
+      - name: Prove database and live product postconditions
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE' > .data/machine-publication/post-state.sql
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile(`${process.env.RELEASE_PATH}/manifest.json`, 'utf8'));
+          const quote = (value) => `'${value.replaceAll("'", "''")}'`;
+          console.log(`SELECT product_id, label_asset_id, basis, calories, protein_grams FROM current_machine_verified_nutrition_facts WHERE label_asset_id IN (${manifest.accepted.map((item) => quote(item.labelAssetId)).join(',')});`);
+          NODE
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json --command "$(< .data/machine-publication/post-state.sql)" > .data/machine-publication/post-state.json
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const manifest = JSON.parse(await readFile(`${process.env.RELEASE_PATH}/manifest.json`, 'utf8'));
+          const rows = JSON.parse(await readFile('.data/machine-publication/post-state.json', 'utf8'))[0]?.results ?? [];
+          const actual = new Map(rows.map((row) => [row.label_asset_id, row]));
+          if (actual.size !== manifest.acceptedCount || manifest.accepted.some((item) => { const row = actual.get(item.labelAssetId); return !row || row.product_id !== item.productId || row.basis !== item.basis || Number(row.calories) !== item.calories || Number(row.protein_grams) !== item.proteinGrams; })) throw new Error('Machine-evidence postcondition mismatch');
+          NODE
+          product_id="$(jq -r '.accepted[0].productId' "$RELEASE_PATH/manifest.json")"
+          curl --fail --silent --show-error --max-time 30 "$LIVE_BASE_URL/api/products/$product_id" -o .data/machine-publication/live-product.json
+          jq -e '.nutritionStatus == "machine_verified" and .nutrition.calories != null and .nutrition.proteinGrams != null' .data/machine-publication/live-product.json >/dev/null
+
+      - name: Upload durable publication evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: machine-evidence-publication-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: |
+            ${{ env.RELEASE_PATH }}/
+            .data/machine-publication/

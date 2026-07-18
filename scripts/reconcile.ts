@@ -311,6 +311,12 @@ export async function emitImportSql(input: {
   extraction?: ExtractionImportInput;
 }): Promise<{ products: number; outputPath: string; runId: string }> {
   const manifest = JSON.parse(await readFile(input.manifestPath, "utf8")) as SourceManifest;
+  // Reject incomplete or inconsistently accounted source sets before durable
+  // import. A non-source-complete manifest (e.g. a run that terminated with
+  // "error" or "limit") must never be imported into D1.
+  if (manifest.sourceComplete !== true || manifest.terminalEvidence !== "end_of_file") {
+    throw new Error(`Refusing to import an incomplete source set: sourceComplete=${manifest.sourceComplete}, terminalEvidence=${manifest.terminalEvidence}.`);
+  }
   const runId = ingestionRunIdForManifest(manifest);
   const expectedExtractionFamily = manifest.source === "open_food_facts_robotoff"
     ? "nutrition"

@@ -621,12 +621,13 @@ describe("Robotoff ingredient evidence", () => {
       },
       labelFetcher: async () => {
         labelRequests += 1;
-        return labelRequests === 2
+        return labelRequests === 2 || labelRequests === 3
           ? new Response("unavailable", { status: 503 })
           : labelImageFetcher();
       },
     });
-    expect(labelRequests).toBe(401);
+    // A retry-exhausted 503 consumes both bounded label-download attempts.
+    expect(labelRequests).toBe(402);
     expect(result.report).toMatchObject({
       sourceComplete: true,
       outcomeAccountingComplete: true,
@@ -4011,12 +4012,13 @@ describe("Robotoff label evidence", () => {
       },
       labelFetcher: async () => {
         labelRequests += 1;
-        return labelRequests === 2
+        return labelRequests === 2 || labelRequests === 3
           ? new Response("unavailable", { status: 503 })
           : labelImageFetcher();
       },
     });
-    expect(labelRequests).toBe(401);
+    // A retry-exhausted 503 consumes both bounded label-download attempts.
+    expect(labelRequests).toBe(402);
     expect(result.manifest).toMatchObject({
       sourceComplete: true,
       terminalEvidence: "end_of_file",

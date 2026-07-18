@@ -31,6 +31,7 @@ describe("official brand sitemap discovery", () => {
     const product = stagedOfficialBrandProduct({ source, pageUrl: "https://brand.example/products/puffs", html: page, observedAt: "2026-07-18T00:00:00.000Z" });
     expect(product).toMatchObject({ gtin: "08900000000012", offers: [{ sellingPrice: 199, available: true }], nutrition: { status: "unverified", basis: "unknown", per100g: { calories: 100, proteinGrams: 12 } } });
     expect(product?.rawEvidence).toHaveProperty("productJsonLd.nutrition.calories", "100 kcal");
+    expect(product?.rawEvidence).not.toHaveProperty("muscleBlazeNutritionHighlights");
   });
 
   it("retains declared MuscleBlaze protein and energy highlights as per-serving first-party evidence", () => {

@@ -8,6 +8,7 @@ import { once } from "node:events";
 import { normalizeGtin } from "../../shared/gtin";
 import type { SourceManifest, StagedProduct } from "../../shared/types";
 import { normalizeOpenFoodFactsRecord } from "./open-food-facts";
+import { RunBudget, type RunBudgetOptions, type RunBudgetSnapshot } from "./run-budget";
 
 export const OPEN_FOOD_FACTS_API_ADAPTER_VERSION = "off-api-enrichment-v6";
 export const OPEN_FOOD_FACTS_MULTI_PRODUCT_URL = "https://world.openfoodfacts.org/api/v2/search";
@@ -113,6 +114,7 @@ export interface OpenFoodFactsApiEnrichmentOptions {
   requestTimeoutMs?: number;
   minimumSplitBatchSize?: number;
   maximumRequestBatchSize?: number;
+  budget?: RunBudgetOptions;
   fetcher?: FetchLike;
   userAgent?: string;
 }
@@ -200,7 +202,10 @@ function retryDelay(response: Response | null, attempt: number, retryBaseMs: num
     const date = Date.parse(retryAfter);
     if (Number.isFinite(date)) return Math.min(Math.max(0, date - Date.now()), 60_000);
   }
-  return Math.min(retryBaseMs * (2 ** (attempt - 1)), 60_000);
+  // Full jitter: pick a random delay in [0, base * 2^(attempt-1)] to avoid
+  // thundering-herd retries against the same upstream endpoint.
+  const ceiling = Math.min(retryBaseMs * (2 ** (attempt - 1)), 60_000);
+  return Math.floor(Math.random() * (ceiling + 1));
 }
 
 function batchUrl(codes: string[]): URL {
@@ -224,6 +229,7 @@ async function fetchSingleProduct(input: {
   maximumAttempts: number;
   retryBaseMs: number;
   requestTimeoutMs: number;
+  budget: RunBudget;
   beforeAttempt: () => Promise<void>;
 }): Promise<ApiSearchResponse> {
   let lastError: Error | null = null;
@@ -231,6 +237,7 @@ async function fetchSingleProduct(input: {
     let response: Response | null = null;
     try {
       await input.beforeAttempt();
+      input.budget.recordApiCall();
       response = await input.fetcher(productUrl(input.code), {
         headers: { Accept: "application/json", "User-Agent": input.userAgent },
         signal: AbortSignal.timeout(input.requestTimeoutMs),
@@ -263,6 +270,7 @@ async function fetchBatch(input: {
   maximumAttempts: number;
   retryBaseMs: number;
   requestTimeoutMs: number;
+  budget: RunBudget;
   beforeAttempt: () => Promise<void>;
 }): Promise<ApiSearchResponse> {
   let lastError: Error | null = null;
@@ -270,6 +278,7 @@ async function fetchBatch(input: {
     let response: Response | null = null;
     try {
       await input.beforeAttempt();
+      input.budget.recordApiCall();
       response = await input.fetcher(batchUrl(input.codes), {
         headers: { Accept: "application/json", "User-Agent": input.userAgent },
         signal: AbortSignal.timeout(input.requestTimeoutMs),
@@ -299,6 +308,7 @@ async function fetchBatchResilient(input: {
   maximumAttempts: number;
   retryBaseMs: number;
   requestTimeoutMs: number;
+  budget: RunBudget;
   beforeAttempt: () => Promise<void>;
   onSplit: () => void;
   onSingleProductFallback: () => void;
@@ -358,6 +368,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
   const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
   const minimumSplitBatchSize = options.minimumSplitBatchSize ?? 1;
   const maximumRequestBatchSize = options.maximumRequestBatchSize ?? Math.min(50, batchSize);
+  const budget = new RunBudget(options.budget);
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 100) throw new Error("API enrichment batch size must be between 1 and 100.");
   if (!Number.isFinite(minimumIntervalMs) || minimumIntervalMs < 0) throw new Error("API enrichment interval must be non-negative.");
   if (!Number.isInteger(maximumAttempts) || maximumAttempts < 1 || maximumAttempts > 8) throw new Error("API enrichment attempts must be between 1 and 8.");
@@ -428,6 +439,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
     maximumAttempts,
     retryBaseMs,
     requestTimeoutMs,
+    budget,
     minimumSplitBatchSize,
     beforeAttempt: async () => {
       if (lastFetchStartedAt !== null) {
@@ -590,6 +602,9 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
   if (accounted !== summaries.length) throw new Error(`API enrichment accounting mismatch: ${accounted} outcomes for ${summaries.length} requested barcodes.`);
   const completedAt = new Date().toISOString();
   const sourceComplete = outcomes.failed === 0;
+  // A run is degraded when any item failed after retry, signalling that the
+  // produced snapshot is incomplete and must not be treated as a clean baseline.
+  const degraded = outcomes.failed > 0;
   const manifest: SourceManifest = {
     schemaVersion: 1,
     source: "open_food_facts_api",
@@ -624,6 +639,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
   const report = {
     generatedAt: completedAt,
     sourceComplete,
+    degraded,
     marketComplete: false,
     requestedBarcodes: summaries.length,
     accountedBarcodes: accounted,
@@ -652,6 +668,7 @@ export async function enrichOpenFoodFactsApi(options: OpenFoodFactsApiEnrichment
     minimumIntervalMs,
     requestTimeoutMs,
     maximumRequestBatchSize,
+    budget: budget.snapshot(),
     requestSchema: OPEN_FOOD_FACTS_API_REQUEST_SCHEMA,
     inputManifestHash: sourceManifest.inputHash,
     continuity: {

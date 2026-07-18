@@ -10,6 +10,7 @@ import { normalizeGtin } from "../../shared/gtin";
 import { emptyNutrition } from "../../shared/nutrition";
 import type { SourceManifest, StagedProduct, ValidationIssue } from "../../shared/types";
 import {
+  EXTRACTION_RESIDUAL_EXCEPTION_MAX_RATE,
   extractionAccountingSummary,
   isResidualExceptionReason,
   residualExceptionBoundsSatisfied,
@@ -26,6 +27,7 @@ import {
 import { parseRobotoffIngredientEvidence } from "./robotoff-ingredients";
 import { startExtractionProgress, type ExtractionProgressSink } from "./extraction-progress";
 import { readCompletedResponseCodes } from "./response-cache";
+import { RunBudget, type RunBudgetOptions, type RunBudgetSnapshot } from "./run-budget";
 import {
   createExtractionAttempt,
   createExtractionAttemptLabel,
@@ -108,10 +110,12 @@ export interface RobotoffIngredientApiOptions {
   minimumIntervalMs?: number;
   retryBaseMs?: number;
   maximumAttempts?: number;
+  requestTimeoutMs?: number;
   fetcher?: FetchLike;
   labelFetcher?: LabelImageFetchLike;
   maximumLabelBytes?: number;
   maximumLabelChunks?: number;
+  budget?: RunBudgetOptions;
   userAgent?: string;
   progress?: ExtractionProgressSink;
   progressIntervalMs?: number;
@@ -148,6 +152,7 @@ export interface RobotoffIngredientApiResult {
 export interface RobotoffIngredientReport {
   generatedAt: string;
   sourceComplete: boolean;
+  degraded: boolean;
   marketComplete: false;
   requestedBarcodes: number;
   accountedBarcodes: number;
@@ -163,6 +168,7 @@ export interface RobotoffIngredientReport {
   resumedBarcodes: number;
   requests: number;
   minimumIntervalMs: number;
+  requestTimeoutMs: number;
   confidenceThreshold: number;
   requestSchema: string;
   cohortHash: string;
@@ -177,6 +183,7 @@ export interface RobotoffIngredientReport {
   residualExceptionCount: number;
   residualExceptionRate: number;
   residualExceptionLimits: { maxCount: number; maxRate: number };
+  budget: RunBudgetSnapshot;
   exclusions: { records: number; path: string; reconcilesIndiaSlice: boolean };
 }
 
@@ -252,7 +259,10 @@ function retryDelay(response: Response | null, attempt: number, retryBaseMs: num
     const date = Date.parse(retryAfter);
     if (Number.isFinite(date)) return Math.min(Math.max(0, date - Date.now()), 60_000);
   }
-  return Math.min(retryBaseMs * (2 ** (attempt - 1)), 60_000);
+  // Full jitter: pick a random delay in [0, base * 2^(attempt-1)] to avoid
+  // thundering-herd retries against the same upstream endpoint.
+  const ceiling = Math.min(retryBaseMs * (2 ** (attempt - 1)), 60_000);
+  return Math.floor(Math.random() * (ceiling + 1));
 }
 
 function requestUrl(code: string, page: number): URL {
@@ -400,10 +410,14 @@ export async function extractRobotoffIngredientApi(
   const minimumIntervalMs = options.minimumIntervalMs ?? 1_100;
   const retryBaseMs = options.retryBaseMs ?? 2_000;
   const maximumAttempts = options.maximumAttempts ?? 5;
+  const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
   const confidenceThreshold = options.confidenceThreshold ?? 0.85;
   if (!Number.isFinite(minimumIntervalMs) || minimumIntervalMs < 0) throw new Error("Robotoff ingredient request interval must be non-negative.");
   if (!Number.isInteger(maximumAttempts) || maximumAttempts < 1 || maximumAttempts > 8) {
     throw new Error("Robotoff ingredient attempts must be between one and eight.");
+  }
+  if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > 300_000) {
+    throw new Error("Robotoff ingredient request timeout must be between 1 and 300000 milliseconds.");
   }
   if (!Number.isFinite(confidenceThreshold) || confidenceThreshold < 0 || confidenceThreshold > 1) {
     throw new Error("Robotoff ingredient confidence threshold must be between zero and one.");
@@ -411,6 +425,7 @@ export async function extractRobotoffIngredientApi(
   if (options.mode === "production" && options.limit !== null) {
     throw new Error("Production Robotoff ingredient extraction cannot use a barcode limit.");
   }
+  const budget = new RunBudget(options.budget);
 
   const sourceManifest = JSON.parse(await readFile(options.inputManifest, "utf8")) as SourceManifest;
   if (sourceManifest.source !== "open_food_facts" || !sourceManifest.sourceComplete || sourceManifest.terminalEvidence !== "end_of_file") {
@@ -511,8 +526,10 @@ export async function extractRobotoffIngredientApi(
         }
         lastFetchStartedAt = Date.now();
         requests += 1;
+        budget.recordApiCall();
         response = await fetcher(requestUrl(code, page), {
           headers: { Accept: "application/json", "User-Agent": userAgent },
+          signal: AbortSignal.timeout(requestTimeoutMs),
         });
         if (!response.ok) {
           const retryable = response.status === 429 || response.status === 503 || response.status >= 500;
@@ -635,6 +652,8 @@ export async function extractRobotoffIngredientApi(
             assetsByUrl.set(reference.url, asset);
             await writeLine(labelAssetOutput, asset);
             fetchedLabelAssets += 1;
+            budget.recordImage();
+            budget.recordBytes(hashed.byteLength);
           } catch (error) {
             labelFailure = error instanceof LabelImageHashError
               ? `label_${error.code}`
@@ -840,6 +859,11 @@ export async function extractRobotoffIngredientApi(
       reasons.length === 1 && isResidualExceptionReason(reasons[0]!)
     ));
   const sourceComplete = residualExceptionBoundsSatisfied(accounting) && residualFailuresAreEligible;
+  // Degraded when any barcode failed after retry, or when the residual-exception
+  // rate is approaching its bound (within 50% of the maximum allowed rate).
+  const residualExceptionApproaching = accounting.residualExceptionRate > 0
+    && accounting.residualExceptionRate >= EXTRACTION_RESIDUAL_EXCEPTION_MAX_RATE / 2;
+  const degraded = outcomes.failed > 0 || residualExceptionApproaching;
   const manifest: SourceManifest = {
     schemaVersion: 1,
     source: "open_food_facts_robotoff_ingredients",
@@ -875,6 +899,7 @@ export async function extractRobotoffIngredientApi(
   const report: RobotoffIngredientReport = {
     generatedAt: completedAt,
     sourceComplete,
+    degraded,
     marketComplete: false,
     requestedBarcodes: contexts.length,
     accountedBarcodes,
@@ -890,6 +915,7 @@ export async function extractRobotoffIngredientApi(
     resumedBarcodes,
     requests,
     minimumIntervalMs,
+    requestTimeoutMs,
     confidenceThreshold,
     requestSchema: ROBOTOFF_INGREDIENT_REQUEST_SCHEMA,
     cohortHash,
@@ -900,6 +926,7 @@ export async function extractRobotoffIngredientApi(
     extractionAttempts: extractionAttempts.length,
     extractionAttemptLabels: extractionAttemptLabels.length,
     ...accounting,
+    budget: budget.snapshot(),
     exclusions: {
       records: outcomes.no_prediction + outcomes.rejected + outcomes.failed,
       path: basename(exclusionsPath),

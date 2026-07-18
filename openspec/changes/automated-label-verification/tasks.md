@@ -23,4 +23,4 @@
 - [x] 4.1 Expose machine-verified evidence separately from human-reviewed evidence in catalog APIs, filters, and product details.
 - [x] 4.2 Update consumer evidence language without exposing infrastructure details.
 - [x] 4.3 Add unit, reconciliation, worker API, dashboard, and regression tests for accepted, rejected, stale, and conflicting attempts.
-- [ ] 4.4 Run the full check suite, the benchmark, a local import rehearsal, and a guarded production preflight before any deploy.
+- [x] 4.4 Run the full check suite, the benchmark, a local import rehearsal, and a guarded production preflight before any deploy.

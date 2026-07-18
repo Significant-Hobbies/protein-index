@@ -26,6 +26,7 @@ describe("machine nutrition publication", () => {
     const batch = emitMachinePublicationBatch([outcome], { passed: true, adapterVersion: "machine-label-v4", cases: [{ errors: [] }, { errors: [] }] });
     expect(batch.manifest).toMatchObject({ acceptedCount: 1, accepted: [{ productId: "prd_test", labelAssetId: "asset_test" }] });
     expect(batch.sql.indexOf("INSERT INTO label_evidence_assets")).toBeLessThan(batch.sql.indexOf("INSERT INTO machine_nutrition_verifications"));
+    expect(emitMachinePublicationBatch([{ ...outcome, status: "cached" }], { passed: true, adapterVersion: "machine-label-v4", cases: [{ errors: [] }, { errors: [] }] }).manifest.acceptedCount).toBe(1);
     expect(() => emitMachinePublicationBatch([outcome], { passed: true, adapterVersion: "machine-label-v4", cases: [{ errors: [] }, { errors: [] }] }, new Set(["other-candidate"]))).toThrow("contains no accepted");
   });
 
