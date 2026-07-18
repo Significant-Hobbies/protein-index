@@ -200,6 +200,17 @@
       "maxSitemapDepth": 2,
       "minimumRequestIntervalMs": 750,
       "maxRetries": 3
+    },
+    {
+      "id": "wellbeing_nutrition_india",
+      "name": "Wellbeing Nutrition",
+      "allowedHosts": ["wellbeingnutrition.com"],
+      "sitemapUrls": ["https://wellbeingnutrition.com/sitemap.xml"],
+      "productPathPrefixes": ["/products/"],
+      "maxProductPages": 500,
+      "maxSitemapDepth": 2,
+      "minimumRequestIntervalMs": 750,
+      "maxRetries": 3
     }
   ]
 }

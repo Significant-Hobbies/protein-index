@@ -69,6 +69,9 @@ jobs:
           - source: myfitness_india
             name: MyFitness
             directory: myfitness
+          - source: wellbeing_nutrition_india
+            name: Wellbeing Nutrition
+            directory: wellbeing-nutrition
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
