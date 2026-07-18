@@ -8,6 +8,7 @@ import type { NutritionPer100g } from "../shared/types";
 
 export const MACHINE_LABEL_ADAPTER_VERSION = "machine-label-v10";
 export const MACHINE_LABEL_MODEL = "qwen3-vl:32b-instruct";
+export const MACHINE_LABEL_MODEL_TIMEOUT_MS = 120_000;
 
 type Basis = "per_100g" | "per_100ml" | "unknown";
 type DeclaredBasis = Basis | "per_serving";
@@ -342,7 +343,10 @@ export async function runMacOsVision(imagePath: string): Promise<VisionResult> {
   return { engine: "macos_vision", version: typeof parsed?.version === "string" ? parsed.version : "unknown", lines };
 }
 
-export async function runQwenLabel(imageBytes: Uint8Array, endpoint = "http://127.0.0.1:11434"): Promise<ModelResult> {
+export async function runQwenLabel(imageBytes: Uint8Array, endpoint = "http://127.0.0.1:11434", timeoutMilliseconds = MACHINE_LABEL_MODEL_TIMEOUT_MS): Promise<ModelResult> {
+  if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds < 1 || timeoutMilliseconds > 300_000) {
+    throw new RangeError("Local model timeout must be between 1 and 300000 milliseconds.");
+  }
   const tagResponse = await fetch(`${endpoint}/api/tags`);
   if (!tagResponse.ok) throw new Error(`Ollama model listing failed with ${tagResponse.status}.`);
   const tags = record(await tagResponse.json());
@@ -351,6 +355,7 @@ export async function runQwenLabel(imageBytes: Uint8Array, endpoint = "http://12
   const response = await fetch(`${endpoint}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: AbortSignal.timeout(timeoutMilliseconds),
     body: JSON.stringify({ model: MACHINE_LABEL_MODEL, stream: false, format: MODEL_RESULT_SCHEMA, think: false, options: { temperature: 0, num_ctx: 8192 }, messages: [{ role: "user", content: MODEL_PROMPT, images: [Buffer.from(imageBytes).toString("base64")] }] }),
   });
   if (!response.ok) throw new Error(`Ollama label extraction failed with ${response.status}.`);
