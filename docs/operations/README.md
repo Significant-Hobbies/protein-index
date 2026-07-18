@@ -55,13 +55,18 @@ or reads production credentials.
 
 ```bash
 pnpm data:macro-refresh --root /absolute/local/data/protein-index \
-  --phase all --label-limit 100 --run-labels
+  --phase all --brand-concurrency 4 --label-limit 100 --run-labels
 ```
 
 The final `runs/<timestamp>/report.json` reports each configured source,
 whether the cohort is source-complete, the bounded label queue, and local model
 outcomes. `marketComplete` is always false: the result is exhaustive only
 within Open Food Facts plus the explicitly configured first-party sources.
+
+`--brand-concurrency` defaults to `4` and may be set from `1` to `16`. It only
+runs independent first-party brand jobs in parallel; each brand retains its
+configured request interval, retry budget, and page ceiling. Use `1` for
+serial diagnostics on a constrained network.
 
 To schedule the job weekly on the local macOS model machine, create the log
 directory, substitute both placeholders in

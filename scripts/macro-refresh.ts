@@ -31,6 +31,7 @@ export interface MacroRefreshReport {
   phase: MacroRefreshPhase;
   remotePublicationAttempted: false;
   configuredSources: string[];
+  brandConcurrency: number;
   sourceBoundedComplete: boolean;
   marketComplete: false;
   sources: MacroRefreshSourceOutcome[];
@@ -81,6 +82,14 @@ function positiveLimit(value: string | null): number | null {
   return parsed;
 }
 
+function boundedBrandConcurrency(value: number | null | undefined): number {
+  const concurrency = value ?? 4;
+  if (!Number.isSafeInteger(concurrency) || concurrency < 1 || concurrency > 16) {
+    throw new Error("--brand-concurrency must be an integer between 1 and 16.");
+  }
+  return concurrency;
+}
+
 function hash(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -119,6 +128,46 @@ async function writeLines(path: string, lines: string[]): Promise<string> {
   return hash(value);
 }
 
+async function discoverBrandSources(input: {
+  sources: OfficialBrandDiscoveryConfig["sources"];
+  concurrency: number;
+  outputDirectory: string;
+  discover: NonNullable<MacroRefreshDependencies["discoverBrand"]>;
+}): Promise<MacroRefreshSourceOutcome[]> {
+  const outcomes: MacroRefreshSourceOutcome[] = new Array(input.sources.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(input.concurrency, input.sources.length) }, async () => {
+    while (nextIndex < input.sources.length) {
+      const index = nextIndex++;
+      const source = input.sources[index]!;
+      try {
+        const result = await input.discover({ source, outputDirectory: join(input.outputDirectory, source.id) });
+        outcomes[index] = {
+          id: source.id,
+          kind: "official_brand",
+          sourceComplete: result.manifest.sourceComplete,
+          stagedRecords: result.manifest.stagedRecords,
+          stagedPath: result.stagedPath,
+          manifestPath: result.manifestPath,
+          error: null,
+        };
+      } catch (error) {
+        outcomes[index] = {
+          id: source.id,
+          kind: "official_brand",
+          sourceComplete: false,
+          stagedRecords: null,
+          stagedPath: null,
+          manifestPath: null,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+  });
+  await Promise.all(workers);
+  return outcomes;
+}
+
 function defaultRunId(now: Date): string {
   return now.toISOString().replace(/[:.]/g, "-");
 }
@@ -131,12 +180,14 @@ export async function runMacroRefresh(input: {
   sourceIds?: string[];
   openFoodFactsInput?: string | null;
   labelLimit?: number | null;
+  brandConcurrency?: number | null;
   runLabels?: boolean;
 }, dependencies: MacroRefreshDependencies = {}): Promise<MacroRefreshReport> {
   const now = dependencies.now ?? (() => new Date());
   const generatedAt = now().toISOString();
   const runId = input.runId ?? defaultRunId(now());
   const phaseValue = input.phase ?? "all";
+  const brandConcurrency = boundedBrandConcurrency(input.brandConcurrency);
   const runDirectory = join(input.rootDirectory, "runs", runId);
   const sourceDirectory = join(runDirectory, "sources");
   const labelsDirectory = join(runDirectory, "labels");
@@ -169,13 +220,16 @@ export async function runMacroRefresh(input: {
     } catch (error) {
       outcomes.push({ id: "open_food_facts", kind: "open_food_facts", sourceComplete: false, stagedRecords: null, stagedPath: null, manifestPath: null, error: error instanceof Error ? error.message : String(error) });
     }
-    for (const source of configuredBrandSources) {
-      try {
-        const result = await (dependencies.discoverBrand ?? ((value) => discoverOfficialBrandCatalog(value)))({ source, outputDirectory: join(sourceDirectory, source.id) });
-        outcomes.push({ id: source.id, kind: "official_brand", sourceComplete: result.manifest.sourceComplete, stagedRecords: result.manifest.stagedRecords, stagedPath: result.stagedPath, manifestPath: result.manifestPath, error: null });
-        if (result.manifest.sourceComplete) snapshots.push({ id: source.id, kind: "official_brand", stagedPath: result.stagedPath, manifestPath: result.manifestPath });
-      } catch (error) {
-        outcomes.push({ id: source.id, kind: "official_brand", sourceComplete: false, stagedRecords: null, stagedPath: null, manifestPath: null, error: error instanceof Error ? error.message : String(error) });
+    const brandOutcomes = await discoverBrandSources({
+      sources: configuredBrandSources,
+      concurrency: brandConcurrency,
+      outputDirectory: sourceDirectory,
+      discover: dependencies.discoverBrand ?? ((value) => discoverOfficialBrandCatalog(value)),
+    });
+    outcomes.push(...brandOutcomes);
+    for (const outcome of brandOutcomes) {
+      if (outcome.sourceComplete && outcome.stagedPath && outcome.manifestPath) {
+        snapshots.push({ id: outcome.id, kind: outcome.kind, stagedPath: outcome.stagedPath, manifestPath: outcome.manifestPath });
       }
     }
   } else {
@@ -221,6 +275,7 @@ export async function runMacroRefresh(input: {
     phase: phaseValue,
     remotePublicationAttempted: false,
     configuredSources: ["open_food_facts", ...configuredBrandSources.map((source) => source.id)],
+    brandConcurrency,
     sourceBoundedComplete,
     marketComplete: false,
     sources: outcomes,
@@ -236,6 +291,7 @@ async function main(): Promise<void> {
   const rootDirectory = option("root") ?? ".data/macro-refresh";
   const configPath = option("config") ?? "config/official-brand-sources.json";
   const labelLimit = positiveLimit(option("label-limit"));
+  const brandConcurrency = option("brand-concurrency");
   const report = await runMacroRefresh({
     rootDirectory,
     configPath,
@@ -244,6 +300,7 @@ async function main(): Promise<void> {
     sourceIds: values("source"),
     openFoodFactsInput: option("open-food-facts-input"),
     labelLimit,
+    brandConcurrency: brandConcurrency === null ? null : Number(brandConcurrency),
     runLabels: process.argv.includes("--run-labels"),
   });
   process.stdout.write(`${JSON.stringify({ runId: report.runId, sourceBoundedComplete: report.sourceBoundedComplete, marketComplete: report.marketComplete, labels: report.labels, report: join(rootDirectory, "runs", report.runId, "report.json") })}\n`);

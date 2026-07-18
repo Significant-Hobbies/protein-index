@@ -55,6 +55,7 @@ the strict terminal-evidence gate above is actually satisfied.
 
 - 2026-07-19 — live dashboard audit found its coverage payload recomputed detail-only extraction JSON, stale-label diagnostics, and review-list state for every completion family. The summary path now retains exact completion/lane accounting while skipping those unused projections; focused Worker tests assert each returned state and lane count matches the detailed ledger.
 - 2026-07-19 — guarded deployment `127db2f` released the slim summary path after green CI and the full preflight. Live coverage fell from roughly 16 seconds to repeated 1.6–3.1 second responses, the default protein-density catalog query stayed below one second, and a fresh browser audit confirmed no console errors, default `Protein / 100 kcal` sorting, and no public offer or cost fields.
+- 2026-07-19 — local macro refresh now schedules independent configured brand sources through a deterministic bounded pool (default four, configurable one to sixteen) without changing any source's request interval, retry budget, page ceiling, evidence policy, or no-publication boundary. The expanded 304-unit/61-Worker full check, docs validation, and strict OpenSpec validation pass; the first current free-source refresh is staging separately.
 
 - 2026-07-15 — private repository created; core MVP specification and implementation started
 - 2026-07-15 — local catalog, D1 ingestion, Worker API, operator UI, source-complete Open Food Facts adapter, and scheduled sync workflow implemented
@@ -245,6 +246,8 @@ the strict terminal-evidence gate above is actually satisfied.
 - Local, checksummed, source-bounded macro refresh with a macOS scheduler
   template, bounded local machine-label queue, and no remote publication side
   effect
+- Deterministic bounded parallelism for independent local first-party brand
+  refreshes, preserving configured source order and individual rate limits
 - Macro-first public API and dashboard that omit price/cost comparison controls
   and retailer-offer payloads while retaining evidence provenance internally
 - Resumable, rate-bounded richer Open Food Facts API enrichment with exhaustive

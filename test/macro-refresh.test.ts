@@ -90,4 +90,46 @@ describe("zero-cost macro refresh", () => {
     expect(report.labels.queuePath).toBeNull();
     expect(report.sources.find((source) => source.id === "acme_india")).toMatchObject({ sourceComplete: false, error: "brand unavailable" });
   });
+
+  it("bounds independent brand discovery while retaining configured-source report order", async () => {
+    const { root, config, input } = await fixtureRoot();
+    await writeFile(config, JSON.stringify({
+      schemaVersion: 1,
+      sources: ["alpha", "beta", "gamma"].map((id) => ({
+        id,
+        name: id,
+        allowedHosts: [`${id}.example`],
+        sitemapUrls: [`https://${id}.example/sitemap.xml`],
+      })),
+    }), "utf8");
+    let active = 0;
+    let peak = 0;
+    const report = await runMacroRefresh({
+      rootDirectory: root,
+      configPath: config,
+      openFoodFactsInput: input,
+      brandConcurrency: 2,
+      phase: "sources",
+      runId: "bounded",
+    }, {
+      stage: async ({ outputDirectory }) => ({ manifest: manifest("open_food_facts", "open_data"), stagedPath: join(outputDirectory, "staged.jsonl"), manifestPath: join(outputDirectory, "manifest.json"), reportPath: join(outputDirectory, "report.json"), indexPath: join(outputDirectory, "index.jsonl"), exclusionsPath: join(outputDirectory, "exclusions.jsonl") }),
+      discoverBrand: async ({ source, outputDirectory }) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, source.id === "alpha" ? 20 : 5));
+        active -= 1;
+        return { manifest: manifest(source.id, "brand"), stagedPath: join(outputDirectory, "staged.jsonl"), manifestPath: join(outputDirectory, "manifest.json") };
+      },
+    });
+    expect(peak).toBe(2);
+    expect(report.brandConcurrency).toBe(2);
+    expect(report.sourceBoundedComplete).toBe(true);
+    expect(report.sources.map((source) => source.id)).toEqual(["open_food_facts", "alpha", "beta", "gamma"]);
+  });
+
+  it("rejects unsafe brand concurrency before contacting a source", async () => {
+    const { root, config, input } = await fixtureRoot();
+    await expect(runMacroRefresh({ rootDirectory: root, configPath: config, openFoodFactsInput: input, brandConcurrency: 17 }))
+      .rejects.toThrow("--brand-concurrency must be an integer between 1 and 16.");
+  });
 });

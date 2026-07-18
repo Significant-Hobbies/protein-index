@@ -29,8 +29,9 @@ the rendered dashboard passes desktop/mobile verification.
   with byte-hash-complete ledgers.
 - Zero-cost local macro refresh is implemented and tested. It creates
   checksummed source-bounded runs plus a bounded local machine-label queue;
-  it never publishes or deploys. A macOS launchd template is ready to install
-  once a local data directory is chosen.
+  it never publishes or deploys. Independent brand sources now use bounded
+  parallelism (default four) without changing each brand's rate limit. A macOS
+  launchd template is ready to install once a local data directory is chosen.
 - Live dashboard audit is complete: the catalog is live, defaults to protein
   per 100 kcal, and no longer displays offers or cost metrics. Guarded release
   `127db2f` is live; coverage now repeatedly returns in 1.6–3.1 seconds and
