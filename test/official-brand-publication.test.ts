@@ -87,7 +87,7 @@ describe("official brand publication preparation", () => {
     await expect(validateOfficialBrandPublicationSnapshot(snapshot.directory)).rejects.toThrow("checksum mismatch");
   });
 
-  it("imports each complete brand as its own source and ingestion run in one transaction", async () => {
+  it("imports each complete brand as its own source and ingestion run in one D1-compatible file", async () => {
     const root = await mkdtemp(join(tmpdir(), "protein-brand-publication-"));
     const configPath = join(root, "sources.json");
     await writeFile(configPath, JSON.stringify({ schemaVersion: 1, sources: [
@@ -100,6 +100,7 @@ describe("official brand publication preparation", () => {
     const importPath = join(root, "import.sql");
     const generated = await emitOfficialBrandPublicationImportSql({ directory: snapshot.directory, outputPath: importPath });
     expect(generated).toMatchObject({ products: 2, runIds: expect.arrayContaining([expect.any(String)]) });
+    expect(await readFile(importPath, "utf8")).not.toMatch(/\b(?:BEGIN|COMMIT)\b/);
     const db = new DatabaseSync(":memory:");
     for (const migration of (await readdir("migrations")).filter((name) => name.endsWith(".sql")).sort()) db.exec(await readFile(join("migrations", migration), "utf8"));
     db.exec(await readFile(importPath, "utf8"));

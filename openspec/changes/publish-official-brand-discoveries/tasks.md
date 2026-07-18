@@ -6,7 +6,7 @@
 
 ## 2. Multi-source reconciliation
 
-- [x] 2.1 Extend import generation to preserve a distinct source and ingestion run for each constituent brand snapshot in one transaction.
+- [x] 2.1 Extend import generation to preserve a distinct source and ingestion run for each constituent brand snapshot in one D1-compatible import file.
 - [ ] 2.2 Preserve GTIN-first/composite identity resolution, first-party offers, and unresolved identity review behavior across source sets.
 - [x] 2.3 Add idempotency and trust-boundary tests for a new product, shared GTIN, and unverified first-party nutrition.
 

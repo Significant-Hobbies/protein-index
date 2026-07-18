@@ -267,7 +267,7 @@ export async function emitOfficialBrandPublicationImportSql(input: {
   let products = 0;
   try {
     const combinedSqlPath = join(temporary, "official-brand-import.sql");
-    await writeFile(combinedSqlPath, "PRAGMA foreign_keys = ON;\nBEGIN IMMEDIATE;\n", "utf8");
+    await writeFile(combinedSqlPath, "PRAGMA foreign_keys = ON;\n", "utf8");
     for (const { source, manifest } of manifests) {
       const stagedPath = join(temporary, `${source}.staged-products.jsonl`);
       const manifestPath = join(temporary, `${source}.manifest.json`);
@@ -287,7 +287,6 @@ export async function emitOfficialBrandPublicationImportSql(input: {
       runIds.push(generated.runId);
       await appendFile(combinedSqlPath, await readFile(sourceSqlPath, "utf8"));
     }
-    await appendFile(combinedSqlPath, "COMMIT;\n");
     await writeFile(input.outputPath, await readFile(combinedSqlPath, "utf8"));
   } finally {
     await rm(temporary, { recursive: true, force: true });

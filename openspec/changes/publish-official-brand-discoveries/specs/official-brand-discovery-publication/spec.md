@@ -18,10 +18,11 @@ per-source record/exclusion accounting before producing publishable SQL.
 - **THEN** the preparer SHALL reject the cohort before producing import SQL
 
 ### Requirement: Publication preserves source-specific canonical evidence
-The system SHALL import every validated constituent manifest as its own source
-and ingestion run while retaining the original source ID on each source record,
-offer, and raw evidence. It MUST use existing GTIN-first and deterministic
-composite identity resolution and MUST retain unresolved products for review.
+The system SHALL import every validated constituent manifest through one
+D1-compatible generated import file, retaining each original source ID on its
+source records, offers, and raw evidence. It MUST use existing GTIN-first and
+deterministic composite identity resolution and MUST retain unresolved products
+for review.
 
 #### Scenario: A newly discovered product has no existing identity match
 - **WHEN** a validated brand record has neither an exact GTIN nor a deterministic
