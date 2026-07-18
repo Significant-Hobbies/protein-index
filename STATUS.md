@@ -32,8 +32,9 @@ the rendered dashboard passes desktop/mobile verification.
   it never publishes or deploys. A macOS launchd template is ready to install
   once a local data directory is chosen.
 - Live dashboard audit is complete: the catalog is live, defaults to protein
-  per 100 kcal, and no longer displays offers or cost metrics. Coverage summary
-  accounting now avoids detail-only extraction projections before deployment.
+  per 100 kcal, and no longer displays offers or cost metrics. Guarded release
+  `127db2f` is live; coverage now repeatedly returns in 1.6–3.1 seconds and
+  the default catalog query remains below one second.
 
 ## Blockers
 
@@ -61,8 +62,8 @@ the rendered dashboard passes desktop/mobile verification.
    rankings.
 3. Apply for GS1 India DataKart access and map its commercial/licensing
    constraints (`PROJECT_STATUS.md` item 3).
-4. Re-run desktop/mobile/tablet and accessibility checks against the live
-   deployment after the coverage-summary performance fix is released
+4. Keep a lightweight live desktop/mobile and accessibility smoke check in the
+   release checklist as the catalog grows
 5. Install the local launchd template with the chosen local data directory,
    then use the existing guarded publisher for any source-complete evidence
    release selected for the hosted dashboard.

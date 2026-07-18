@@ -54,6 +54,7 @@ the strict terminal-evidence gate above is actually satisfied.
 ## Timeline
 
 - 2026-07-19 — live dashboard audit found its coverage payload recomputed detail-only extraction JSON, stale-label diagnostics, and review-list state for every completion family. The summary path now retains exact completion/lane accounting while skipping those unused projections; focused Worker tests assert each returned state and lane count matches the detailed ledger.
+- 2026-07-19 — guarded deployment `127db2f` released the slim summary path after green CI and the full preflight. Live coverage fell from roughly 16 seconds to repeated 1.6–3.1 second responses, the default protein-density catalog query stayed below one second, and a fresh browser audit confirmed no console errors, default `Protein / 100 kcal` sorting, and no public offer or cost fields.
 
 - 2026-07-15 — private repository created; core MVP specification and implementation started
 - 2026-07-15 — local catalog, D1 ingestion, Worker API, operator UI, source-complete Open Food Facts adapter, and scheduled sync workflow implemented
