@@ -1,6 +1,6 @@
 # Protein Index — PROJECT STATUS
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
 ## Why / What
 
@@ -327,24 +327,19 @@ the strict terminal-evidence gate above is actually satisfied.
 14. Continue publishing real reviewed decisions only after exact source/hash
     validation; every publication must verify the live coverage delta and retain
     workflow diagnostics.
-15. Pending explicit release approval: apply the compatible production
-    migrations through `0018_reviewed_fact_time_boundary.sql`, generate and
-    publish fresh byte-hash-complete adapter-v8 and
-    adapter-v3 artifacts, publish the compatible reviewed bundles in
-    the guarded order, deploy the browser-verified dashboard,
-    redundant-evidence, and completion-ledger code, then prove the live family
-    accounting invariants and repeat API, desktop/mobile visual, and
-    accessibility verification before calling the release shipped.
-16. Blocked data refresh: protected Cloudflare credentials are configured, but
-    pending migrations `0007_review_queue_indexes.sql`,
-    `0008_redundant_evidence_decisions.sql`, and
-    `0009_extraction_outcome_ledger.sql` through
-    `0018_reviewed_fact_time_boundary.sql` still require separate explicit
-    production authorization. The repository-level manual publication gate is
+15. Release authorization was recorded on 2026-07-18. Production migrations
+    through `0019_machine_verified_nutrition.sql` are applied, and the
+    browser-verified dashboard release is proceeding through the normal CI,
+    deployment, and live-verification gates. Exact source-artifact publication
+    remains a separate safeguarded data operation.
+16. Data refresh status: protected Cloudflare credentials are configured and
+    production migrations `0007_review_queue_indexes.sql` through
+    `0019_machine_verified_nutrition.sql` are applied. The repository-level
+    manual publication gate is
     implemented and producer completion now causes zero publication jobs; the
     evidence workflow cannot apply migrations. Historical run `29511127992`
-    proved the credential and artifact route before failing closed on pending
-    migrations, while runs `29449999090`, `29474290721`, and `29495130626`
+    proved the credential and artifact route before failing closed on its
+    then-future schema assertion, while runs `29449999090`, `29474290721`, and `29495130626`
     retain evidence of the earlier empty credential state.
 17. The 13 adapter-v7 replacement bundles are committed and all 18 allowed
     bundles pass portable checksums plus semantic bundle validation: 312 unique
@@ -357,9 +352,7 @@ the strict terminal-evidence gate above is actually satisfied.
     set retains 220 unchanged decisions, binds 22 replacement decisions to v7,
     omits two non-candidates, and adds the separately reviewed whole-wheat-bread
     rejection for 23 v7 decisions total.
-    After pending production migrations `0007_review_queue_indexes.sql` and
-    `0008_redundant_evidence_decisions.sql` are explicitly approved,
-    source-check and publish the allowed liquid bundle set,
+    Source-check and publish the allowed liquid bundle set,
     including
     `review-230fca7ea00663c6c05e`,
     `review-e1c5dcaa7a70bbf66c0b`,
@@ -420,9 +413,10 @@ the strict terminal-evidence gate above is actually satisfied.
 24. Completed locally: mutable projected unavailable outcomes are replaced by
     immutable, source/hash-bound not-declared and not-applicable decisions with
     contradiction handling, deterministic fallback, stale-evidence refresh,
-    and idempotent replay. Production migrations remain pending approval.
+    and idempotent replay. The compatible production schema is applied; this
+    evidence still needs its separate source-checked publication.
 25. Completed locally: identity-resolution publication writes immutable exact
     source/hash-bound verification decisions whose evidence URL must match the
     current source or retained current-label bytes. GTIN or catalog presence
-    alone never marks identity verified; remote migration and deployment remain
-    pending explicit approval.
+    alone never marks identity verified; its source-checked evidence publication
+    remains separate from the dashboard release.
