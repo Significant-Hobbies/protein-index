@@ -209,6 +209,8 @@ describe("official brand sitemap discovery", () => {
     validateOfficialBrandConfig(config);
     const workflow = await readFile(".github/workflows/official-brand-discovery.yml", "utf8");
     for (const configured of config.sources) expect(workflow).toContain(`- source: ${configured.id}`);
+    expect(workflow).toContain("timeout-minutes: ${{ matrix.timeout_minutes || 15 }}");
+    expect(workflow).toContain("timeout_minutes: 30");
   });
 
   it("reconciles first-party identity and offer evidence through the normal import path", async () => {

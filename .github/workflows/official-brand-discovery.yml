@@ -12,7 +12,7 @@ jobs:
   catalog:
     name: ${{ matrix.name }} catalog snapshot
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ matrix.timeout_minutes || 15 }}
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +29,7 @@ jobs:
           - source: muscleblaze_india
             name: MuscleBlaze
             directory: muscleblaze
+            timeout_minutes: 30
           - source: max_protein_india
             name: Max Protein
             directory: max-protein
