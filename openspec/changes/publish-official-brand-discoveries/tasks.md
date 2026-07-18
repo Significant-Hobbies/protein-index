@@ -8,7 +8,7 @@
 
 - [x] 2.1 Extend import generation to preserve a distinct source and ingestion run for each constituent brand snapshot in one transaction.
 - [ ] 2.2 Preserve GTIN-first/composite identity resolution, first-party offers, and unresolved identity review behavior across source sets.
-- [ ] 2.3 Add idempotency and trust-boundary tests for a new product, shared GTIN, and unverified first-party nutrition.
+- [x] 2.3 Add idempotency and trust-boundary tests for a new product, shared GTIN, and unverified first-party nutrition.
 
 ## 3. Guarded production publication
 

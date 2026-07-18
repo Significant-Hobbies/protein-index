@@ -96,6 +96,31 @@ describe("official brand publication preparation", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM sources WHERE id IN ('brand_one', 'brand_two')").get()).toEqual({ count: 2 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM ingestion_runs WHERE source_id IN ('brand_one', 'brand_two')").get()).toEqual({ count: 2 });
     expect(db.prepare("SELECT COUNT(*) AS count FROM offers WHERE retailer IN ('brand_one', 'brand_two')").get()).toEqual({ count: 2 });
+    db.exec(await readFile(importPath, "utf8"));
+    expect(db.prepare("SELECT COUNT(*) AS count FROM source_records WHERE source_id IN ('brand_one', 'brand_two')").get()).toEqual({ count: 2 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM offers WHERE retailer IN ('brand_one', 'brand_two')").get()).toEqual({ count: 2 });
+    db.close();
+  });
+
+  it("reconciles a shared GTIN without promoting first-party discovery nutrition to verified facts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "protein-brand-publication-"));
+    const configPath = join(root, "sources.json");
+    await writeFile(configPath, JSON.stringify({ schemaVersion: 1, sources: [
+      { id: "brand_one", name: "Brand One", allowedHosts: ["brand-one.example"], sitemapUrls: ["https://brand-one.example/sitemap.xml"] },
+      { id: "brand_two", name: "Brand Two", allowedHosts: ["brand-two.example"], sitemapUrls: ["https://brand-two.example/sitemap.xml"] },
+    ] }));
+    const sharedGtin = "08900000000012";
+    const one = await artifact(root, "brand_one", product("brand_one", "bar-one", sharedGtin));
+    const two = await artifact(root, "brand_two", product("brand_two", "bar-two", sharedGtin));
+    const snapshot = await prepareOfficialBrandPublication({ configPath, sourceDirectories: { brand_one: one, brand_two: two }, outputDirectory: join(root, "publication") });
+    const importPath = join(root, "import.sql");
+    await emitOfficialBrandPublicationImportSql({ directory: snapshot.directory, outputPath: importPath });
+    const db = new DatabaseSync(":memory:");
+    for (const migration of (await readdir("migrations")).filter((name) => name.endsWith(".sql")).sort()) db.exec(await readFile(join("migrations", migration), "utf8"));
+    db.exec(await readFile(importPath, "utf8"));
+    expect(db.prepare("SELECT COUNT(*) AS count FROM products WHERE gtin = ?").get(sharedGtin)).toEqual({ count: 1 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM source_records WHERE source_id IN ('brand_one', 'brand_two')").get()).toEqual({ count: 2 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM nutrition_facts WHERE status = 'verified'").get()).toEqual({ count: 0 });
     db.close();
   });
 
@@ -106,6 +131,8 @@ describe("official brand publication preparation", () => {
     ]);
     expect(producer).toContain("official-brand-${{ matrix.source }}-${{ github.run_id }}");
     expect(publisher).toContain("PUBLISH_OFFICIAL_BRAND_DISCOVERIES_TO_PRODUCTION");
+    expect(publisher).toContain("Official brand discovery");
+    expect(publisher).toContain("official-brand-${source}-${runId}");
     expect(publisher).toContain("Official-brand publication refuses pending migrations.");
     expect(publisher).toContain("pnpm data:brand-prepare");
     expect(publisher).toContain("pnpm data:brand-import-sql");
