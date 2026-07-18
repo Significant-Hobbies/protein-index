@@ -44,6 +44,50 @@ source-sync (cron Mon 02:23 UTC)
 
 Per-job reference: [jobs/](jobs/README.md).
 
+## Local no-cost macro refresh
+
+The local refresh is the zero-provider-cost producer for a machine that already
+has the local Vision and Qwen label tools. It stages the complete Open Food
+Facts India export, every configured first-party brand sitemap, and a bounded
+queue of current protein-branded label images. It writes checksummed artifacts
+under the selected local directory and **never** writes D1, deploys the Worker,
+or reads production credentials.
+
+```bash
+pnpm data:macro-refresh --root /absolute/local/data/protein-index \
+  --phase all --label-limit 100 --run-labels
+```
+
+The final `runs/<timestamp>/report.json` reports each configured source,
+whether the cohort is source-complete, the bounded label queue, and local model
+outcomes. `marketComplete` is always false: the result is exhaustive only
+within Open Food Facts plus the explicitly configured first-party sources.
+
+To schedule the job weekly on the local macOS model machine, create the log
+directory, substitute both placeholders in
+[`ops/com.proteinindex.macro-refresh.plist.template`](../../ops/com.proteinindex.macro-refresh.plist.template), and install it as a user agent:
+
+```bash
+mkdir -p /absolute/local/data/protein-index/logs
+sed \
+  -e "s|__REPOSITORY_ROOT__|$(pwd)|g" \
+  -e "s|__LOCAL_DATA_ROOT__|/absolute/local/data/protein-index|g" \
+  ops/com.proteinindex.macro-refresh.plist.template \
+  > "$HOME/Library/LaunchAgents/com.proteinindex.macro-refresh.plist"
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.proteinindex.macro-refresh.plist"
+```
+
+The wrapper has an advisory local-directory lock, so overlapping launchd runs
+exit safely. To stop it, run:
+
+```bash
+launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/com.proteinindex.macro-refresh.plist"
+rm "$HOME/Library/LaunchAgents/com.proteinindex.macro-refresh.plist"
+```
+
+The existing guarded publication workflows remain the only paths that can put a
+selected evidence bundle on the hosted dashboard.
+
 ## Publication gates
 
 Every publication workflow enforces the same gate pattern, with a narrower or

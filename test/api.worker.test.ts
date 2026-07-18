@@ -587,7 +587,7 @@ describe("Worker catalog API", () => {
     expect(detail.ingredientStatement).toBeTruthy();
     expect(detail.ingredients.length).toBeGreaterThan(0);
     expect(detail.nutrients.length).toBeGreaterThan(0);
-    expect(detail.offers[0]?.retailer).toBe("fixture_retailer");
+    expect("offers" in detail).toBe(false);
     expect(detail.ratings[0]?.ratingCount).toBeGreaterThan(0);
     expect(detail.provenance.some((observation) => observation.field.startsWith("nutrition."))).toBe(true);
 
@@ -1099,15 +1099,6 @@ describe("Worker catalog API", () => {
     });
     expect(detail.metrics.proteinPer100Calories).toEqual({ value: 18.75, reason: null });
     expect(detail.metrics.proteinCaloriePercentage).toEqual({ value: 75, reason: null });
-    expect(detail.metrics.totalProteinInPack).toEqual({
-      value: null,
-      reason: "nutrition_basis_not_mass_normalized",
-    });
-    expect(detail.metrics.costPer25gProtein.value).toBeNull();
-    expect(detail.metrics.pricePerServing).toEqual({
-      value: null,
-      reason: "nutrition_basis_not_mass_normalized",
-    });
     const artifacts = await env.DB.prepare(`SELECT
       (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND source_record_id = ? AND basis = 'per_100ml') AS nutrients,
       (SELECT COUNT(*) FROM nutrient_values WHERE product_id = ? AND nutrient_code = 'sugarGrams') AS stale_core,
@@ -1420,31 +1411,11 @@ describe("Worker catalog API", () => {
     expect(detail.nutrition.basis).toBe("per_100ml");
     expect(detail.metrics.proteinPer100Calories).toEqual({ value: expect.closeTo(1.11, 2), reason: null });
     expect(detail.metrics.proteinCaloriePercentage).toEqual({ value: expect.closeTo(4.44, 2), reason: null });
-    expect(detail.metrics.totalProteinInPack).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });
-    expect(detail.metrics.costPer25gProtein.value).toBeNull();
-    expect(detail.metrics.pricePerServing).toEqual({ value: null, reason: "nutrition_basis_not_mass_normalized" });
   });
 
-  it("does not sort non-mass nutrition by a fabricated cost per protein", async () => {
-    const product = await env.DB.prepare(`SELECT p.id
-      FROM products p JOIN nutrition_facts n ON n.product_id = p.id
-      JOIN offers o ON o.product_id = p.id AND o.available = 1
-      WHERE n.status = 'verified' AND p.net_quantity_grams > 0 AND n.protein_grams > 0
-      ORDER BY p.id LIMIT 1`).first<{ id: string }>();
-    if (!product) throw new Error("Expected a seeded product with mass nutrition and an offer");
-
-    await env.DB.batch([
-      env.DB.prepare("UPDATE nutrition_facts SET basis = 'per_100ml' WHERE product_id = ?").bind(product.id),
-      env.DB.prepare("UPDATE offers SET selling_price = 1 WHERE product_id = ?").bind(product.id),
-    ]);
-
+  it("rejects price sorting from the macro-first consumer API", async () => {
     const response = await worker.fetch("http://localhost/api/products?sort=cost&pageSize=100");
-    expect(response.status).toBe(200);
-    const catalog = await json<CatalogResponse>(response);
-    const productIndex = catalog.products.findIndex(({ id }) => id === product.id);
-    expect(productIndex).toBeGreaterThan(0);
-    expect(catalog.products[productIndex]?.metrics.costPer25gProtein.value).toBeNull();
-    expect(catalog.products.slice(0, productIndex).every(({ metrics }) => metrics.costPer25gProtein.value !== null)).toBe(true);
+    expect(response.status).toBe(400);
   });
 
   it("rejects a Robotoff candidate without clearing independently sourced nutrition", async () => {

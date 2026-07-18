@@ -381,8 +381,6 @@ export function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
             <th scope="col">Protein</th>
             <th scope="col">Energy</th>
             <th scope="col">Protein calories</th>
-            <th scope="col">Cost / 25 g</th>
-            <th scope="col">Current offer</th>
             <th scope="col">Field coverage</th>
           </tr>
         </thead>
@@ -397,8 +395,6 @@ export function CatalogTable({ data, onOpen, onExplore, page, onPage }: {
               <td><strong>{formatNumber(product.nutrition.proteinGrams)} g</strong><small>{nutritionBasisLabel(product.nutrition.basis)}</small></td>
               <td><strong>{product.nutrition.calories === null ? "—" : `${formatNumber(product.nutrition.calories)} kcal`}</strong><small>{nutritionBasisLabel(product.nutrition.basis)}</small></td>
               <td>{metric(product.metrics.proteinCaloriePercentage, "%")}</td>
-              <td>{product.metrics.costPer25gProtein.value === null ? "—" : `₹${formatNumber(product.metrics.costPer25gProtein.value, 2)}`}</td>
-              <td>{product.currentOffer ? <><strong>₹{formatNumber(product.currentOffer.sellingPrice, 0)}</strong><small>{product.currentOffer.retailer} · {product.currentOffer.pincode ?? "all India"}</small></> : "—"}</td>
               <td><span className="completeness"><i style={{ width: `${product.completeness}%` }} />{product.completeness}%</span></td>
             </tr>
           ))}
@@ -491,7 +487,7 @@ function ProductDrawer({ detail, loading, error, onClose }: {
               <div><p className="eyebrow">{detail.brand} · {detail.category.replaceAll("_", " ")}</p><h2>{detail.name}</h2><p>{detail.flavour ?? "No flavour declared"} · GTIN {detail.gtin ?? "not recorded"}</p><div className="product-pack-meta"><span><small>Pack size</small><strong>{detail.netQuantityGrams === null ? "Not recorded" : `${formatNumber(detail.netQuantityGrams, 0)} g`}</strong></span><span><small>Serving size</small><strong>{detail.servingSizeGrams === null ? "Not recorded" : `${formatNumber(detail.servingSizeGrams, 1)} g`}</strong></span></div><ClassificationBadges product={detail} /></div>
             </header>
 
-            {detail.nutritionStatus !== "verified" && <div className={`evidence-notice evidence-notice-${detail.nutritionStatus}`}><strong>{detail.nutritionStatus === "machine_verified" ? "Machine-verified from the current label" : detail.nutritionStatus === "missing" ? "Nutrition is missing" : detail.nutritionStatus === "conflict" ? "Nutrition sources conflict" : detail.nutritionEvidenceAuthority === "first_party_structured_source" ? "First-party structured nutrition—not label verified" : "Community evidence—not label verified"}</strong><span>{detail.nutritionStatus === "machine_verified" ? "Two local extractors and deterministic validation agree on this label. It remains excluded from Trusted comparisons until human or authoritative-source verification." : detail.nutritionEvidenceAuthority === "first_party_structured_source" ? "Protein-per-calorie metrics are shown because the source declares calories and protein together. Its basis is not stated, so it remains excluded from Trusted comparisons and mass-normalized price metrics." : detail.nutritionStatus === "unverified" ? "Validation-passing metrics are shown for discovery, but this product remains excluded from Trusted comparisons until a current label or authoritative source is verified." : "This product is excluded from trusted comparisons until the evidence gap is resolved."}</span></div>}
+            {detail.nutritionStatus !== "verified" && <div className={`evidence-notice evidence-notice-${detail.nutritionStatus}`}><strong>{detail.nutritionStatus === "machine_verified" ? "Machine-verified from the current label" : detail.nutritionStatus === "missing" ? "Nutrition is missing" : detail.nutritionStatus === "conflict" ? "Nutrition sources conflict" : detail.nutritionEvidenceAuthority === "first_party_structured_source" ? "First-party structured nutrition—not label verified" : "Community evidence—not label verified"}</strong><span>{detail.nutritionStatus === "machine_verified" ? "Two local extractors and deterministic validation agree on this label. It remains excluded from Trusted comparisons until human or authoritative-source verification." : detail.nutritionEvidenceAuthority === "first_party_structured_source" ? "Protein-per-calorie metrics are shown because the source declares calories and protein together. Its basis is not stated, so it remains excluded from Trusted comparisons." : detail.nutritionStatus === "unverified" ? "Validation-passing metrics are shown for discovery, but this product remains excluded from Trusted comparisons until a current label or authoritative source is verified." : "This product is excluded from trusted comparisons until the evidence gap is resolved."}</span></div>}
 
             <section className="trust-panel">
               <div><span>Nutrition</span><StatusBadge status={detail.nutritionStatus} /></div>
@@ -534,10 +530,8 @@ function ProductDrawer({ detail, loading, error, onClose }: {
               <div className="metric-grid">
                 <div><span>Protein / 100 kcal</span><strong><MetricValue result={detail.metrics.proteinPer100Calories} suffix=" g" /></strong></div>
                 <div><span>Calories from protein</span><strong><MetricValue result={detail.metrics.proteinCaloriePercentage} suffix="%" /></strong></div>
-                <div><span>Cost / 25 g protein</span><strong><MetricValue result={detail.metrics.costPer25gProtein} prefix="₹" /></strong></div>
                 <div><span>Calories for 25 g protein</span><strong><MetricValue result={detail.metrics.caloriesFor25gProtein} suffix=" kcal" /></strong></div>
                 <div><span>Sugar / 25 g protein</span><strong><MetricValue result={detail.metrics.sugarPer25gProtein} suffix=" g" /></strong></div>
-                <div><span>Protein / ₹100</span><strong><MetricValue result={detail.metrics.proteinPerInr100} suffix=" g" /></strong></div>
               </div>
             </section>
 
@@ -551,19 +545,10 @@ function ProductDrawer({ detail, loading, error, onClose }: {
               </div>
             </section>
 
-            <section>
-              <h3>Offers and retailer ratings</h3>
-              <div className="mini-table">
-                {detail.offers.length > 0 ? detail.offers.map((offer) => {
-                  const offerUrl = publicEvidenceUrl(offer.url);
-                  const content = <><span>{offer.retailer}<small>{offer.available ? offer.pincode ?? "all India" : "currently unavailable"} · observed {new Date(offer.observedAt).toLocaleDateString("en-IN")}</small></span><strong>₹{formatNumber(offer.sellingPrice, 0)}</strong></>;
-                  return offerUrl
-                    ? <a href={offerUrl} target="_blank" rel="noreferrer" key={`${offer.retailer}-${offer.listingId}-${offer.observedAt}`}>{content}</a>
-                    : <div key={`${offer.retailer}-${offer.listingId}-${offer.observedAt}`}>{content}</div>;
-                }) : <p className="inline-empty">No current retailer offers are recorded.</p>}
-              </div>
-              {detail.ratings.length > 0 ? <div className="ratings">{detail.ratings.map((rating) => <span key={`${rating.retailer}-${rating.observedAt}`}><strong>{rating.stars.toFixed(1)}★</strong> {rating.ratingCount.toLocaleString("en-IN")} ratings · {rating.retailer}<small>Observed {new Date(rating.observedAt).toLocaleDateString("en-IN")}</small></span>)}</div> : <p className="inline-empty retailer-empty">No retailer ratings are recorded.</p>}
-            </section>
+            {detail.ratings.length > 0 && <section>
+              <h3>Retailer ratings</h3>
+              <div className="ratings">{detail.ratings.map((rating) => <span key={`${rating.retailer}-${rating.observedAt}`}><strong>{rating.stars.toFixed(1)}★</strong> {rating.ratingCount.toLocaleString("en-IN")} ratings · {rating.retailer}<small>Observed {new Date(rating.observedAt).toLocaleDateString("en-IN")}</small></span>)}</div>
+            </section>}
 
             <section>
               <h3>Selected-field provenance</h3>
@@ -1943,7 +1928,7 @@ export function App() {
               <div><span>Machine labels</span><strong>{coverage?.catalog.machineVerifiedNutrition.toLocaleString("en-IN") ?? "—"}</strong><small>machine-verified nutrition</small></div>
               <div><span>Nutrition evidence</span><strong>{coverage ? (coverage.catalog.verifiedNutrition + coverage.catalog.unverifiedNutrition).toLocaleString("en-IN") : "—"}</strong><small>{coverage?.catalog.verifiedNutrition.toLocaleString("en-IN") ?? "—"} label verified</small></div>
               <div><span>Ingredients</span><strong>{coverage ? (coverage.catalog.verifiedIngredients + coverage.catalog.unverifiedIngredients).toLocaleString("en-IN") : "—"}</strong><small>statements captured</small></div>
-              <button onClick={() => setTab("coverage")}><span>Source state</span><strong>{coverage?.completion.sourceCoverageComplete ? "Exhausted" : "Checking"}</strong><small>configured sources only →</small></button>
+              <button onClick={() => setTab("coverage")}><span>Source state</span><strong>{coverage?.completion.sourceCoverageComplete ? "Source-complete" : "Checking"}</strong><small>configured free sources →</small></button>
             </section>
             <section className="trust-switch" aria-label="Comparison trust mode">
               <div><p className="eyebrow">Choose your evidence boundary</p><strong>{catalog?.trustedDefault ? "Trusted comparisons" : "Discovery catalog"}</strong><span>{catalog?.trustedDefault ? "Exact current identity, verified nutrition, and terminal ingredient evidence are required." : "Validation-passing community values can rank here with an unverified label; use Scope to explore every retained food."}</span></div>
@@ -1955,7 +1940,7 @@ export function App() {
               <label htmlFor="catalog-evidence">Evidence<select id="catalog-evidence" name="evidence" value={filters.verification} onChange={(event) => updateFilters({ trust: "all", verification: event.target.value })}><option value="verified">Verified nutrition</option><option value="machine_verified">Machine-verified label</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
               <label htmlFor="catalog-ingredients">Ingredients<select id="catalog-ingredients" name="ingredientEvidence" value={filters.ingredientVerification} onChange={(event) => updateFilters({ trust: "all", ingredientVerification: event.target.value })}><option value="verified">Verified ingredients</option><option value="unverified">Unverified</option><option value="conflict">Conflicts</option><option value="missing">Missing</option><option value="all">All evidence</option></select></label>
               <label htmlFor="catalog-scope">Scope<select id="catalog-scope" name="scope" value={filters.scope} onChange={(event) => updateFilters({ scope: event.target.value })}><option value="protein_branded">Protein-branded discovery</option><option value="protein">Protein cohorts</option><option value="all">All ingested foods</option></select></label>
-              <label htmlFor="catalog-sort">Sort<select id="catalog-sort" name="sort" value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}><option value="protein_density">Protein / 100 kcal</option><option value="cost">Cost / 25 g</option><option value="completeness">Field coverage</option><option value="name">Name</option></select></label>
+              <label htmlFor="catalog-sort">Sort<select id="catalog-sort" name="sort" value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}><option value="protein_density">Protein / 100 kcal</option><option value="completeness">Field coverage</option><option value="name">Name</option></select></label>
             </section>
             <div className="result-meta" aria-live="polite"><span>{catalog?.pagination.total.toLocaleString("en-IN") ?? "—"} results</span><small>Missing values stay missing. Unverified values never enter trusted metrics.</small></div>
             {catalogState.loading && <div className="loading" role="status"><span className="loader" />Querying canonical catalog…</div>}
@@ -1964,7 +1949,7 @@ export function App() {
           </>
         )}
         {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h1>Evidence review queue</h1><p>{isPublic ? "Inspect unresolved evidence and decision history. Production decisions remain read-only until operator authentication is in place." : "Resolve conflicts without discarding the original source record."}</p></section>{reviewId && <div className="read-only-notice"><strong>Focused review</strong><span>Showing the exact ledger-linked evidence item.</span><button className="ghost" onClick={() => setReviewId(null)}>Return to full queue</button></div>}<Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} typeFilter={reviewType} statusFilter={reviewStatus} page={reviewPage} onType={(type) => { setReviewId(null); setReviewPage(1); setReviewType(type); }} onStatus={(status) => { setReviewId(null); setReviewPage(1); setReviewStatus(status); }} onPage={setReviewPage} readOnly={isPublic} /></>}
-        {tab === "coverage" && <><section className="page-head"><p className="eyebrow">No fake completeness claims</p><h1>Coverage ledger</h1><p>Exhaustion is proved per configured source, with every active product reachable through an exact evidence worklist.</p></section><Coverage data={coverage} loading={coverageState.loading} error={coverageState.error} completion={completion} completionLoading={completionState.loading} completionError={completionState.error} completionFilters={completionFilters} completionFocusRequest={completionFocusRequest} onCompletionFamily={changeCompletionFamily} onCompletionState={changeCompletionState} onCompletionLane={changeCompletionLane} onCompletionQuery={changeCompletionQuery} onCompletionPage={changeCompletionPage} onCompletionRetry={loadCompletion} onCompletionDrillDown={drillIntoCompletion} onOpenProduct={setSelectedId} onOpenReview={openCompletionReview} onEvidenceCommitted={refreshAfterEvidenceDecision} readOnly={isPublic} /></>}
+        {tab === "coverage" && <><section className="page-head"><p className="eyebrow">No fake completeness claims</p><h1>Coverage ledger</h1><p>Completeness is proved per configured free source, never presented as the whole Indian market.</p></section><Coverage data={coverage} loading={coverageState.loading} error={coverageState.error} completion={completion} completionLoading={completionState.loading} completionError={completionState.error} completionFilters={completionFilters} completionFocusRequest={completionFocusRequest} onCompletionFamily={changeCompletionFamily} onCompletionState={changeCompletionState} onCompletionLane={changeCompletionLane} onCompletionQuery={changeCompletionQuery} onCompletionPage={changeCompletionPage} onCompletionRetry={loadCompletion} onCompletionDrillDown={drillIntoCompletion} onOpenProduct={setSelectedId} onOpenReview={openCompletionReview} onEvidenceCommitted={refreshAfterEvidenceDecision} readOnly={isPublic} /></>}
       </main>
       <footer><span>Protein Index</span><p>Evidence before rankings. Configured-source coverage, never a claim of the whole Indian market.</p><button onClick={() => setTab("coverage")}>Read the coverage ledger</button></footer>
       {selectedId && <ProductDrawer detail={detail} loading={detailState.loading} error={detailState.error} onClose={() => setSelectedId(null)} />}

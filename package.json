@@ -33,6 +33,7 @@
     "data:machine-publish-batch": "tsx scripts/machine-publication.ts batch",
     "data:machine-release": "tsx scripts/create-machine-release-bundle.ts",
     "data:machine-benchmark": "tsx scripts/machine-label-benchmark.ts",
+    "data:macro-refresh": "tsx scripts/macro-refresh.ts",
     "data:seed": "tsx scripts/sync.ts seed",
     "data:coverage": "tsx scripts/sync.ts coverage",
     "data:publish": "tsx scripts/sync.ts publish",

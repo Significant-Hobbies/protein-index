@@ -46,14 +46,23 @@ function product(input: { calories: number | null; proteinGrams: number | null }
       observedAt: "2026-07-17T00:00:00.000Z",
       labelVerifiedAt: "2026-07-17T00:00:00.000Z",
     },
-    currentOffer: null,
-    metrics: calculateMetrics({
+    metrics: (() => {
+      const metrics = calculateMetrics({
       nutrition,
       nutritionBasis: "per_100g",
       netQuantityGrams: 500,
       servingSizeGrams: 50,
       sellingPrice: null,
-    }),
+      });
+      return {
+        proteinPer100Calories: metrics.proteinPer100Calories,
+        proteinCaloriePercentage: metrics.proteinCaloriePercentage,
+        caloriesFor25gProtein: metrics.caloriesFor25gProtein,
+        sugarPer25gProtein: metrics.sugarPer25gProtein,
+        saturatedFatPer25gProtein: metrics.saturatedFatPer25gProtein,
+        fibrePer100Calories: metrics.fibrePer100Calories,
+      };
+    })(),
   };
 }
 
@@ -81,6 +90,8 @@ describe("catalog comparison surface", () => {
     expect(markup).toContain("Energy");
     expect(markup).toContain("52 g protein · 360 kcal · per 100 g");
     expect(markup.match(/360 kcal/g)).toHaveLength(2);
+    expect(markup).not.toContain("Cost / 25 g");
+    expect(markup).not.toContain("Current offer");
   });
 
   it("shows separate nutrition and ingredient evidence on mobile cards", () => {

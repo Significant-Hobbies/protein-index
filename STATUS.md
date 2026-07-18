@@ -4,7 +4,7 @@
 > [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Update this file each working
 > session; update `PROJECT_STATUS.md` when PR-sized work completes.
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 ## Current objective
 
@@ -27,6 +27,10 @@ the rendered dashboard passes desktop/mobile verification.
   calories-plus-protein comparisons; current source coverage remains incomplete.
 - Replacement adapter-v8 (nutrition) and adapter-v3 (ingredient) artifacts
   with byte-hash-complete ledgers.
+- Zero-cost local macro refresh is implemented and tested. It creates
+  checksummed source-bounded runs plus a bounded local machine-label queue;
+  it never publishes or deploys. A macOS launchd template is ready to install
+  once a local data directory is chosen.
 
 ## Blockers
 
@@ -56,6 +60,9 @@ the rendered dashboard passes desktop/mobile verification.
    constraints (`PROJECT_STATUS.md` item 3).
 4. Re-run desktop/mobile/tablet and accessibility checks against the live
    deployment after the updated dashboard is explicitly released
+5. Install the local launchd template with the chosen local data directory,
+   then use the existing guarded publisher for any source-complete evidence
+   release selected for the hosted dashboard.
    (`PROJECT_STATUS.md` item 2).
 
 ## Deferred

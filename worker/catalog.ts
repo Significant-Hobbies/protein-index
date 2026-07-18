@@ -40,11 +40,6 @@ interface ProductRow {
   nutrition_basis: "per_100g" | "per_100ml" | "per_serving" | "unknown" | null;
   nutrition_observed_at: string | null;
   label_verified_at: string | null;
-  offer_retailer: string | null;
-  selling_price: number | null;
-  mrp: number | null;
-  offer_pincode: string | null;
-  offer_observed_at: string | null;
 }
 
 interface CountRow { total: number }
@@ -83,25 +78,28 @@ function mapProduct(row: ProductRow): CatalogProduct {
     nutritionBasis: nutrition.basis,
     netQuantityGrams: row.net_quantity_grams,
     servingSizeGrams: row.serving_size_grams,
-    sellingPrice: row.selling_price,
+    sellingPrice: null,
   });
   const nutritionPassesValidation = !hasNutritionErrors(validateNutrition(
     nutritionPer100g,
     row.nutrition_basis ?? "unknown",
   ));
   const metrics = (row.nutrition_status === "verified" || row.nutrition_status === "machine_verified" || row.nutrition_status === "unverified") && nutritionPassesValidation
-    ? calculatedMetrics
+    ? {
+      proteinPer100Calories: calculatedMetrics.proteinPer100Calories,
+      proteinCaloriePercentage: calculatedMetrics.proteinCaloriePercentage,
+      caloriesFor25gProtein: calculatedMetrics.caloriesFor25gProtein,
+      sugarPer25gProtein: calculatedMetrics.sugarPer25gProtein,
+      saturatedFatPer25gProtein: calculatedMetrics.saturatedFatPer25gProtein,
+      fibrePer100Calories: calculatedMetrics.fibrePer100Calories,
+    }
     : {
         proteinPer100Calories: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
         proteinCaloriePercentage: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
-        costPer25gProtein: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
-        proteinPerInr100: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
         caloriesFor25gProtein: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
         sugarPer25gProtein: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
         saturatedFatPer25gProtein: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
         fibrePer100Calories: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
-        pricePerServing: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
-        totalProteinInPack: { value: null, reason: nutritionPassesValidation ? `nutrition_${row.nutrition_status ?? "missing"}` : "nutrition_validation_error" },
       };
   return {
     id: row.id,
@@ -128,15 +126,6 @@ function mapProduct(row: ProductRow): CatalogProduct {
     ingredientTerminalOutcome: row.ingredient_terminal_outcome,
     completeness: row.completeness,
     nutrition,
-    currentOffer: row.offer_retailer && row.selling_price !== null && row.offer_observed_at
-      ? {
-          retailer: row.offer_retailer,
-          sellingPrice: row.selling_price,
-          mrp: row.mrp,
-          pincode: row.offer_pincode,
-          observedAt: row.offer_observed_at,
-        }
-      : null,
     metrics,
   };
 }
@@ -186,7 +175,7 @@ export function validateSearch(input: URLSearchParams): { value?: SearchInput; e
     return { error: "Invalid ingredient verification filter" };
   }
   if (!["all", "protein", "protein_branded"].includes(value.scope)) return { error: "Invalid scope" };
-  if (!["protein_density", "cost", "completeness", "name"].includes(value.sort)) return { error: "Invalid sort" };
+  if (!["protein_density", "completeness", "name"].includes(value.sort)) return { error: "Invalid sort" };
   if (!Number.isInteger(value.page) || value.page < 1) return { error: "Page must be a positive integer" };
   if (!Number.isInteger(value.pageSize) || value.pageSize < 1 || value.pageSize > 100) return { error: "Page size must be between 1 and 100" };
   if (!Number.isInteger(value.minCompleteness) || value.minCompleteness < 0 || value.minCompleteness > 100) return { error: "Minimum completeness must be between 0 and 100" };
@@ -231,9 +220,7 @@ const SELECT_PRODUCT = `
     COALESCE(verified_nutrition.sodium_mg, machine_nutrition.sodium_mg, n.sodium_mg) AS sodium_mg,
     COALESCE(verified_nutrition.basis, machine_nutrition.basis, n.basis) AS nutrition_basis,
     COALESCE(verified_nutrition.observed_at, machine_nutrition.verified_at, n.observed_at) AS nutrition_observed_at,
-    COALESCE(verified_nutrition.label_verified_at, machine_nutrition.verified_at, n.label_verified_at) AS label_verified_at,
-    o.retailer AS offer_retailer, o.selling_price, o.mrp,
-    o.pincode AS offer_pincode, o.observed_at AS offer_observed_at
+    COALESCE(verified_nutrition.label_verified_at, machine_nutrition.verified_at, n.label_verified_at) AS label_verified_at
   FROM products p
   LEFT JOIN nutrition_facts n ON n.product_id = p.id
   LEFT JOIN source_records nutrition_record ON nutrition_record.id = n.source_record_id
@@ -259,11 +246,7 @@ const SELECT_PRODUCT = `
     AND ingredient_terminal.verified_at = ingredient_terminal_decision.decided_at
     AND ingredient_terminal.decided_by = 'terminal_evidence_projection'
     AND ingredient_terminal.notes = 'terminal_evidence_decision:' || ingredient_terminal_decision.id
-  LEFT JOIN offers o ON o.id = (
-    SELECT latest.id FROM offers latest
-    WHERE latest.product_id = p.id AND latest.available = 1
-    ORDER BY latest.observed_at DESC, latest.selling_price ASC LIMIT 1
-  )`;
+  `;
 
 function filtersFor(input: SearchInput): { sql: string; bindings: Array<string | number> } {
   const clauses: string[] = ["p.is_active = 1"];
@@ -311,7 +294,6 @@ export async function searchProducts(db: D1Database, input: SearchInput): Promis
   const filters = filtersFor(input);
   const order = {
     protein_density: "CASE WHEN (verified_nutrition.product_id IS NOT NULL OR machine_nutrition.product_id IS NOT NULL OR n.status IN ('verified', 'unverified')) AND COALESCE(verified_nutrition.calories, machine_nutrition.calories, n.calories) > 0 AND COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams) >= 0 AND COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams) * 4.0 <= COALESCE(verified_nutrition.calories, machine_nutrition.calories, n.calories) THEN COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams) * 100.0 / COALESCE(verified_nutrition.calories, machine_nutrition.calories, n.calories) END DESC, p.name_normalized",
-    cost: "CASE WHEN (verified_nutrition.product_id IS NOT NULL OR machine_nutrition.product_id IS NOT NULL OR n.status IN ('verified', 'unverified')) AND COALESCE(verified_nutrition.basis, machine_nutrition.basis, n.basis) = 'per_100g' AND COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams) > 0 AND p.net_quantity_grams > 0 THEN o.selling_price * 2500.0 / (p.net_quantity_grams * COALESCE(verified_nutrition.protein_grams, machine_nutrition.protein_grams, n.protein_grams)) END ASC NULLS LAST, p.name_normalized",
     completeness: "p.completeness DESC, p.name_normalized",
     name: "p.name_normalized, p.brand_normalized",
   }[input.sort] ?? "p.name_normalized";
@@ -345,7 +327,6 @@ interface IngredientRow { id: string; parent_id: string | null; position: number
 interface AllergenRow { name: string; declaration: "contains" | "may_contain" | "source_tag" }
 interface AdditiveRow { identifier: string }
 interface NutrientRow { nutrient_code: string; quantity: number; unit: string; basis: string; status: string; observed_at: string }
-interface OfferRow { retailer: string; retailer_listing_id: string; pincode: string | null; seller: string | null; selling_price: number; mrp: number | null; available: number; url: string; observed_at: string }
 interface RatingRow { retailer: string; retailer_listing_id: string; stars: number; rating_count: number; review_count: number | null; observed_at: string }
 interface ProvenanceRow { field_path: string; raw_value_json: string; normalized_value_json: string; source_id: string; confidence: string; authority: number; observed_at: string; evidence_url: string | null; selected: number }
 interface IngredientStatementRow { raw_text: string | null }
@@ -387,7 +368,6 @@ export async function getProductDetail(db: D1Database, id: string): Promise<Prod
       FROM nutrient_values nutrient
       WHERE nutrient.product_id = ?
       ORDER BY nutrient.nutrient_code LIMIT 300`).bind(id),
-    db.prepare("SELECT retailer, retailer_listing_id, pincode, seller, selling_price, mrp, available, url, observed_at FROM offers WHERE product_id = ? ORDER BY observed_at DESC LIMIT 100").bind(id),
     db.prepare("SELECT retailer, retailer_listing_id, stars, rating_count, review_count, observed_at FROM ratings WHERE product_id = ? ORDER BY observed_at DESC LIMIT 100").bind(id),
     db.prepare("SELECT f.field_path, f.raw_value_json, f.normalized_value_json, s.source_id, f.confidence, f.authority, f.observed_at, f.evidence_url, f.selected FROM field_observations f JOIN source_records s ON s.id = f.source_record_id WHERE f.product_id = ? ORDER BY f.field_path, f.authority DESC").bind(id),
     db.prepare("SELECT raw_text FROM ingredient_statements WHERE product_id = ?").bind(id),
@@ -398,8 +378,8 @@ export async function getProductDetail(db: D1Database, id: string): Promise<Prod
   if (!productRow) return null;
   const product = mapProduct(productRow);
   const ingredientRows = (results[2]?.results ?? []) as IngredientRow[];
-  const statement = results[9]?.results[0] as IngredientStatementRow | undefined;
-  const openReview = results[10]?.results[0] as OpenReviewRow | undefined;
+  const statement = results[8]?.results[0] as IngredientStatementRow | undefined;
+  const openReview = results[9]?.results[0] as OpenReviewRow | undefined;
   return {
     ...product,
     sourceRecords: ((results[1]?.results ?? []) as SourceRow[]).map((row) => ({ id: row.id, source: row.source_id, sourceRecordId: row.source_record_id, sourceUrl: row.source_url, observedAt: row.observed_at, resolutionRule: row.resolution_rule })),
@@ -408,9 +388,8 @@ export async function getProductDetail(db: D1Database, id: string): Promise<Prod
     allergens: ((results[3]?.results ?? []) as AllergenRow[]).map((row) => ({ name: row.name, declaration: row.declaration })),
     additives: ((results[4]?.results ?? []) as AdditiveRow[]).map(({ identifier }) => identifier),
     nutrients: ((results[5]?.results ?? []) as NutrientRow[]).map((row) => ({ code: row.nutrient_code, quantity: row.quantity, unit: row.unit, basis: row.basis, status: row.status, observedAt: row.observed_at })),
-    offers: ((results[6]?.results ?? []) as OfferRow[]).map((row) => ({ retailer: row.retailer, listingId: row.retailer_listing_id, pincode: row.pincode, seller: row.seller, sellingPrice: row.selling_price, mrp: row.mrp, available: row.available === 1, url: row.url, observedAt: row.observed_at })),
-    ratings: ((results[7]?.results ?? []) as RatingRow[]).map((row) => ({ retailer: row.retailer, listingId: row.retailer_listing_id, stars: row.stars, ratingCount: row.rating_count, reviewCount: row.review_count, observedAt: row.observed_at })),
-    provenance: ((results[8]?.results ?? []) as ProvenanceRow[]).map((row) => ({ field: row.field_path, raw: parseJson(row.raw_value_json, null), normalized: parseJson(row.normalized_value_json, null), source: row.source_id, confidence: row.confidence, authority: row.authority, observedAt: row.observed_at, evidenceUrl: row.evidence_url, selected: row.selected === 1 })),
+    ratings: ((results[6]?.results ?? []) as RatingRow[]).map((row) => ({ retailer: row.retailer, listingId: row.retailer_listing_id, stars: row.stars, ratingCount: row.rating_count, reviewCount: row.review_count, observedAt: row.observed_at })),
+    provenance: ((results[7]?.results ?? []) as ProvenanceRow[]).map((row) => ({ field: row.field_path, raw: parseJson(row.raw_value_json, null), normalized: parseJson(row.normalized_value_json, null), source: row.source_id, confidence: row.confidence, authority: row.authority, observedAt: row.observed_at, evidenceUrl: row.evidence_url, selected: row.selected === 1 })),
     completenessMissing: parseJson(productRow.completeness_missing_json, []),
     openReviewCount: openReview?.count ?? 0,
   };

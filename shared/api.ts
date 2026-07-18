@@ -19,6 +19,15 @@ export interface ApiErrorBody {
 
 export type NutritionEvidenceStatus = EvidenceStatus | "machine_verified";
 
+export type ConsumerMetrics = Pick<ProductMetrics,
+  | "proteinPer100Calories"
+  | "proteinCaloriePercentage"
+  | "caloriesFor25gProtein"
+  | "sugarPer25gProtein"
+  | "saturatedFatPer25gProtein"
+  | "fibrePer100Calories"
+>;
+
 export interface CatalogProduct {
   id: string;
   gtin: string | null;
@@ -56,14 +65,7 @@ export interface CatalogProduct {
     observedAt: string | null;
     labelVerifiedAt: string | null;
   };
-  currentOffer: {
-    retailer: string;
-    sellingPrice: number;
-    mrp: number | null;
-    pincode: string | null;
-    observedAt: string;
-  } | null;
-  metrics: ProductMetrics;
+  metrics: ConsumerMetrics;
 }
 
 export interface CatalogResponse {
@@ -87,7 +89,6 @@ export interface ProductDetailResponse extends CatalogProduct {
   allergens: AllergenDeclaration[];
   additives: string[];
   nutrients: Array<{ code: string; quantity: number; unit: string; basis: string; status: string; observedAt: string }>;
-  offers: Array<{ retailer: string; listingId: string; pincode: string | null; seller: string | null; sellingPrice: number; mrp: number | null; available: boolean; url: string; observedAt: string }>;
   ratings: Array<{ retailer: string; listingId: string; stars: number; ratingCount: number; reviewCount: number | null; observedAt: string }>;
   provenance: Array<{ field: string; raw: unknown; normalized: unknown; source: string; confidence: string; authority: number; observedAt: string; evidenceUrl: string | null; selected: boolean }>;
   completenessMissing: string[];

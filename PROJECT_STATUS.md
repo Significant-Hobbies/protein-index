@@ -204,6 +204,7 @@ the strict terminal-evidence gate above is actually satisfied.
 - 2026-07-18 — guarded machine-label publication completed in GitHub Actions run `29653810942`: a checksum-pinned local Qwen3-VL and macOS Vision benchmark accepted three current first-party Protein Chef nutrition labels, exact live source/hash checks passed before the idempotent D1 write, and live product API postconditions prove the resulting nutrition facts are `machine_verified`. These facts remain distinct from human-reviewed Trusted evidence; strict catalog completion remains incomplete.
 - 2026-07-18 — machine-label adapter v10 adds fail-closed per-serving mass normalization: both local extractors must explicitly agree on the declared serving mass and every required value before deterministic conversion to per 100 g. The expanded five-case benchmark and full 299-unit/61-Worker suite pass. Guarded publication run `29654573451` then published three current Yoga Bar wafer labels as `machine_verified` (465/25, 467.5/25, and 470/25 kcal/protein per 100 g) with exact live source/hash and API postconditions.
 - 2026-07-18 — the bounded local-model queue published one additional accepted Yoga Bar Variety Pack fact through guarded run `29654858728`; the live product API proves `470 kcal` and `25 g protein` per 100 g as `machine_verified`. Six rejected batch outcomes remain excluded.
+- 2026-07-19 — zero-cost macro refresh is implemented locally: one checksummed, non-publishing command stages the Open Food Facts India export and configured first-party brands, emits a bounded local label-verification queue, and records source-bounded completeness without claiming India-market exhaustion. A locked macOS launchd template schedules the existing local Vision/Qwen lane. The consumer catalog is macro-first: price/cost controls and offer payloads are removed while retained source evidence remains intact. Full verification passes 302 unit tests, 61 Worker tests, docs validation, type generation, production build, and strict OpenSpec validation; production remains unchanged pending an explicit release.
 
 ## Products
 
@@ -238,6 +239,11 @@ the strict terminal-evidence gate above is actually satisfied.
   clean-main, sync, and CI gates
 - Evidence-aware discovery defaults to protein grams per 100 kcal while Trusted
   mode additionally requires exact identity and terminal ingredient evidence
+- Local, checksummed, source-bounded macro refresh with a macOS scheduler
+  template, bounded local machine-label queue, and no remote publication side
+  effect
+- Macro-first public API and dashboard that omit price/cost comparison controls
+  and retailer-offer payloads while retaining evidence provenance internally
 - Resumable, rate-bounded richer Open Food Facts API enrichment with exhaustive
   barcode outcome accounting
 - Review-gated Robotoff label extraction with basis, unit, confidence, image,
