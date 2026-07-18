@@ -407,6 +407,7 @@ export async function hashHttpsLabelImage(options: {
   maximumBytes?: number;
   maximumChunks?: number;
   timeoutMilliseconds?: number;
+  maximumAttempts?: number;
   userAgent?: string;
   now?: () => Date;
 }): Promise<HashedLabelImage> {

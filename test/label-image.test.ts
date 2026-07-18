@@ -121,4 +121,106 @@ describe("label image hashing", () => {
       fetcher: async () => chunkedResponse([new Uint8Array([1])], { "content-length": "2" }),
     })).rejects.toMatchObject({ code: "stream_read_failed" });
   });
+
+  it("retries a 429 then succeeds within the attempt budget", async () => {
+    const chunks = [new Uint8Array([0xff, 0xd8, 0xff, 0xd9])];
+    let attempts = 0;
+    const result = await hashHttpsLabelImage({
+      url: "https://images.openfoodfacts.org/label.jpg",
+      maximumAttempts: 2,
+      timeoutMilliseconds: 1000,
+      fetcher: async () => {
+        attempts += 1;
+        return attempts === 1
+          ? new Response("rate limited", { status: 429 })
+          : chunkedResponse(chunks, { "content-length": "4" });
+      },
+    });
+    expect(attempts).toBe(2);
+    expect(result.byteLength).toBe(4);
+  });
+
+  it("retries a 503 then succeeds", async () => {
+    const chunks = [new Uint8Array([0xff, 0xd8, 0xff, 0xd9])];
+    let attempts = 0;
+    const result = await hashHttpsLabelImage({
+      url: "https://images.openfoodfacts.org/label.jpg",
+      maximumAttempts: 2,
+      timeoutMilliseconds: 1000,
+      fetcher: async () => {
+        attempts += 1;
+        return attempts === 1
+          ? new Response("unavailable", { status: 503 })
+          : chunkedResponse(chunks, { "content-length": "4" });
+      },
+    });
+    expect(attempts).toBe(2);
+    expect(result.byteLength).toBe(4);
+  });
+
+  it("retries a 500 then succeeds", async () => {
+    const chunks = [new Uint8Array([0xff, 0xd8, 0xff, 0xd9])];
+    let attempts = 0;
+    await hashHttpsLabelImage({
+      url: "https://images.openfoodfacts.org/label.jpg",
+      maximumAttempts: 2,
+      timeoutMilliseconds: 1000,
+      fetcher: async () => {
+        attempts += 1;
+        return attempts === 1
+          ? new Response("server error", { status: 500 })
+          : chunkedResponse(chunks, { "content-length": "4" });
+      },
+    });
+    expect(attempts).toBe(2);
+  });
+
+  it("does not retry a 404 and fails fast", async () => {
+    let attempts = 0;
+    await expect(hashHttpsLabelImage({
+      url: "https://images.openfoodfacts.org/label.jpg",
+      maximumAttempts: 3,
+      timeoutMilliseconds: 1000,
+      fetcher: async () => {
+        attempts += 1;
+        return new Response("not found", { status: 404 });
+      },
+    })).rejects.toMatchObject({ code: "http_error" });
+    expect(attempts).toBe(1);
+  });
+
+  it("retries a request timeout then succeeds", async () => {
+    const chunks = [new Uint8Array([0xff, 0xd8, 0xff, 0xd9])];
+    let attempts = 0;
+    const result = await hashHttpsLabelImage({
+      url: "https://images.openfoodfacts.org/label.jpg",
+      maximumAttempts: 2,
+      timeoutMilliseconds: 5,
+      fetcher: async (_input, init) => {
+        attempts += 1;
+        if (attempts === 1) {
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+          });
+        }
+        return chunkedResponse(chunks, { "content-length": "4" });
+      },
+    });
+    expect(attempts).toBe(2);
+    expect(result.byteLength).toBe(4);
+  });
+
+  it("does not amplify into an infinite retry loop when 429 persists", async () => {
+    let attempts = 0;
+    await expect(hashHttpsLabelImage({
+      url: "https://images.openfoodfacts.org/label.jpg",
+      maximumAttempts: 2,
+      timeoutMilliseconds: 1000,
+      fetcher: async () => {
+        attempts += 1;
+        return new Response("rate limited", { status: 429 });
+      },
+    })).rejects.toMatchObject({ code: "http_error" });
+    expect(attempts).toBe(2);
+  });
 });
