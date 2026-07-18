@@ -10,3 +10,4 @@ Allow: /api/coverage
 Allow: /api/products
 
 Sitemap: https://protein.significanthobbies.com/sitemap.xml
+Allow: /llms-full.txt

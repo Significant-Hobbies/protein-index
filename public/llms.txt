@@ -1,26 +1,15 @@
 # Protein Index
 
-> Source-aware catalog of Indian food products. Separates verified label
-> evidence from broader discovery data. Does not claim complete coverage of
-> the Indian market.
-
-The human UI is a React SPA. Agents should use the API and markdown surfaces
-below — do not scrape the empty client shell.
+> A searchable index of proteins.
 
 ## Product
 
-- [Catalog UI](https://protein.significanthobbies.com/): Human browse / compare experience (SPA)
-- [This index](https://protein.significanthobbies.com/llms.txt): Agent entrypoint
-- [Agent catalog](https://protein.significanthobbies.com/api/ai): Machine-readable surface list
+
+## Machine surfaces
+
+- [Agent catalog](https://protein.significanthobbies.com/api/ai): JSON inventory of public surfaces
 - [Homepage markdown](https://protein.significanthobbies.com/index.md): Product brief without JS
-
-## API (JSON)
-
-- [Health](https://protein.significanthobbies.com/api/health): Product count and publication status
-- [Coverage](https://protein.significanthobbies.com/api/coverage): Completion / evidence coverage
-- [Search products](https://protein.significanthobbies.com/api/products): Query catalog
-- [Product detail](https://protein.significanthobbies.com/api/products/:id): One canonical product
-- [Product markdown](https://protein.significanthobbies.com/api/products/:id.md): Same product as markdown
+- [This index](https://protein.significanthobbies.com/llms.txt)
 
 ## Optional
 
