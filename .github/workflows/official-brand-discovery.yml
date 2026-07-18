@@ -66,6 +66,9 @@ jobs:
           - source: fitfeast_india
             name: FitFeast
             directory: fitfeast
+          - source: myfitness_india
+            name: MyFitness
+            directory: myfitness
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

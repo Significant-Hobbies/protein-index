@@ -32,6 +32,9 @@ the rendered dashboard passes desktop/mobile verification.
   it never publishes or deploys. Independent brand sources now use bounded
   parallelism (default four) without changing each brand's rate limit. A macOS
   launchd template is ready to install once a local data directory is chosen.
+- MyFitness is now a configured first-party high-protein source and scheduled
+  discovery target; the active refresh predates this addition and remains
+  source-bounded to its original 16-brand manifest set.
 - Live dashboard audit is complete: the catalog is live, defaults to protein
   per 100 kcal, and no longer displays offers or cost metrics. Guarded release
   `127db2f` is live; coverage now repeatedly returns in 1.6–3.1 seconds and
