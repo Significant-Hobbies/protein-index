@@ -18,7 +18,7 @@ the rendered dashboard passes desktop/mobile verification.
 
 - Machine-verified label lane (`automated-label-verification` OpenSpec change):
   complete and published through protected workflow run `29653810942`. Three
-  current first-party Protein Chef labels plus three serving-normalized Yoga Bar
+  current first-party Protein Chef labels plus four serving-normalized Yoga Bar
   labels are live as `machine_verified` facts; they remain separate from
   human-reviewed Trusted evidence.
 - Official brand discovery lane (`official-brand-discovery`,
