@@ -13,6 +13,7 @@ const model = (overrides: Partial<ModelResult> = {}): ModelResult => ({
   promptHash: "a".repeat(64),
   raw: "{}",
   basis: "per_100g",
+  servingSizeGrams: null,
   nutrition: { calories: 173, proteinGrams: 1.9, carbohydrateGrams: 40.1, sugarGrams: 35.3, fatGrams: 0.5, saturatedFatGrams: null, fibreGrams: null, sodiumMg: null },
   ingredientsRaw: null,
   unreadableFields: [],
@@ -27,10 +28,10 @@ describe("machine label extraction acceptance", () => {
       "Carbohydrate 40.1g, of which sugars 35.3g",
       "Protein 1.9g",
     ]).lines);
-    expect(parsed).toEqual({
+    expect(parsed).toEqual(expect.objectContaining({
       basis: "per_100g",
       nutrition: expect.objectContaining({ calories: 173, proteinGrams: 1.9, carbohydrateGrams: 40.1, sugarGrams: 35.3, fatGrams: 0.5 }),
-    });
+    }));
   });
 
   it("parses a vertically laid out nutrition table only when the next value is adjacent", () => {
@@ -38,10 +39,10 @@ describe("machine label extraction acceptance", () => {
       "APPROXIMATE COMPOSITION (per 100 g)", "Protein (mainly Casein)", "30.00 g", "Total Fat", "14.00 g",
       "Carbohydrate", "48.00", "Total Sugar", "30.00", "Energy Value", "438.00 kcal",
     ]).lines);
-    expect(parsed).toEqual({
+    expect(parsed).toEqual(expect.objectContaining({
       basis: "per_100g",
       nutrition: expect.objectContaining({ calories: 438, proteinGrams: 30, carbohydrateGrams: 48, sugarGrams: 30, fatGrams: 14 }),
-    });
+    }));
   });
 
   it("uses label-row geometry instead of OCR reading order for multi-column tables", () => {
@@ -82,6 +83,15 @@ describe("machine label extraction acceptance", () => {
       model: model(),
     });
     expect(result.nutrition).toMatchObject({ accepted: true, reasons: [], nutrition: expect.objectContaining({ calories: 173, proteinGrams: 1.9 }) });
+  });
+
+  it("normalizes matching per-serving values only when both extractors declare the same serving mass", () => {
+    const result = decideMachineLabelEvidence({
+      vision: vision(["Serving Size: 20g, Nutritional Facts (per serve): Energy (kcal) 93, Protein (g) 5.0, Total Fat (g) 5.1"]),
+      model: model({ basis: "per_serving", servingSizeGrams: 20, nutrition: { calories: 93, proteinGrams: 5, carbohydrateGrams: null, sugarGrams: null, fatGrams: null, saturatedFatGrams: null, fibreGrams: null, sodiumMg: null } }),
+    });
+    expect(result.nutrition.reasons).toEqual([]);
+    expect(result.nutrition).toMatchObject({ accepted: true, basis: "per_100g", nutrition: { calories: 465, proteinGrams: 25 } });
   });
 
   it("does not publish an optional field unless both extractors agree", () => {

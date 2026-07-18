@@ -6,10 +6,11 @@ import { pathToFileURL } from "node:url";
 import { emptyNutrition, hasNutritionErrors, validateNutrition } from "../shared/nutrition";
 import type { NutritionPer100g } from "../shared/types";
 
-export const MACHINE_LABEL_ADAPTER_VERSION = "machine-label-v9";
+export const MACHINE_LABEL_ADAPTER_VERSION = "machine-label-v10";
 export const MACHINE_LABEL_MODEL = "qwen3-vl:32b-instruct";
 
 type Basis = "per_100g" | "per_100ml" | "unknown";
+type DeclaredBasis = Basis | "per_serving";
 type NutritionKey = keyof NutritionPer100g;
 
 export interface VisionLine {
@@ -29,7 +30,8 @@ export interface ModelResult {
   digest: string;
   promptHash: string;
   raw: string;
-  basis: Basis;
+  basis: DeclaredBasis;
+  servingSizeGrams: number | null;
   nutrition: NutritionPer100g;
   ingredientsRaw: string | null;
   unreadableFields: string[];
@@ -61,7 +63,8 @@ const NUTRITION_FIELDS: NutritionKey[] = [
 
 const MODEL_PROMPT = `Read this food package label. Return only JSON with exactly these keys:
 {
-  "basis":"per_100g"|"per_100ml"|"unknown",
+  "basis":"per_100g"|"per_100ml"|"per_serving"|"unknown",
+  "serving_size_g":number|null,
   "calories_kcal":number|null,
   "protein_g":number|null,
   "carbohydrate_g":number|null,
@@ -80,10 +83,11 @@ const MODEL_RESULT_SCHEMA = {
   additionalProperties: false,
   required: [
     "basis", "calories_kcal", "protein_g", "carbohydrate_g", "sugars_g", "fat_g",
-    "saturated_fat_g", "fibre_g", "sodium_mg", "ingredients_raw", "unreadable_fields",
+    "saturated_fat_g", "fibre_g", "sodium_mg", "ingredients_raw", "unreadable_fields", "serving_size_g",
   ],
   properties: {
-    basis: { type: "string", enum: ["per_100g", "per_100ml", "unknown"] },
+    basis: { type: "string", enum: ["per_100g", "per_100ml", "per_serving", "unknown"] },
+    serving_size_g: { type: ["number", "null"], exclusiveMinimum: 0 },
     calories_kcal: { type: ["number", "null"], minimum: 0 },
     protein_g: { type: ["number", "null"], minimum: 0 },
     carbohydrate_g: { type: ["number", "null"], minimum: 0 },
@@ -105,10 +109,10 @@ function finite(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-function basis(value: unknown): Basis {
+function basis(value: unknown): DeclaredBasis {
   if (typeof value !== "string") return "unknown";
   const normalized = value.toLowerCase().replace(/[\s-]+/g, "_");
-  return normalized === "per_100g" || normalized === "per_100ml" ? normalized : "unknown";
+  return normalized === "per_100g" || normalized === "per_100ml" || normalized === "per_serving" ? normalized : "unknown";
 }
 
 function normalizeText(value: string): string {
@@ -129,7 +133,10 @@ function visionNumber(lines: VisionLine[], expression: RegExp, label: RegExp): n
   // multi-column tables, so a bare next-line number can belong to another row.
   for (const line of lines) {
     const match = expression.exec(line.text);
-    if (match) return Number(match[1]);
+    if (match) {
+      const value = match.slice(1).find((entry) => entry !== undefined);
+      if (value !== undefined) return Number(value);
+    }
   }
   const labelRows = lines
     .map((line, index) => ({ line, index }))
@@ -165,20 +172,22 @@ function spatialPer100Basis(lines: VisionLine[]): Basis {
 }
 
 /** Deterministic parser; it intentionally returns null rather than guessing a layout it cannot prove. */
-export function parseVisionNutrition(lines: VisionLine[]): { basis: Basis; nutrition: NutritionPer100g } {
+export function parseVisionNutrition(lines: VisionLine[]): { basis: DeclaredBasis; servingSizeGrams: number | null; nutrition: NutritionPer100g } {
   const text = textFor(lines);
   const output = emptyNutrition();
   const per100 = /\b(?:per|\/)[\s-]*100\s*(g|ml)\b/i.exec(text);
-  const parsedBasis: Basis = per100?.[1]?.toLowerCase() === "ml" ? "per_100ml" : per100 ? "per_100g" : spatialPer100Basis(lines);
-  output.calories = visionNumber(lines, /(?:energy|energy value)[^\n]{0,100}?(\d+(?:\.\d+)?)\s*kcal\b/i, /(?:energy|energy value)/i);
-  output.proteinGrams = visionNumber(lines, /\bprotein(?:\s*\([^\n)]*\))?[^\n]{0,36}?(\d+(?:\.\d+)?)\s*g\b/i, /\bprotein\b/i);
+  const spatialBasis = spatialPer100Basis(lines);
+  const servingSize = /\bserving\s*size\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*g\b/i.exec(text);
+  const parsedBasis: DeclaredBasis = per100?.[1]?.toLowerCase() === "ml" ? "per_100ml" : per100 ? "per_100g" : spatialBasis !== "unknown" ? spatialBasis : /\bper\s*(?:serve|serving)\b/i.test(text) ? "per_serving" : "unknown";
+  output.calories = visionNumber(lines, /(?:energy|energy value)(?:[^\n]{0,100}?(\d+(?:\.\d+)?)\s*kcal\b|\s*\(\s*kcal\s*\)\s*(\d+(?:\.\d+)?))/i, /(?:energy|energy value)/i);
+  output.proteinGrams = visionNumber(lines, /\bprotein(?:\s*\([^\n)]*\))?(?:[^\n]{0,36}?(\d+(?:\.\d+)?)\s*g\b|\s*\(\s*g\s*\)\s*(\d+(?:\.\d+)?))/i, /\bprotein\b/i);
   output.carbohydrateGrams = visionNumber(lines, /\b(?:total )?carbohydrate[^\n]{0,36}?(\d+(?:\.\d+)?)\s*g\b/i, /\b(?:total )?carbohydrate/i);
   output.sugarGrams = visionNumber(lines, /\b(?:total )?sugars?[^\n]{0,36}?(\d+(?:\.\d+)?)\s*g\b/i, /\b(?:total )?sugars?\b/i);
   output.fatGrams = visionNumber(lines, /(?:^|[•\n])\s*(?:total )?fat\b[^\n]{0,36}?(\d+(?:\.\d+)?)\s*g\b/im, /\b(?:total )?fat\b/i);
   output.saturatedFatGrams = visionNumber(lines, /\bsaturat(?:ed|es)[^\n]{0,36}?(\d+(?:\.\d+)?)\s*g\b/i, /\bsaturat(?:ed|es)/i);
   output.fibreGrams = visionNumber(lines, /\bfib(?:er|re)[^\n]{0,36}?(\d+(?:\.\d+)?)\s*g\b/i, /\bfib(?:er|re)/i);
   output.sodiumMg = visionNumber(lines, /\bsodium[^\n]{0,36}?(\d+(?:\.\d+)?)\s*mg\b/i, /\bsodium/i);
-  return { basis: parsedBasis, nutrition: output };
+  return { basis: parsedBasis, servingSizeGrams: servingSize ? Number(servingSize[1]) : null, nutrition: output };
 }
 
 function modelNutrition(input: Record<string, unknown>): NutritionPer100g {
@@ -196,6 +205,16 @@ function modelNutrition(input: Record<string, unknown>): NutritionPer100g {
 
 function sameNumber(left: number | null, right: number | null): boolean {
   return left !== null && right !== null && Math.abs(left - right) < 0.000_001;
+}
+
+function normalizeComparableNutrition(input: { basis: DeclaredBasis; servingSizeGrams: number | null; nutrition: NutritionPer100g }): { basis: Basis; nutrition: NutritionPer100g } | null {
+  if (input.basis === "per_100g" || input.basis === "per_100ml") return { basis: input.basis, nutrition: input.nutrition };
+  if (input.basis !== "per_serving" || input.servingSizeGrams === null || !Number.isFinite(input.servingSizeGrams) || input.servingSizeGrams <= 0) return null;
+  const factor = 100 / input.servingSizeGrams;
+  return {
+    basis: "per_100g",
+    nutrition: Object.fromEntries(Object.entries(input.nutrition).map(([field, value]) => [field, value === null ? null : value * factor])) as unknown as NutritionPer100g,
+  };
 }
 
 const FIELD_LABELS: Record<NutritionKey, RegExp> = {
@@ -241,21 +260,25 @@ export function decideMachineLabelEvidence(input: { vision: VisionResult; model:
   ingredients: MachineVerificationOutcome;
 } {
   const vision = parseVisionNutrition(input.vision.lines);
+  const visionComparable = normalizeComparableNutrition(vision);
+  const modelComparable = normalizeComparableNutrition({ basis: input.model.basis, servingSizeGrams: input.model.servingSizeGrams, nutrition: input.model.nutrition });
   const nutritionReasons: string[] = [];
   if (vision.basis === "unknown" || input.model.basis !== vision.basis) nutritionReasons.push("basis_disagreement");
+  if (vision.basis === "per_serving" && !sameNumber(vision.servingSizeGrams, input.model.servingSizeGrams)) nutritionReasons.push("serving_size_disagreement");
+  if (!visionComparable || !modelComparable || visionComparable.basis !== modelComparable.basis) nutritionReasons.push("basis_normalization_failed");
   for (const field of ["calories", "proteinGrams"] as const) {
-    if (!sameNumber(vision.nutrition[field], input.model.nutrition[field])) nutritionReasons.push(`core_${field}_disagreement`);
+    if (!visionComparable || !modelComparable || !sameNumber(visionComparable.nutrition[field], modelComparable.nutrition[field])) nutritionReasons.push(`core_${field}_disagreement`);
     if (visionFieldIsQualified(input.vision.lines, field)) nutritionReasons.push(`core_${field}_qualified`);
   }
   if (!visibleBounds(input.vision.lines, /(?:energy|protein)/i)) nutritionReasons.push("nutrition_text_edge_clipped");
-  if (hasNutritionErrors(validateNutrition(input.model.nutrition, input.model.basis === "per_100ml" ? "per_100ml" : "per_100g"))) {
+  if (!modelComparable || hasNutritionErrors(validateNutrition(modelComparable.nutrition, modelComparable.basis === "per_100ml" ? "per_100ml" : "per_100g"))) {
     nutritionReasons.push("nutrition_validation_failed");
   }
   const nutritionAccepted = nutritionReasons.length === 0;
   const agreedNutrition = emptyNutrition();
   for (const field of NUTRITION_FIELDS) {
-    if (sameNumber(vision.nutrition[field], input.model.nutrition[field]) && !visionFieldIsQualified(input.vision.lines, field)) {
-      agreedNutrition[field] = input.model.nutrition[field];
+    if (visionComparable && modelComparable && sameNumber(visionComparable.nutrition[field], modelComparable.nutrition[field]) && !visionFieldIsQualified(input.vision.lines, field)) {
+      agreedNutrition[field] = modelComparable.nutrition[field];
     }
   }
 
@@ -273,7 +296,7 @@ export function decideMachineLabelEvidence(input: { vision: VisionResult; model:
     nutrition: {
       accepted: nutritionAccepted,
       reasons: nutritionReasons,
-      basis: input.model.basis,
+      basis: modelComparable?.basis ?? "unknown",
       // Do not turn a label qualifier such as "<0.1 g" into an exact value.
       // Optional fields are published only when the independent extractors
       // literally agree; acceptance itself only depends on the required core.
@@ -345,6 +368,7 @@ export async function runQwenLabel(imageBytes: Uint8Array, endpoint = "http://12
     promptHash: createHash("sha256").update(MODEL_PROMPT).digest("hex"),
     raw: message.content,
     basis: basis(parsed.basis),
+    servingSizeGrams: finite(parsed.serving_size_g),
     nutrition: modelNutrition(parsed),
     ingredientsRaw: typeof parsed.ingredients_raw === "string" && parsed.ingredients_raw.trim() ? normalizeText(parsed.ingredients_raw) : null,
     unreadableFields: unreadable,
