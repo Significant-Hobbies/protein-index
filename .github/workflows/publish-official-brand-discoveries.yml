@@ -1,0 +1,195 @@
+name: Publish official brand discoveries
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_run_id:
+        description: Successful Official brand discovery workflow run ID
+        required: true
+        type: string
+      confirm_production_publication:
+        description: Type PUBLISH_OFFICIAL_BRAND_DISCOVERIES_TO_PRODUCTION exactly
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: protein-index-production-publication
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      approved: ${{ steps.gate.outputs.approved }}
+    steps:
+      - id: gate
+        shell: bash
+        env:
+          CONFIRM: ${{ inputs.confirm_production_publication }}
+          RUN_ID: ${{ inputs.upstream_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]]
+          [[ "$CONFIRM" == "PUBLISH_OFFICIAL_BRAND_DISCOVERIES_TO_PRODUCTION" ]]
+          [[ "$RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          echo "approved=true" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: authorize
+    if: needs.authorize.outputs.approved == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production
+    env:
+      RUN_ID: ${{ inputs.upstream_run_id }}
+      LIVE_BASE_URL: https://protein.significanthobbies.com
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Initialize durable publication evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_dir="$RUNNER_TEMP/protein-index-official-brand-publication"
+          mkdir -p "$evidence_dir"
+          echo "PUBLICATION_EVIDENCE_DIR=$evidence_dir" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Pin successful official-brand discovery cohort
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const runId = Number(process.env.RUN_ID);
+            if (!Number.isSafeInteger(runId) || runId <= 0) throw new Error('Official-brand discovery run ID is invalid');
+            const run = (await github.rest.actions.getWorkflowRun({ owner: context.repo.owner, repo: context.repo.repo, run_id: runId })).data;
+            if (run.name !== 'Official brand discovery' || run.conclusion !== 'success') throw new Error('Selected run is not a successful official-brand discovery');
+            if (run.head_branch !== context.payload.repository.default_branch || run.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`) throw new Error('Selected run is not from this repository main branch');
+            if (!/^[a-f0-9]{40}$/.test(run.head_sha ?? '')) throw new Error('Selected run has no exact immutable head SHA');
+            const config = JSON.parse(fs.readFileSync('config/official-brand-sources.json', 'utf8'));
+            const sources = config.sources?.map((source) => source.id).sort();
+            if (!Array.isArray(sources) || sources.length === 0 || sources.some((source) => !/^[a-z][a-z0-9_-]{1,63}$/.test(source))) throw new Error('Configured official-brand source set is invalid');
+            const artifacts = (await github.rest.actions.listWorkflowRunArtifacts({ owner: context.repo.owner, repo: context.repo.repo, run_id: runId, per_page: 100 })).data.artifacts;
+            const pinned = sources.map((source) => {
+              const name = `official-brand-${source}-${runId}`;
+              const matches = artifacts.filter((artifact) => artifact.name === name && !artifact.expired);
+              if (matches.length !== 1) throw new Error(`Expected one unexpired artifact named ${name}`);
+              const artifact = matches[0];
+              if (!artifact || !/^sha256:[a-f0-9]{64}$/.test(artifact.digest ?? '') || artifact.size_in_bytes <= 0) throw new Error(`Artifact ${name} has no valid immutable digest and size`);
+              return { source, name, id: artifact.id, digest: artifact.digest, bytes: artifact.size_in_bytes };
+            });
+            fs.writeFileSync(`${process.env.PUBLICATION_EVIDENCE_DIR}/route.json`, JSON.stringify({ runId, workflow: run.name, upstreamHeadSha: run.head_sha, publisherHeadSha: context.sha, sources: pinned }, null, 2));
+
+      - name: Require current publisher and upstream ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          upstream_head="$(jq -r '.upstreamHeadSha' "$PUBLICATION_EVIDENCE_DIR/route.json")"
+          [[ "$upstream_head" =~ ^[a-f0-9]{40}$ ]]
+          git merge-base --is-ancestor "$upstream_head" "$(git rev-parse HEAD)"
+          test -f scripts/official-brand-publication.ts
+          test -f scripts/emit-official-brand-import.ts
+          test -f migrations/0019_machine_verified_nutrition.sql
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Download and validate exact configured artifacts before credentials
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const route = JSON.parse(fs.readFileSync(`${process.env.PUBLICATION_EVIDENCE_DIR}/route.json`, 'utf8'));
+            fs.mkdirSync('.data/official-brand/downloads', { recursive: true });
+            for (const artifact of route.sources) {
+              const archive = await github.rest.actions.downloadArtifact({ owner: context.repo.owner, repo: context.repo.repo, artifact_id: artifact.id, archive_format: 'zip' });
+              const target = `.data/official-brand/${artifact.source}.zip`;
+              fs.writeFileSync(target, Buffer.from(archive.data));
+              const crypto = require('crypto');
+              const digest = `sha256:${crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex')}`;
+              if (digest !== artifact.digest || fs.statSync(target).size !== artifact.bytes) throw new Error(`Pinned artifact ${artifact.name} differs after download`);
+              fs.mkdirSync(path.join('.data/official-brand/downloads', artifact.source), { recursive: true });
+            }
+
+      - name: Prepare complete cohort and atomic import before credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for artifact in .data/official-brand/*.zip; do
+            source="$(basename "$artifact" .zip)"
+            unzip -q "$artifact" -d ".data/official-brand/downloads/$source"
+          done
+          pnpm data:brand-prepare -- --input-root .data/official-brand/downloads --output .data/official-brand/publication | tee "$PUBLICATION_EVIDENCE_DIR/preparation.json"
+          pnpm data:brand-import-sql -- --input .data/official-brand/publication --output .data/official-brand/import.sql | tee "$PUBLICATION_EVIDENCE_DIR/import.json"
+          cp .data/official-brand/publication/{manifest.json,report.json,checksums.sha256,source-manifests.jsonl} "$PUBLICATION_EVIDENCE_DIR/"
+
+      - name: Require protected publication credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]]
+
+      - name: Refuse pending production migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec wrangler d1 migrations list protein-index --remote | tee "$PUBLICATION_EVIDENCE_DIR/migrations.txt"
+          if grep -q "Migrations to be applied" "$PUBLICATION_EVIDENCE_DIR/migrations.txt"; then
+            echo "::error::Official-brand publication refuses pending migrations."
+            exit 1
+          fi
+
+      - name: Capture production state, publish, and prove postconditions
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sql="$(jq -r '[.sources[].source | @json] | join(",")' .data/official-brand/publication/manifest.json)"
+          query="SELECT COUNT(*) AS active_products FROM products WHERE is_active = 1; SELECT COUNT(*) AS source_records FROM source_records WHERE source_id IN ($source_sql); SELECT COUNT(*) AS offers FROM offers WHERE retailer IN ($source_sql);"
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json --command "$query" > "$PUBLICATION_EVIDENCE_DIR/pre-state.json"
+          pnpm exec wrangler d1 execute protein-index --remote --yes --file .data/official-brand/import.sql 2>&1 | tee "$PUBLICATION_EVIDENCE_DIR/publication.log"
+          pnpm exec wrangler d1 execute protein-index --remote --yes --json --command "$query" > "$PUBLICATION_EVIDENCE_DIR/post-state.json"
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const [before, after, manifest] = await Promise.all(['pre-state.json', 'post-state.json'].map(async (name) => JSON.parse(await readFile(`${process.env.PUBLICATION_EVIDENCE_DIR}/${name}`, 'utf8'))).concat(readFile('.data/official-brand/publication/manifest.json', 'utf8').then(JSON.parse)));
+          const values = (state) => state.map((entry) => Number(entry.results?.[0]?.[Object.keys(entry.results?.[0] ?? {})[0]] ?? -1));
+          const [beforeProducts, beforeSources, beforeOffers] = values(before);
+          const [afterProducts, afterSources, afterOffers] = values(after);
+          if (afterProducts < beforeProducts || afterSources < beforeSources || afterOffers < beforeOffers || afterSources < manifest.stagedRecords) throw new Error('Official-brand publication postconditions are not monotonic or do not retain the cohort');
+          NODE
+
+      - name: Verify the live catalog stays healthy and discoverable
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --max-time 30 "$LIVE_BASE_URL/api/health" -o "$PUBLICATION_EVIDENCE_DIR/live-health.json"
+          curl --fail --silent --show-error --max-time 30 "$LIVE_BASE_URL/api/products?scope=protein_branded&sort=protein_density&page=1&pageSize=1" -o "$PUBLICATION_EVIDENCE_DIR/live-catalog.json"
+          jq -e '.status == "ok" and .runtime == "production" and .products > 0' "$PUBLICATION_EVIDENCE_DIR/live-health.json" >/dev/null
+          jq -e '.pagination.total > 0 and (.products | length) == 1' "$PUBLICATION_EVIDENCE_DIR/live-catalog.json" >/dev/null
+          jq -n --arg completedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{status:"success",completedAt:$completedAt}' > "$PUBLICATION_EVIDENCE_DIR/result.json"
+
+      - name: Upload durable publication evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: official-brand-publication-${{ inputs.upstream_run_id }}-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: error
+          path: ${{ env.PUBLICATION_EVIDENCE_DIR }}/

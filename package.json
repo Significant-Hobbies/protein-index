@@ -28,6 +28,7 @@
     "data:brand-discover": "tsx scripts/discover-official-brand.ts",
     "data:brand-dedupe": "tsx scripts/dedupe-official-brand.ts",
     "data:brand-prepare": "tsx scripts/prepare-official-brand-publication.ts",
+    "data:brand-import-sql": "tsx scripts/emit-official-brand-import.ts",
     "data:machine-publish-sql": "tsx scripts/machine-publication.ts",
     "data:machine-publish-batch": "tsx scripts/machine-publication.ts batch",
     "data:machine-benchmark": "tsx scripts/machine-label-benchmark.ts",

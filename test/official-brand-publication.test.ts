@@ -98,4 +98,16 @@ describe("official brand publication preparation", () => {
     expect(db.prepare("SELECT COUNT(*) AS count FROM offers WHERE retailer IN ('brand_one', 'brand_two')").get()).toEqual({ count: 2 });
     db.close();
   });
+
+  it("keeps official-brand producer and protected publisher on the source-id artifact contract", async () => {
+    const [producer, publisher] = await Promise.all([
+      readFile(".github/workflows/official-brand-discovery.yml", "utf8"),
+      readFile(".github/workflows/publish-official-brand-discoveries.yml", "utf8"),
+    ]);
+    expect(producer).toContain("official-brand-${{ matrix.source }}-${{ github.run_id }}");
+    expect(publisher).toContain("PUBLISH_OFFICIAL_BRAND_DISCOVERIES_TO_PRODUCTION");
+    expect(publisher).toContain("Official-brand publication refuses pending migrations.");
+    expect(publisher).toContain("pnpm data:brand-prepare");
+    expect(publisher).toContain("pnpm data:brand-import-sql");
+  });
 });

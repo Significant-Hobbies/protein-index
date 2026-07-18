@@ -12,9 +12,9 @@
 
 ## 3. Guarded production publication
 
-- [ ] 3.1 Add a protected manually dispatched workflow that pins a complete official-brand discovery run and validates it before remote credentials.
-- [ ] 3.2 Add source/product/offer pre/postcondition diagnostics and refusal on pending migrations or incomplete cohorts.
-- [ ] 3.3 Document the producer-to-publication path and configured-source coverage wording.
+- [x] 3.1 Add a protected manually dispatched workflow that pins a complete official-brand discovery run and validates it before remote credentials.
+- [x] 3.2 Add source/product/offer pre/postcondition diagnostics and refusal on pending migrations or incomplete cohorts.
+- [x] 3.3 Document the producer-to-publication path and configured-source coverage wording.
 
 ## 4. Verification and release
 

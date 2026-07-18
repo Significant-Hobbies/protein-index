@@ -78,7 +78,7 @@ jobs:
       - run: pnpm data:brand-discover config/official-brand-sources.json ${{ matrix.source }} .data/official-brand/${{ matrix.directory }}
       - uses: actions/upload-artifact@v4
         with:
-          name: official-brand-${{ matrix.directory }}-${{ github.run_id }}
+          name: official-brand-${{ matrix.source }}-${{ github.run_id }}
           path: .data/official-brand/${{ matrix.directory }}
           if-no-files-found: error
           retention-days: 14

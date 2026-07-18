@@ -71,6 +71,17 @@ confirmation phrase. All refuse pending migrations except `publish-catalog`.
 - **Use:** publish a reviewed catalog snapshot. This is the recovery path and
   the only catalog path allowed to apply reviewed schema migrations.
 
+### `publish-official-brand-discoveries` — `.github/workflows/publish-official-brand-discoveries.yml`
+
+- **Trigger:** manual dispatch with one successful `official-brand-discovery`
+  run ID and the exact `PUBLISH_OFFICIAL_BRAND_DISCOVERIES_TO_PRODUCTION`
+  confirmation.
+- **Authority:** no schema migrations. It downloads exactly one current
+  artifact for every configured official brand, validates the complete cohort,
+  and writes provenance-bound source records and first-party offers.
+- **Use:** make new first-party brand products searchable in the public catalog
+  without promoting their nutrition or ingredients to verified facts.
+
 ### `publish-enrichment` — `.github/workflows/publish-enrichment.yml`
 
 - **Trigger:** `workflow_dispatch` with `enrichment_run_id` and
