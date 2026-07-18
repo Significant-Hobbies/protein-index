@@ -164,6 +164,16 @@ describe("official brand sitemap discovery", () => {
     expect(await readFile(result.exclusionsPath, "utf8")).toContain("product_name_not_included");
   });
 
+  it("uses declared URL terms to avoid fetching out-of-scope sitemap products while retaining an auditable exclusion", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-brand-url-scope-"));
+    const urls = new Map<string, string>([["https://brand.example/robots.txt", "User-agent: *\nAllow: /"], ["https://brand.example/sitemap.xml", "<urlset><url><loc>https://brand.example/products/salt</loc></url><url><loc>https://brand.example/products/whey</loc></url></urlset>"], ["https://brand.example/products/whey", microdataPage]]);
+    const requests: string[] = [];
+    const result = await discoverOfficialBrandCatalog({ source: { ...source, candidateUrlTerms: ["whey"], requiredNameTerms: ["whey"] }, outputDirectory: directory, fetcher: async (input) => { const url = String(input); requests.push(url); return new Response(urls.get(url) ?? "missing", { status: urls.has(url) ? 200 : 404 }); } });
+    expect(result.manifest).toMatchObject({ sourceComplete: true, recordsRead: 1, stagedRecords: 1 });
+    expect(requests).not.toContain("https://brand.example/products/salt");
+    expect(await readFile(result.exclusionsPath, "utf8")).toContain("product_url_not_included");
+  });
+
   it("deduplicates identical official product variants without merging unknown variants", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-brand-duplicates-"));
     const urls = new Map<string, string>([["https://brand.example/robots.txt", "User-agent: *\nAllow: /"], ["https://brand.example/sitemap.xml", "<urlset><url><loc>https://brand.example/products/whey?variant=1</loc></url><url><loc>https://brand.example/products/whey?variant=2</loc></url></urlset>"], ["https://brand.example/products/whey?variant=1", microdataPage], ["https://brand.example/products/whey?variant=2", microdataPage]]);

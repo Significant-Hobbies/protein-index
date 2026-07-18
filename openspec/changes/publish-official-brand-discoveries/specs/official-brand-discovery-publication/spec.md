@@ -58,6 +58,10 @@ The system SHALL report the configured official-brand source set and its
 source-complete status separately from market completeness. It MUST NOT promote
 unverified discovery nutrition or ingredients into Trusted ranking eligibility.
 
+When a source declares candidate URL terms, the system SHALL exclude sitemap
+product URLs outside that declared boundary before fetching them, record each
+exclusion, and retain page-level product-name validation for fetched candidates.
+
 #### Scenario: A shopper views a newly published discovery product
 - **WHEN** the product only has first-party discovery evidence
 - **THEN** the API SHALL expose its evidence status as unverified and the

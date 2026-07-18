@@ -40,6 +40,7 @@
       "allowedHosts": ["www.muscleblaze.com"],
       "sitemapUrls": ["https://www.muscleblaze.com/sitemap.xml"],
       "productPathPrefixes": ["/sv/"],
+      "candidateUrlTerms": ["protein", "whey", "casein", "gainer"],
       "requiredNameTerms": ["protein", "whey", "casein", "gainer"],
       "maxProductPages": 650,
       "maxSitemapDepth": 2,
