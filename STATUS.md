@@ -33,8 +33,9 @@ the rendered dashboard passes desktop/mobile verification.
   parallelism (default four) without changing each brand's rate limit. A macOS
   launchd template is ready to install once a local data directory is chosen.
 - MyFitness and Wellbeing Nutrition are configured first-party high-protein
-  sources and scheduled discovery targets; the active refresh predates these
-  additions and remains source-bounded to its original 16-brand manifest set.
+  sources and scheduled discovery targets. The current 19-source local run
+  stages their records but remains source-incomplete because official pages
+  intermittently return 503 responses; nothing from it has been published.
 - Live dashboard audit is complete: the catalog is live, defaults to protein
   per 100 kcal, and no longer displays offers or cost metrics. Guarded release
   `127db2f` is live; coverage now repeatedly returns in 1.6–3.1 seconds and
