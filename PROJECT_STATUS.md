@@ -337,7 +337,7 @@ the strict terminal-evidence gate above is actually satisfied.
     `0019_machine_verified_nutrition.sql` are applied. The repository-level
     manual publication gate is
     implemented and producer completion now causes zero publication jobs; the
-    evidence workflow cannot apply migrations. Historical run `29511127992`
+    evidence workflow performs no schema writes. Historical run `29511127992`
     proved the credential and artifact route before failing closed on its
     then-future schema assertion, while runs `29449999090`, `29474290721`, and `29495130626`
     retain evidence of the earlier empty credential state.
