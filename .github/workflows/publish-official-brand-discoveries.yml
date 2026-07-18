@@ -49,8 +49,6 @@ jobs:
     env:
       RUN_ID: ${{ inputs.upstream_run_id }}
       LIVE_BASE_URL: https://protein.significanthobbies.com
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Initialize durable publication evidence
         shell: bash
@@ -143,12 +141,18 @@ jobs:
 
       - name: Require protected publication credentials
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]]
 
       - name: Refuse pending production migrations
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           pnpm exec wrangler d1 migrations list protein-index --remote | tee "$PUBLICATION_EVIDENCE_DIR/migrations.txt"
@@ -159,6 +163,9 @@ jobs:
 
       - name: Capture production state, publish, and prove postconditions
         shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           source_sql="$(jq -r '[.sources[].source | @json] | join(",")' .data/official-brand/publication/manifest.json)"
