@@ -171,7 +171,7 @@ function completionReasonCodes(row: LedgerRow): string[] {
   return [...codes].sort();
 }
 
-function familySql(family: CompletionFamily, includeSources = true): string {
+function familySql(family: CompletionFamily, includeSources = true, includeDetail = true): string {
   const supportsExtraction = family !== "identity";
   const factJoin = family === "nutrition"
     ? "LEFT JOIN nutrition_facts f ON f.product_id = p.id"
@@ -265,7 +265,7 @@ function familySql(family: CompletionFamily, includeSources = true): string {
     SELECT product_id, COUNT(*) AS failed_attempts,
       SUM(failure_count) AS extraction_failed
     FROM current_attempt_failures GROUP BY product_id
-  ), current_label_ranked AS (
+  )${includeDetail ? `, current_label_ranked AS (
     SELECT a.product_id, a.id AS attempt_id, l.id AS label_asset_id, l.source_image_id,
       al.role, al.outcome, l.effective_url, l.content_sha256, l.fetched_at, a.attempted_at,
       al.candidate_count, al.rejection_count, al.failure_count, al.conflict_count, al.reasons_json,
@@ -354,7 +354,52 @@ function familySql(family: CompletionFamily, includeSources = true): string {
     WHERE d.active = 1 AND d.decision = 'verify' AND d.field_family = '${family}'
       AND derived.source_id = '${extractionSourceId}'
     GROUP BY d.product_id, d.source_record_id
-  )` : "";
+  )` : `, current_label_summary AS (
+    SELECT a.product_id, COUNT(*) AS extraction_labels,
+      SUM(CASE WHEN al.outcome = 'candidate' THEN 1 ELSE 0 END) AS extraction_candidate,
+      SUM(CASE WHEN al.outcome = 'no_prediction' THEN 1 ELSE 0 END) AS extraction_no_prediction,
+      SUM(CASE WHEN al.outcome = 'rejected' THEN 1 ELSE 0 END) AS extraction_rejected,
+      SUM(CASE WHEN al.outcome = 'failed' THEN 1 ELSE 0 END) AS extraction_failed,
+      SUM(al.conflict_count) AS extraction_conflicts
+    FROM extraction_attempts a
+    JOIN source_records subject ON subject.id = a.subject_source_record_id
+      AND subject.product_id = a.product_id
+      AND subject.content_hash = a.subject_source_content_hash
+    JOIN extraction_attempt_labels al ON al.attempt_id = a.id
+    JOIN current_label_evidence_assets l ON l.id = al.label_asset_id
+      AND l.subject_source_record_id = a.subject_source_record_id
+      AND l.subject_source_content_hash = a.subject_source_content_hash
+      AND l.product_id = a.product_id AND l.field_family = a.field_family
+    WHERE a.is_current = 1 AND a.field_family = '${family}'
+    GROUP BY a.product_id
+  ), linked_decision_summary AS (
+    SELECT d.product_id, d.source_record_id AS fact_source_record_id,
+      COUNT(*) AS linked_verify_count,
+      SUM(CASE WHEN a.is_current = 1
+        AND subject.product_id = d.product_id AND subject.content_hash = a.subject_source_content_hash
+        AND derived.product_id = d.product_id AND derived.content_hash = d.source_content_hash
+        AND json_extract(derived.raw_evidence_json, '$.extractionAttemptId') = a.id
+        AND json_extract(derived.raw_evidence_json, '$.labelAssetId') = d.label_asset_id
+        AND json_extract(derived.raw_evidence_json, '$.labelContentSha256') = l.content_sha256
+        AND al.label_asset_id = d.label_asset_id
+        AND d.evidence_url IN (l.requested_url, l.effective_url)
+        AND instr(al.candidate_hashes_json, '"' || d.candidate_hash || '"') > 0
+        THEN 1 ELSE 0 END) AS current_linked_verify_count
+    FROM evidence_decisions d
+    JOIN extraction_attempts a ON a.id = d.extraction_attempt_id
+    JOIN extraction_attempt_labels al ON al.attempt_id = a.id AND al.label_asset_id = d.label_asset_id
+    JOIN current_label_evidence_assets l
+      ON l.id = d.label_asset_id
+      AND l.subject_source_record_id = a.subject_source_record_id
+      AND l.subject_source_content_hash = a.subject_source_content_hash
+      AND l.product_id = a.product_id
+      AND l.field_family = a.field_family
+    JOIN source_records derived ON derived.id = d.source_record_id
+    JOIN source_records subject ON subject.id = a.subject_source_record_id
+    WHERE d.active = 1 AND d.decision = 'verify' AND d.field_family = '${family}'
+      AND derived.source_id = '${extractionSourceId}'
+    GROUP BY d.product_id, d.source_record_id
+  )`}` : "";
   const exactCandidateCte = supportsExtraction ? `, exact_candidate_ranked AS (
     SELECT r.product_id, r.id AS review_id,
       ROW_NUMBER() OVER (PARTITION BY r.product_id ORDER BY r.priority DESC, r.created_at, r.id) AS candidate_rank
@@ -499,10 +544,10 @@ function familySql(family: CompletionFamily, includeSources = true): string {
       CASE WHEN TRIM(COALESCE(${labelUrl}, '')) <> ''
         AND COALESCE(cls.extraction_labels, 0) = 0
         AND COALESCE(cafs.failed_attempts, 0) = 0 THEN 1 ELSE 0 END AS extraction_unattempted,
-      COALESCE(sls.extraction_stale, 0) AS extraction_stale,
+      ${includeDetail ? "COALESCE(sls.extraction_stale, 0)" : "0"} AS extraction_stale,
       COALESCE(cls.extraction_conflicts, 0) AS extraction_conflicts,
-      COALESCE(cers.reason_codes_json, '[]') AS reason_codes_json,
-      COALESCE(cls.labels_json, '[]') AS labels_json,
+      ${includeDetail ? "COALESCE(cers.reason_codes_json, '[]')" : "'[]'"} AS reason_codes_json,
+      ${includeDetail ? "COALESCE(cls.labels_json, '[]')" : "'[]'"} AS labels_json,
       COALESCE(lds.linked_verify_count, 0) AS linked_verify_count,
       COALESCE(lds.current_linked_verify_count, 0) AS current_linked_verify_count`
     : `0 AS extraction_labels, 0 AS extraction_candidate, 0 AS extraction_no_prediction,
@@ -512,16 +557,17 @@ function familySql(family: CompletionFamily, includeSources = true): string {
   const extractionJoins = supportsExtraction ? `
     LEFT JOIN current_attempt_failure_summary cafs ON cafs.product_id = p.id
     LEFT JOIN current_label_summary cls ON cls.product_id = p.id
-    LEFT JOIN current_extraction_reason_summary cers ON cers.product_id = p.id
-    LEFT JOIN stale_label_summary sls ON sls.product_id = p.id
+    ${includeDetail ? "LEFT JOIN current_extraction_reason_summary cers ON cers.product_id = p.id" : ""}
+    ${includeDetail ? "LEFT JOIN stale_label_summary sls ON sls.product_id = p.id" : ""}
     LEFT JOIN linked_decision_summary lds
       ON lds.product_id = p.id AND lds.fact_source_record_id = f.source_record_id
     LEFT JOIN exact_candidate_summary ecs ON ecs.product_id = p.id` : "";
   const candidateColumns = supportsExtraction
-    ? "COALESCE(ecs.open_candidate_count, 0) AS open_candidate_count, COALESCE(ecs.primary_candidate_review_id, rs.primary_review_id) AS primary_review_id"
-    : "0 AS open_candidate_count, rs.primary_review_id";
-
-  return `WITH review_ranked AS (
+    ? includeDetail
+      ? "COALESCE(ecs.open_candidate_count, 0) AS open_candidate_count, COALESCE(ecs.primary_candidate_review_id, rs.primary_review_id) AS primary_review_id"
+      : "COALESCE(ecs.open_candidate_count, 0) AS open_candidate_count, NULL AS primary_review_id"
+    : includeDetail ? "0 AS open_candidate_count, rs.primary_review_id" : "0 AS open_candidate_count, NULL AS primary_review_id";
+  const reviewCtes = includeDetail ? `review_ranked AS (
     SELECT r.product_id, r.id AS review_id,
       ROW_NUMBER() OVER (PARTITION BY r.product_id ORDER BY r.priority DESC, r.created_at, r.id) AS review_rank
     FROM review_items r
@@ -530,7 +576,11 @@ function familySql(family: CompletionFamily, includeSources = true): string {
     SELECT product_id, COUNT(*) AS open_review_count,
       MAX(CASE WHEN review_rank = 1 THEN review_id END) AS primary_review_id
     FROM review_ranked GROUP BY product_id
-  )${extractionCtes}${exactCandidateCte}${terminalDecisionCte}${identityDecisionCte}${sourceCtes}, joined AS (
+  )` : "completion_anchor AS (SELECT 1)";
+  const reviewJoin = includeDetail ? "LEFT JOIN review_summary rs ON rs.product_id = p.id" : "";
+  const reviewColumns = includeDetail ? "COALESCE(rs.open_review_count, 0) AS open_review_count" : "0 AS open_review_count";
+
+  return `WITH ${reviewCtes}${extractionCtes}${exactCandidateCte}${terminalDecisionCte}${identityDecisionCte}${sourceCtes}, joined AS (
     SELECT p.id, p.gtin, p.brand, p.brand_normalized, p.name, p.name_normalized,
       p.category, p.image_url, ${labelUrl} AS label_url,
       ${fieldStatus} AS field_status, ${factAuthority} AS fact_authority,
@@ -543,7 +593,7 @@ function familySql(family: CompletionFamily, includeSources = true): string {
       ${family === "identity" ? "NULL" : "fsr.source_id"} AS fact_source_origin_id,
       eo.observed_at AS outcome_observed_at, ${evidenceSourceColumns}, ${identityDecisionColumns},
       ${terminalDecisionColumns},
-      COALESCE(rs.open_review_count, 0) AS open_review_count,
+      ${reviewColumns},
       ${candidateColumns}, ${extractionColumns}, ${sourceColumns}
     FROM products p ${factJoin}
     ${currentFactJoin}
@@ -551,7 +601,7 @@ function familySql(family: CompletionFamily, includeSources = true): string {
     ${evidenceSourceJoin}
     ${identityDecisionJoin}
     ${terminalDecisionJoin}
-    LEFT JOIN review_summary rs ON rs.product_id = p.id
+    ${reviewJoin}
     ${extractionJoins}
     ${sourceJoin}
     WHERE p.is_active = 1
@@ -605,7 +655,7 @@ function familySql(family: CompletionFamily, includeSources = true): string {
 }
 
 function summarySql(family: CompletionFamily): string {
-  return `${familySql(family, false)} SELECT COUNT(*) AS active_products,
+  return `${familySql(family, false, false)} SELECT COUNT(*) AS active_products,
     SUM(CASE WHEN completion_state = 'verified' THEN 1 ELSE 0 END) AS verified,
     SUM(CASE WHEN completion_state = 'terminal_unavailable' THEN 1 ELSE 0 END) AS terminal_unavailable,
     SUM(CASE WHEN completion_state = 'outstanding' THEN 1 ELSE 0 END) AS outstanding,
@@ -711,7 +761,7 @@ export async function getCompletionLedger(
     extraction_unattempted, extraction_stale, extraction_conflicts, reason_codes_json, labels_json
     FROM ledger ${filters.sql}
     ORDER BY lane_priority, brand_normalized, name_normalized, id LIMIT ? OFFSET ?`;
-  const countSql = `${familySql(input.family, false)} SELECT COUNT(*) AS total FROM ledger ${filters.sql}`;
+  const countSql = `${familySql(input.family, false, false)} SELECT COUNT(*) AS total FROM ledger ${filters.sql}`;
   const offset = (input.page - 1) * input.pageSize;
   const [summaryResult, countResult, pageResult, snapshotResult] = await db.batch([
     db.prepare(summarySql(input.family)),

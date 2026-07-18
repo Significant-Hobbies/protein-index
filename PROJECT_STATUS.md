@@ -1,6 +1,6 @@
 # Protein Index — PROJECT STATUS
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 ## Why / What
 
@@ -52,6 +52,8 @@ the strict terminal-evidence gate above is actually satisfied.
 - Fleet standards and release controls in `../AGENTS.md`
 
 ## Timeline
+
+- 2026-07-19 — live dashboard audit found its coverage payload recomputed detail-only extraction JSON, stale-label diagnostics, and review-list state for every completion family. The summary path now retains exact completion/lane accounting while skipping those unused projections; focused Worker tests assert each returned state and lane count matches the detailed ledger.
 
 - 2026-07-15 — private repository created; core MVP specification and implementation started
 - 2026-07-15 — local catalog, D1 ingestion, Worker API, operator UI, source-complete Open Food Facts adapter, and scheduled sync workflow implemented

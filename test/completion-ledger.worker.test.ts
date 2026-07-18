@@ -468,9 +468,9 @@ describe("completion ledger Worker API", () => {
     await seedNutritionPartition("agreement");
     const coverage = await json<CoverageResponse>(await worker.fetch("http://localhost/api/coverage"));
     const [identity, nutrition, ingredients] = await Promise.all([
-      ledger("family=identity&state=all&pageSize=1"),
-      ledger("family=nutrition&state=all&pageSize=1"),
-      ledger("family=ingredients&state=all&pageSize=1"),
+      ledger("family=identity&state=all&pageSize=100"),
+      ledger("family=nutrition&state=all&pageSize=100"),
+      ledger("family=ingredients&state=all&pageSize=100"),
     ]);
 
     expect(identity.summary.outstanding).toBe(coverage.completion.outstandingIdentity);
@@ -479,6 +479,15 @@ describe("completion ledger Worker API", () => {
     for (const { summary } of [identity, nutrition, ingredients]) {
       expect(summary.verified + summary.terminalUnavailable + summary.outstanding).toBe(summary.activeProducts);
       expect(summary.invariantHolds).toBe(true);
+    }
+    for (const { items, summary } of [identity, nutrition, ingredients]) {
+      expect(items).toHaveLength(summary.activeProducts);
+      expect(summary.verified).toBe(items.filter((item) => item.state === "verified").length);
+      expect(summary.terminalUnavailable).toBe(items.filter((item) => item.state === "terminal_unavailable").length);
+      expect(summary.outstanding).toBe(items.filter((item) => item.state === "outstanding").length);
+      for (const [lane, count] of Object.entries(summary.lanes)) {
+        expect(count).toBe(items.filter((item) => item.lane === lane).length);
+      }
     }
     expect(coverage.completion.status).toBe("incomplete");
   });
