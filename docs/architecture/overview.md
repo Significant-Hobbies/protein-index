@@ -81,7 +81,7 @@ lives in code; this table is a navigation aid, not a substitute for reading it.
 | Worker (serving) | [`worker/`](../../worker/) | Hono routes: catalog, completion, coverage, reviews, terminal/identity evidence, agent-index |
 | Shared domain | [`shared/`](../../shared/) | Pure domain logic: types, evidence-decisions, extraction-outcomes, identity/ingredient/terminal evidence, nutrition, metrics, gtin, classification |
 | Scripts (producer) | [`scripts/`](../../scripts/) | sync, reconcile, review-bundles, publication, machine-label*, guarded-publication, audit-decisions |
-| Adapters | [`scripts/adapters/`](../../scripts/adapters/) | open-food-facts, robotoff, robotoff-ingredients, label-image, official-brand-sitemap, response-cache |
+| Adapters | [`scripts/adapters/`](../../scripts/adapters/) | open-food-facts (+ `-api`), robotoff (+ `-api`), robotoff-ingredients (+ `-api`), label-image, official-brand-sitemap, datakart, response-cache, extraction-progress, run-budget |
 | Migrations | [`migrations/`](../../migrations/) | D1 schema, applied in order; see [data model](data-model.md) |
 | Tests | [`test/`](../../test/) | unit + Worker/D1 integration via `@cloudflare/vitest-pool-workers` |
 | Frontend | [`src/`](../../src/) | React SPA: catalog, evidence detail, review controls, completion worklist |
@@ -89,22 +89,25 @@ lives in code; this table is a navigation aid, not a substitute for reading it.
 ## Agent / LLM surfaces
 
 The Worker serves machine-readable surfaces before SPA fallback so agents do
-not receive fake HTML 200s. See
-[`worker/agent-index.ts`](../../worker/agent-index.ts) and
-[`public/`](../../public/) for the implementation.
+not receive fake HTML 200s. Some surfaces are Worker routes
+([`worker/agent-index.ts`](../../worker/agent-index.ts), registered in
+[`worker/index.ts`](../../worker/index.ts)); others are plain static assets in
+[`public/`](../../public/).
 
-| Path | Content |
-| --- | --- |
-| `/llms.txt` | Compact agent index |
-| `/llms-full.txt` | Full agent brief |
-| `/index.md` | Product brief in Markdown |
-| `/api/ai` | JSON catalog of public surfaces |
-| `/api/products/:id.md` | Per-product Markdown |
-| `/sitemap.xml` | Sitemap |
-| `/robots.txt` | Allow rules for agent paths |
+| Path | Content | Served by |
+| --- | --- | --- |
+| `/llms.txt` | Compact agent index | Worker route |
+| `/index.md` | Product brief in Markdown | Worker route |
+| `/api/ai` | JSON catalog of public surfaces | Worker route |
+| `/api/products/:id.md` | Per-product Markdown | Worker route |
+| `/sitemap.xml` | Sitemap | Worker route |
+| `/llms-full.txt` | Full agent brief | Static asset (`public/`) |
+| `/robots.txt` | Allow rules for agent paths | Static asset (`public/`) |
 
-`wrangler.jsonc` lists these paths under `assets.run_worker_first` so they hit
-the Worker before SPA HTML fallback.
+`wrangler.jsonc` lists `/api/*`, `/llms.txt`, `/llms-full.txt`, `/index.md`, and
+`/sitemap.xml` under `assets.run_worker_first` so the Worker's dynamic surfaces
+win over the SPA HTML fallback. `/robots.txt` is a plain static asset and is not
+in that list.
 
 ## See also
 

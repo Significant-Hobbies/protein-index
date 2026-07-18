@@ -122,6 +122,19 @@ confirmation phrase. All refuse pending migrations except `publish-catalog`.
   no deployment. Verified counts cannot increase. Community observations stay
   unverified; model output stays review-only.
 
+### `publish-machine-evidence` — `.github/workflows/publish-machine-evidence.yml`
+
+- **Trigger:** `workflow_dispatch` with `release_path` (a checksummed release
+  directory under `machine-evidence/`), `expected_manifest_sha256`, and
+  `confirm_production_publication` (must be
+  `PUBLISH_MACHINE_EVIDENCE_TO_PRODUCTION`).
+- **Authority:** no migrations. Publishes the offline automated label lane's
+  `machine_verified` nutrition state from a pinned machine-evidence release
+  bundle. Rebuilds and byte-compares the exact `import.sql`, refuses pending
+  migrations, and verifies current source bindings before any write. The
+  `machine_verified` state can never claim human or brand verification (see
+  [evidence policy](../../product/evidence-policy.md)).
+
 ## CI
 
 ### `ci` — `.github/workflows/ci.yml`
