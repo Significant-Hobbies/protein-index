@@ -44,8 +44,9 @@
       "requiredNameTerms": ["protein", "whey", "casein", "gainer"],
       "maxProductPages": 650,
       "maxSitemapDepth": 2,
-      "minimumRequestIntervalMs": 1000,
-      "maxRetries": 3
+      "minimumRequestIntervalMs": 1500,
+      "maxRetries": 3,
+      "maxNotFoundRetries": 1
     },
     {
       "id": "max_protein_india",

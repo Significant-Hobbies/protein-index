@@ -67,6 +67,16 @@ describe("official brand publication preparation", () => {
     await expect(prepareOfficialBrandPublication({ configPath, sourceDirectories: { brand_one: one, brand_two: two }, outputDirectory: join(root, "incomplete") })).rejects.toThrow("not a complete production snapshot");
   });
 
+  it("rejects an empty configured source even when its terminal marker is complete", async () => {
+    const root = await mkdtemp(join(tmpdir(), "protein-brand-publication-"));
+    const configPath = join(root, "sources.json");
+    await writeFile(configPath, JSON.stringify({ schemaVersion: 1, sources: [{ id: "brand_one", name: "Brand One", allowedHosts: ["brand-one.example"], sitemapUrls: ["https://brand-one.example/sitemap.xml"] }] }));
+    const one = await artifact(root, "brand_one");
+    await writeFile(join(one, "manifest.json"), JSON.stringify(manifest("brand_one", 0)));
+    await writeFile(join(one, "staged-products.jsonl"), "");
+    await expect(prepareOfficialBrandPublication({ configPath, sourceDirectories: { brand_one: one }, outputDirectory: join(root, "empty") })).rejects.toThrow("staged-record accounting");
+  });
+
   it("rejects a changed composite artifact after preparation", async () => {
     const root = await mkdtemp(join(tmpdir(), "protein-brand-publication-"));
     const configPath = join(root, "sources.json");

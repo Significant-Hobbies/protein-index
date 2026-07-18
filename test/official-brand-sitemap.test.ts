@@ -156,6 +156,24 @@ describe("official brand sitemap discovery", () => {
     expect(result.manifest).toMatchObject({ sourceComplete: true, stagedRecords: 1 });
   });
 
+  it("retries a declared transient not-found response before excluding a live product page", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-brand-not-found-retry-"));
+    let productRequests = 0;
+    const result = await discoverOfficialBrandCatalog({
+      source: { ...source, maxNotFoundRetries: 1 },
+      outputDirectory: directory,
+      fetcher: async (input) => {
+        const url = String(input);
+        if (url.endsWith("/robots.txt")) return new Response("User-agent: *\nAllow: /");
+        if (url.endsWith("/sitemap.xml")) return new Response("<urlset><url><loc>https://brand.example/products/puffs</loc></url></urlset>");
+        productRequests += 1;
+        return productRequests === 1 ? new Response("missing", { status: 404 }) : new Response(page);
+      },
+    });
+    expect(productRequests).toBe(2);
+    expect(result.manifest).toMatchObject({ sourceComplete: true, stagedRecords: 1 });
+  });
+
   it("records non-matching configured product names as exclusions without making the source partial", async () => {
     const directory = await mkdtemp(join(tmpdir(), "protein-brand-scope-"));
     const urls = new Map<string, string>([["https://brand.example/robots.txt", "User-agent: *\nAllow: /"], ["https://brand.example/sitemap.xml", "<urlset><url><loc>https://brand.example/products/salt</loc></url></urlset>"], ["https://brand.example/products/salt", microdataPage.replace("Acme Whey Protein", "Acme Salt")]]);

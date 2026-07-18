@@ -101,7 +101,7 @@ function assertManifest(manifest: SourceManifest, expectedSource: string, staged
   if (!manifest.inputHash || !/^[a-f0-9]{64}$/.test(manifest.inputHash)) {
     throw new Error(`Official-brand artifact ${expectedSource} has no valid input hash.`);
   }
-  if (!Number.isSafeInteger(manifest.stagedRecords) || manifest.stagedRecords < 0 || manifest.stagedRecords !== stagedRecords) {
+  if (!Number.isSafeInteger(manifest.stagedRecords) || manifest.stagedRecords < 1 || manifest.stagedRecords !== stagedRecords) {
     throw new Error(`Official-brand artifact ${expectedSource} staged-record accounting differs from its manifest.`);
   }
 }
