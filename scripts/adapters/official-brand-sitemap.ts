@@ -8,7 +8,7 @@ import { normalizeGtin, normalizeText, parseQuantity } from "../../shared/gtin";
 import { emptyNutrition, hasNutritionErrors, validateNutrition } from "../../shared/nutrition";
 import type { SourceManifest, StagedOffer, StagedProduct } from "../../shared/types";
 
-export const OFFICIAL_BRAND_SITEMAP_ADAPTER_VERSION = "official-brand-sitemap-v16";
+export const OFFICIAL_BRAND_SITEMAP_ADAPTER_VERSION = "official-brand-sitemap-v17";
 export const OFFICIAL_BRAND_USER_AGENT = "ProteinIndexCatalogBot/1.0";
 export const DEFAULT_MAX_PRODUCT_PAGES = 2_000;
 export const DEFAULT_MAX_SITEMAP_DEPTH = 3;
@@ -306,6 +306,33 @@ function structuredNutrition(product: Json, source: OfficialBrandSource, observe
   return { per100g, servingSizeGrams: null, basis: "unknown" as const, preparationState: "as_sold" as const, status: "unverified" as const, confidence: "medium" as const, source: source.id, observedAt, labelVerifiedAt: null };
 }
 
+function muscleBlazeHighlightsNutrition(html: string, source: OfficialBrandSource, observedAt: string) {
+  if (source.id !== "muscleblaze_india") return null;
+  const raw = /<script\b[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i.exec(html)?.[1];
+  if (!raw) return null;
+  try {
+    const data = record(JSON.parse(raw));
+    const props = record(data?.props);
+    const pageProps = record(props?.pageProps);
+    const payload = record(pageProps?.data);
+    const product = record(payload?.results);
+    const highlights = Array.isArray(product?.nut_info_grp) ? product.nut_info_grp.map(record).filter((value): value is Json => value !== null) : [];
+    const value = (names: string[]) => highlights.find((item) => names.includes(normalizeText(string(item.dis_nm) ?? string(item.nm) ?? "")))?.val;
+    if (value(["protein per serving"]) === undefined) return null;
+    const caloriesRaw = value(["kcal", "calories", "energy"]);
+    const calories = declaredNutritionNumber(caloriesRaw, "kcal") ?? (typeof caloriesRaw === "string" && /^\d+(?:\.\d+)?$/.test(caloriesRaw) ? Number(caloriesRaw) : null);
+    const protein = declaredNutritionNumber(value(["protein"]), "g");
+    const per100g = { ...emptyNutrition(), calories, proteinGrams: protein };
+    if (calories === null || protein === null || hasNutritionErrors(validateNutrition(per100g, "per_serving"))) return null;
+    return {
+      nutrition: { per100g, servingSizeGrams: null, basis: "per_serving" as const, preparationState: "as_sold" as const, status: "unverified" as const, confidence: "medium" as const, source: source.id, observedAt, labelVerifiedAt: null },
+      raw: highlights,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function htmlTableText(html: string): string {
   return html
     .replace(/<br\s*\/?>/gi, "\n")
@@ -398,7 +425,7 @@ function canonicalBrand(source: OfficialBrandSource, declared: string | null): s
 }
 
 function stagedOfficialBrandProductFromParsed(input: { source: OfficialBrandSource; pageUrl: string; html: string; observedAt: string; parsed: ParsedProduct }): StagedProduct | null {
-  const product = input.parsed.product; const name = string(product.name); if (!name) return null; const group = input.parsed.productGroup; const brandValue = record(product.brand) ?? record(group?.brand); const brand = canonicalBrand(input.source, string(product.brand) ?? string(group?.brand) ?? string(brandValue?.name)); const rawGtin = string(product.gtin13) ?? string(product.gtin12) ?? string(product.gtin14) ?? string(product.gtin) ?? string(product.sku); const gtin = normalizeGtin(rawGtin); const images = Array.isArray(product.image) ? product.image : [product.image]; const imageUrl = images.map(string).find((value) => value?.startsWith("https://")) ?? null; const flavour = visibleVariant(input.html); const netQuantityGrams = parseQuantity(flavour)?.grams ?? declaredPackQuantity(name, string(product.description) ?? string(group?.description)); const sourceUrl = productUrl(product, input.pageUrl); const labels = group ? { nutritionImageUrl: null, ingredientImageUrl: null } : explicitLabelImages(input.source, input.html, input.pageUrl); const declaredNutrition = structuredNutrition(product, input.source, input.observedAt); const tableNutrition = declaredNutrition ? null : htmlTableNutrition(input.html, input.source, input.observedAt); const evidence = { pageUrl: input.pageUrl, [input.parsed.evidenceKey]: product, productGroup: group, flavour, labels, nutritionTable: tableNutrition?.raw ?? null }; const nutrition = declaredNutrition ?? tableNutrition?.nutrition ?? { per100g: emptyNutrition(), servingSizeGrams: null, basis: "unknown" as const, preparationState: "as_sold" as const, status: "missing" as const, confidence: "medium" as const, source: input.source.id, observedAt: input.observedAt, labelVerifiedAt: null }; const classification = classifyProtein({ brand, name, categories: string(product.category) ?? string(group?.category) ?? "", labels: "", nutrition });
+  const product = input.parsed.product; const name = string(product.name); if (!name) return null; const group = input.parsed.productGroup; const brandValue = record(product.brand) ?? record(group?.brand); const brand = canonicalBrand(input.source, string(product.brand) ?? string(group?.brand) ?? string(brandValue?.name)); const rawGtin = string(product.gtin13) ?? string(product.gtin12) ?? string(product.gtin14) ?? string(product.gtin) ?? string(product.sku); const gtin = normalizeGtin(rawGtin); const images = Array.isArray(product.image) ? product.image : [product.image]; const imageUrl = images.map(string).find((value) => value?.startsWith("https://")) ?? null; const flavour = visibleVariant(input.html); const netQuantityGrams = parseQuantity(flavour)?.grams ?? declaredPackQuantity(name, string(product.description) ?? string(group?.description)); const sourceUrl = productUrl(product, input.pageUrl); const labels = group ? { nutritionImageUrl: null, ingredientImageUrl: null } : explicitLabelImages(input.source, input.html, input.pageUrl); const declaredNutrition = structuredNutrition(product, input.source, input.observedAt); const tableNutrition = declaredNutrition ? null : htmlTableNutrition(input.html, input.source, input.observedAt); const highlightsNutrition = declaredNutrition || tableNutrition ? null : muscleBlazeHighlightsNutrition(input.html, input.source, input.observedAt); const evidence = { pageUrl: input.pageUrl, [input.parsed.evidenceKey]: product, productGroup: group, flavour, labels, nutritionTable: tableNutrition?.raw ?? null, muscleBlazeNutritionHighlights: highlightsNutrition?.raw ?? null }; const nutrition = declaredNutrition ?? tableNutrition?.nutrition ?? highlightsNutrition?.nutrition ?? { per100g: emptyNutrition(), servingSizeGrams: null, basis: "unknown" as const, preparationState: "as_sold" as const, status: "missing" as const, confidence: "medium" as const, source: input.source.id, observedAt: input.observedAt, labelVerifiedAt: null }; const classification = classifyProtein({ brand, name, categories: string(product.category) ?? string(group?.category) ?? "", labels: "", nutrition });
   return { source: input.source.id, sourceKind: "brand", sourceAuthority: { identity: 70, nutrition: 40, ingredients: 40 }, sourceLicenseUrl: null, sourceRetentionNotes: "Configured official brand page; retain provenance and respect source policy.", sourceRecordId: sourceUrl, sourceUrl, observedAt: input.observedAt, contentHash: stable(JSON.stringify(evidence)), gtinRaw: rawGtin, gtin, brand, name, flavour, category: "other", categoryRaw: string(product.category) ?? string(group?.category), productKind: "retail_packaged", netQuantityGrams, servingSizeGrams: null, imageUrl, nutritionImageUrl: labels.nutritionImageUrl, ingredientImageUrl: labels.ingredientImageUrl, offers: offerFrom(product, input.source, sourceUrl, input.observedAt), ratings: [], nutrition, nutrients: [], ingredients: { raw: null, language: null, normalized: [], allergens: [], additives: [], status: "missing", confidence: "medium", source: input.source.id, observedAt: input.observedAt }, classification, completeness: 0, completenessMissing: ["nutrition", "ingredients"], rawEvidence: evidence, validationIssues: [] };
 }
 

@@ -19,6 +19,7 @@ const nutritionTablePage = `${microdataPage}<p>Nutrition facts</p><p>| Nutrient 
 const nutritionLabelTablePage = `${microdataPage}<p>Nutrition Label | PER 100g | PER 40g<br><strong>Calories</strong> | 422kcal | 169kcal<br><strong>Protein</strong> | 27g | 11g<br>Carbohydrate | 48g | 19g<br>Total Fat | 9g | 4g</p>`;
 const multipleNutritionTablesPage = `${nutritionTablePage}<p>| Nutrient | Per 100g | Per 40g |<br>| --- | --- | --- |<br>| Energy | 500 kcal | 200 kcal |<br>| Protein | 20 g | 8 g |</p>`;
 const configuredNutritionImagePage = `${page}<img src="https://cdn.example/nivalues_45.png?v=1&width=100" alt="">`;
+const muscleBlazeHighlightsPage = `${microdataPage}<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"data":{"results":{"nut_info_grp":[{"val":"26 g","dis_nm":"Protein"},{"val":"140.08","dis_nm":"Kcal"},{"val":"74.0","dis_nm":"Protein % per Serving"}]}}}}}</script>`;
 
 describe("official brand sitemap discovery", () => {
   it("honors specific robots rules", () => {
@@ -30,6 +31,12 @@ describe("official brand sitemap discovery", () => {
     const product = stagedOfficialBrandProduct({ source, pageUrl: "https://brand.example/products/puffs", html: page, observedAt: "2026-07-18T00:00:00.000Z" });
     expect(product).toMatchObject({ gtin: "08900000000012", offers: [{ sellingPrice: 199, available: true }], nutrition: { status: "unverified", basis: "unknown", per100g: { calories: 100, proteinGrams: 12 } } });
     expect(product?.rawEvidence).toHaveProperty("productJsonLd.nutrition.calories", "100 kcal");
+  });
+
+  it("retains declared MuscleBlaze protein and energy highlights as per-serving first-party evidence", () => {
+    const product = stagedOfficialBrandProduct({ source: { ...source, id: "muscleblaze_india", name: "MuscleBlaze" }, pageUrl: "https://brand.example/products/whey", html: muscleBlazeHighlightsPage, observedAt: "2026-07-18T00:00:00.000Z" });
+    expect(product).toMatchObject({ nutrition: { status: "unverified", basis: "per_serving", per100g: { calories: 140.08, proteinGrams: 26 } } });
+    expect(product?.rawEvidence).toHaveProperty("muscleBlazeNutritionHighlights.0.val", "26 g");
   });
 
   it("normalizes only configured first-party brand aliases to the configured display name", () => {
