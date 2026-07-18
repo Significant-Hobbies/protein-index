@@ -407,9 +407,9 @@ the strict terminal-evidence gate above is actually satisfied.
 23. Completed locally: exact product/source-bound extraction outcomes
     (candidate, no prediction, rejected, and failed), current label-byte hashes,
     immutable replay guards, and honest attempt-status lanes are implemented.
-    Historical v7 and earlier artifacts cannot establish exact label-content
-    hashes, so production backfill requires fresh adapter-v8/v3 extraction after
-    migration `0009`; do not infer or synthesize hashes for legacy evidence.
+    Historical v7 and earlier artifacts lack exact label-content hashes, so any
+    production backfill uses fresh adapter-v8/v3 extraction after migration
+    `0009`; do not infer or synthesize hashes for legacy evidence.
 24. Completed locally: mutable projected unavailable outcomes are replaced by
     immutable, source/hash-bound not-declared and not-applicable decisions with
     contradiction handling, deterministic fallback, stale-evidence refresh,
