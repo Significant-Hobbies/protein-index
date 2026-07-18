@@ -8,13 +8,13 @@ import { normalizeGtin, normalizeText, parseQuantity } from "../../shared/gtin";
 import { emptyNutrition, hasNutritionErrors, validateNutrition } from "../../shared/nutrition";
 import type { SourceManifest, StagedOffer, StagedProduct } from "../../shared/types";
 
-export const OFFICIAL_BRAND_SITEMAP_ADAPTER_VERSION = "official-brand-sitemap-v19";
+export const OFFICIAL_BRAND_SITEMAP_ADAPTER_VERSION = "official-brand-sitemap-v20";
 export const OFFICIAL_BRAND_USER_AGENT = "ProteinIndexCatalogBot/1.0";
 export const DEFAULT_MAX_PRODUCT_PAGES = 2_000;
 export const DEFAULT_MAX_SITEMAP_DEPTH = 3;
 export const DEFAULT_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
-export interface OfficialBrandSource { id: string; name: string; allowedHosts: string[]; sitemapUrls: string[]; brandAliases?: string[]; productPathPrefixes?: string[]; candidateUrlTerms?: string[]; requiredNameTerms?: string[]; nutritionImageFilenamePrefixes?: string[]; maxProductPages?: number; maxSitemapDepth?: number; maximumResponseBytes?: number; minimumRequestIntervalMs?: number; maxRetries?: number; maxNotFoundRetries?: number }
+export interface OfficialBrandSource { id: string; name: string; allowedHosts: string[]; sitemapUrls: string[]; brandAliases?: string[]; productPathPrefixes?: string[]; candidateUrlTerms?: string[]; requiredNameTerms?: string[]; nutritionImageFilenamePrefixes?: string[]; minimumStagedProducts?: number; maxProductPages?: number; maxSitemapDepth?: number; maximumResponseBytes?: number; minimumRequestIntervalMs?: number; maxRetries?: number; maxNotFoundRetries?: number }
 export interface OfficialBrandDiscoveryConfig { schemaVersion: 1; sources: OfficialBrandSource[] }
 export interface OfficialBrandDiscoveryResult { manifest: SourceManifest; stagedPath: string; exclusionsPath: string; manifestPath: string }
 
@@ -37,6 +37,7 @@ export function validateOfficialBrandSource(source: OfficialBrandSource): void {
   if (source.candidateUrlTerms && (!Array.isArray(source.candidateUrlTerms) || source.candidateUrlTerms.length === 0 || source.candidateUrlTerms.some((term) => !normalizeText(term)))) throw new Error("candidateUrlTerms must be non-empty product URL terms.");
   if (source.requiredNameTerms && (!Array.isArray(source.requiredNameTerms) || source.requiredNameTerms.length === 0 || source.requiredNameTerms.some((term) => !normalizeText(term)))) throw new Error("requiredNameTerms must be non-empty product-name terms.");
   if (source.nutritionImageFilenamePrefixes && (!Array.isArray(source.nutritionImageFilenamePrefixes) || source.nutritionImageFilenamePrefixes.length === 0 || source.nutritionImageFilenamePrefixes.some((prefix) => !/^[a-z0-9_-]+$/i.test(prefix)))) throw new Error("nutritionImageFilenamePrefixes must be non-empty literal filename prefixes.");
+  if (source.minimumStagedProducts !== undefined && (!Number.isSafeInteger(source.minimumStagedProducts) || source.minimumStagedProducts < 1)) throw new Error("minimumStagedProducts must be a positive integer.");
   const hosts = new Set(source.allowedHosts.map((host) => host.toLowerCase()));
   for (const sitemapUrl of source.sitemapUrls) if (!hosts.has(httpsUrl(sitemapUrl, "Sitemap URL").host.toLowerCase())) throw new Error("Sitemap URL host is outside the configured boundary.");
   for (const [name, value, fallback] of [["maxProductPages", source.maxProductPages, DEFAULT_MAX_PRODUCT_PAGES], ["maxSitemapDepth", source.maxSitemapDepth, DEFAULT_MAX_SITEMAP_DEPTH]] as const) if (!Number.isSafeInteger(value ?? fallback) || (value ?? fallback) < 1) throw new Error(`${name} must be a positive integer.`);
@@ -59,7 +60,7 @@ const pause = (milliseconds: number) => new Promise<void>((resolve) => setTimeou
 async function boundedText(fetcher: Fetcher, url: string, maximumBytes: number): Promise<{ text: string; effectiveUrl: string }> { const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 20_000); try { const response = await fetcher(url, { headers: { "User-Agent": OFFICIAL_BRAND_USER_AGENT, Accept: "text/html,application/xml,text/xml;q=0.9" }, redirect: "follow", signal: controller.signal }); if (!response.ok) throw new HttpError(response.status); if (!response.body) throw new Error("Response body is missing."); const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let size = 0; try { for (;;) { const item = await reader.read(); if (item.done) break; if (!item.value) continue; size += item.value.byteLength; if (size > maximumBytes) throw new Error("Response exceeds byte limit."); chunks.push(item.value); } } finally { reader.releaseLock(); } return { text: new TextDecoder().decode(Buffer.concat(chunks)), effectiveUrl: response.url || url }; } finally { clearTimeout(timeout); } }
 export function sitemapLocations(xml: string): string[] { return [...xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)].map((match) => match[1]!.trim()); }
 
-interface ParsedProduct { product: Json; evidenceKey: "productJsonLd" | "productMicrodata" | "productShopifyMeta"; productGroup: Json | null }
+interface ParsedProduct { product: Json; evidenceKey: "productJsonLd" | "productMicrodata" | "productShopifyMeta" | "productMuscleBlazeNext"; productGroup: Json | null }
 
 function microdataAttributes(tag: string): Record<string, string> {
   const attributes: Record<string, string> = {};
@@ -283,7 +284,38 @@ function jsonLdProducts(value: Json): ParsedProduct[] {
   });
 }
 
-function firstProducts(html: string, pageUrl: string): ParsedProduct[] { for (const script of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) { try { const value = JSON.parse(script[1]!); const values = Array.isArray(value) ? value : [value]; for (const entry of values) { const item = record(entry); if (!item) continue; const graph = Array.isArray(item["@graph"]) ? item["@graph"] : [item]; for (const nested of graph) { const product = record(nested); if (!product) continue; const parsed = jsonLdProducts(product); if (parsed.length > 0) return parsed; } } } catch { /* malformed JSON-LD is excluded below */ } } const microdata = microdataProduct(html); if (microdata) return [microdata]; return shopifyMetaProducts(html, pageUrl); }
+function muscleBlazeNextProducts(html: string, source: OfficialBrandSource): ParsedProduct[] {
+  if (source.id !== "muscleblaze_india") return [];
+  const raw = /<script\b[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i.exec(html)?.[1];
+  if (!raw) return [];
+  try {
+    const data = record(JSON.parse(raw));
+    const payload = record(record(record(data?.props)?.pageProps)?.data);
+    const result = record(payload?.results);
+    const name = string(result?.nm);
+    if (!name) return [];
+    const brand = record(result?.brand);
+    const image = Array.isArray(result?.images) ? result.images.map(record).find((value) => string(value?.o_link) ?? string(value?.m_link)) : null;
+    const price = result?.offer_pr;
+    const numericPrice = typeof price === "number" && Number.isFinite(price) ? price : typeof price === "string" && /^\d+(?:\.\d+)?$/.test(price) ? Number(price) : null;
+    return [{
+      evidenceKey: "productMuscleBlazeNext",
+      product: {
+        "@type": "Product",
+        name,
+        brand: string(brand?.nm) ?? string(brand?.dis_nm),
+        sku: typeof result?.id === "number" || typeof result?.id === "string" ? String(result.id) : null,
+        image: string(image?.o_link) ?? string(image?.m_link),
+        offers: numericPrice === null ? null : { price: numericPrice, priceCurrency: "INR", availability: result?.oos === true ? "OutOfStock" : "InStock" },
+      },
+      productGroup: null,
+    }];
+  } catch {
+    return [];
+  }
+}
+
+function firstProducts(html: string, pageUrl: string, source: OfficialBrandSource): ParsedProduct[] { for (const script of html.matchAll(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) { try { const value = JSON.parse(script[1]!); const values = Array.isArray(value) ? value : [value]; for (const entry of values) { const item = record(entry); if (!item) continue; const graph = Array.isArray(item["@graph"]) ? item["@graph"] : [item]; for (const nested of graph) { const product = record(nested); if (!product) continue; const parsed = jsonLdProducts(product); if (parsed.length > 0) return parsed; } } } catch { /* malformed JSON-LD is excluded below */ } } const microdata = microdataProduct(html); if (microdata) return [microdata]; const shopify = shopifyMetaProducts(html, pageUrl); return shopify.length > 0 ? shopify : muscleBlazeNextProducts(html, source); }
 function offerFrom(product: Json, source: OfficialBrandSource, pageUrl: string, observedAt: string): StagedOffer[] { const offers = Array.isArray(product.offers) ? product.offers : [product.offers]; for (const rawOffer of offers) { const offer = record(rawOffer); if (!offer) continue; const rawPrice = offer.price; const price = typeof rawPrice === "number" ? rawPrice : typeof rawPrice === "string" ? Number(rawPrice) : NaN; const currency = string(offer.priceCurrency)?.toUpperCase(); if (!Number.isFinite(price) || price < 0 || currency !== "INR") continue; const availability = string(offer.availability)?.toLowerCase() ?? ""; return [{ retailer: source.id, retailerListingId: stable(pageUrl).slice(0, 40), pincode: null, seller: source.name, mrp: null, sellingPrice: price, available: !availability.includes("outofstock") && !availability.includes("soldout"), url: pageUrl, observedAt }]; } return []; }
 
 function declaredNutritionNumber(value: unknown, unit: "kcal" | "g" | "mg"): number | null {
@@ -436,12 +468,12 @@ function stagedOfficialBrandProductFromParsed(input: { source: OfficialBrandSour
 }
 
 export function stagedOfficialBrandProduct(input: { source: OfficialBrandSource; pageUrl: string; html: string; observedAt: string }): StagedProduct | null {
-  const parsed = firstProducts(input.html, input.pageUrl)[0];
+  const parsed = firstProducts(input.html, input.pageUrl, input.source)[0];
   return parsed ? stagedOfficialBrandProductFromParsed({ ...input, parsed }) : null;
 }
 
 export function stagedOfficialBrandProducts(input: { source: OfficialBrandSource; pageUrl: string; html: string; observedAt: string }): StagedProduct[] {
-  return firstProducts(input.html, input.pageUrl).flatMap((parsed) => {
+  return firstProducts(input.html, input.pageUrl, input.source).flatMap((parsed) => {
     const product = stagedOfficialBrandProductFromParsed({ ...input, parsed });
     return product ? [product] : [];
   });
@@ -456,5 +488,9 @@ export function officialBrandVariantKey(product: StagedProduct): string {
 export async function discoverOfficialBrandCatalog(input: { source: OfficialBrandSource; outputDirectory: string; fetcher?: Fetcher; now?: () => Date }): Promise<OfficialBrandDiscoveryResult> {
   validateOfficialBrandSource(input.source); await mkdir(input.outputDirectory, { recursive: true }); const fetcher = input.fetcher ?? fetch; const now = input.now ?? (() => new Date()); const startedAt = now().toISOString(); const hosts = new Set(input.source.allowedHosts.map((host) => host.toLowerCase())); const root = httpsUrl(input.source.sitemapUrls[0]!, "Sitemap URL"); const stagedPath = join(input.outputDirectory, "staged-products.jsonl"); const exclusionsPath = join(input.outputDirectory, "exclusions.jsonl"); const manifestPath = join(input.outputDirectory, "manifest.json"); const staged = createWriteStream(stagedPath); const exclusions = createWriteStream(exclusionsPath); const maximumPages = input.source.maxProductPages ?? DEFAULT_MAX_PRODUCT_PAGES; const maximumDepth = input.source.maxSitemapDepth ?? DEFAULT_MAX_SITEMAP_DEPTH; const maximumResponseBytes = input.source.maximumResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES; const minimumIntervalMs = input.source.minimumRequestIntervalMs ?? 0; const maxRetries = input.source.maxRetries ?? 0; const maxNotFoundRetries = input.source.maxNotFoundRetries ?? 0; let lastRequestAt = 0; const requestText = async (url: string) => { const elapsed = Date.now() - lastRequestAt; if (elapsed < minimumIntervalMs) await pause(minimumIntervalMs - elapsed); for (let attempt = 0;; attempt += 1) { try { const result = await boundedText(fetcher, url, maximumResponseBytes); lastRequestAt = Date.now(); if (!withinBoundary(result.effectiveUrl, hosts)) throw new Error("Redirect left the configured HTTPS host boundary."); return result; } catch (error) { lastRequestAt = Date.now(); const retryLimit = error instanceof HttpError && error.status === 404 ? maxNotFoundRetries : maxRetries; if (!(error instanceof HttpError) || ![404, 429, 500, 502, 503, 504].includes(error.status) || attempt >= retryLimit) throw error; await pause(Math.max(minimumIntervalMs, Math.floor(Math.random() * (500 * 2 ** attempt + 1)))); } } }; let recordsRead = 0; let stagedRecords = 0; let invalidRecords = 0; let duplicateRecords = 0; const productVariants = new Set<string>(); let failed = false; let limited = false;
   try { let robots = ""; try { robots = (await requestText(`https://${root.host}/robots.txt`)).text; } catch { robots = ""; } if (robots && !robotsAllows(robots)) { failed = true; await write(exclusions, { reason: "robots_disallow_all", url: `https://${root.host}/robots.txt` }); } else { const pending = input.source.sitemapUrls.map((url) => ({ url, depth: 0 })); const seenSitemaps = new Set<string>(); const pages = new Set<string>(); while (pending.length > 0 && !limited) { const current = pending.shift()!; if (seenSitemaps.has(current.url)) continue; seenSitemaps.add(current.url); if (current.depth > maximumDepth || !withinBoundary(current.url, hosts)) { invalidRecords += 1; await write(exclusions, { reason: "sitemap_outside_boundary_or_depth", url: current.url }); continue; } let locations: string[]; try { locations = sitemapLocations((await requestText(current.url)).text); } catch (error) { failed = true; await write(exclusions, { reason: "sitemap_fetch_failed", url: current.url, error: error instanceof Error ? error.message : String(error) }); continue; } for (const url of locations) { if (!withinBoundary(url, hosts)) { invalidRecords += 1; await write(exclusions, { reason: "url_outside_boundary", url }); continue; } if (/\.xml(?:$|[?#])/i.test(url)) pending.push({ url, depth: current.depth + 1 }); else if (!input.source.productPathPrefixes || input.source.productPathPrefixes.some((prefix) => new URL(url).pathname.startsWith(prefix))) { if (input.source.candidateUrlTerms && !input.source.candidateUrlTerms.some((term) => normalizeText(url).includes(normalizeText(term)))) { await write(exclusions, { reason: "product_url_not_included", url }); continue; } pages.add(url); } if (pages.size >= maximumPages) { limited = true; break; } } } for (const pageUrl of [...pages].sort()) { recordsRead += 1; try { const html = (await requestText(pageUrl)).text; const products = stagedOfficialBrandProducts({ source: input.source, pageUrl, html, observedAt: now().toISOString() }); if (products.length === 0) { invalidRecords += 1; await write(exclusions, { reason: "product_metadata_missing_or_invalid", url: pageUrl }); continue; } for (const product of products) { if (input.source.requiredNameTerms && !input.source.requiredNameTerms.some((term) => normalizeText(`${product.brand} ${product.name}`).includes(normalizeText(term)))) { invalidRecords += 1; await write(exclusions, { reason: "product_name_not_included", url: product.sourceUrl, name: product.name }); continue; } const variant = officialBrandVariantKey(product); if (productVariants.has(variant)) { duplicateRecords += 1; await write(exclusions, { reason: "duplicate_product_variant", url: product.sourceUrl, product: { brand: product.brand, name: product.name, flavour: product.flavour, netQuantityGrams: product.netQuantityGrams } }); continue; } productVariants.add(variant); await write(staged, product); stagedRecords += 1; } } catch (error) { if (error instanceof HttpError && error.status === 404) { await write(exclusions, { reason: "product_not_found", url: pageUrl }); continue; } failed = true; await write(exclusions, { reason: "product_fetch_failed", url: pageUrl, error: error instanceof Error ? error.message : String(error) }); } } } } finally { staged.end(); exclusions.end(); await Promise.all([once(staged, "finish"), once(exclusions, "finish")]); }
+  if (!failed && !limited && input.source.minimumStagedProducts !== undefined && stagedRecords < input.source.minimumStagedProducts) {
+    failed = true;
+    await writeFile(exclusionsPath, `${JSON.stringify({ reason: "minimum_staged_products_not_met", expected: input.source.minimumStagedProducts, actual: stagedRecords })}\n`, { encoding: "utf8", flag: "a" });
+  }
   const terminalEvidence = failed ? "error" : limited ? "limit" : "end_of_file"; const manifest: SourceManifest = { schemaVersion: 1, source: input.source.id, sourceKind: "brand", sourceAuthority: { identity: 70, nutrition: 40, ingredients: 40 }, sourceLicenseUrl: null, sourceRetentionNotes: "Configured official brand page; retain provenance and respect source policy.", adapterVersion: OFFICIAL_BRAND_SITEMAP_ADAPTER_VERSION, input: input.source.sitemapUrls.join(","), inputHash: stable(JSON.stringify(input.source)), inputBytes: null, sourceUpdatedAt: null, startedAt, completedAt: now().toISOString(), mode: "production", terminalEvidence, sourceComplete: terminalEvidence === "end_of_file", marketComplete: false, advertisedTotal: null, recordsRead, indiaRecords: stagedRecords, stagedRecords, invalidRecords, duplicateRecords, newRecords: 0, changedRecords: 0, unchangedRecords: 0, missingSinceRecords: 0, knownExclusions: ["Product pages not linked from the configured sitemap", "Products absent from configured brand source"], disconnectedSources: ["open_food_facts", "gs1_india_datakart", "retailer_offer_feeds"] }; await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8"); return { manifest, stagedPath, exclusionsPath, manifestPath };
 }

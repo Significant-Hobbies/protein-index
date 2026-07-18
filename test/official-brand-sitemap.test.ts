@@ -21,6 +21,7 @@ const multipleNutritionTablesPage = `${nutritionTablePage}<p>| Nutrient | Per 10
 const configuredNutritionImagePage = `${page}<img src="https://cdn.example/nivalues_45.png?v=1&width=100" alt="">`;
 const nutritionLogoBeforeLabelPage = `${page}<img src="https://cdn.example/nutrition-logo.png" alt="Nutrition logo"><img src="https://cdn.example/puffs-nutrition.jpg" alt="Nutrition facts panel">`;
 const muscleBlazeHighlightsPage = `${microdataPage}<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"data":{"results":{"nut_info_grp":[{"val":"26 g","dis_nm":"Protein"},{"val":"140.08","dis_nm":"Kcal"},{"val":"74.0","dis_nm":"Protein % per Serving"}]}}}}}</script>`;
+const muscleBlazeCurrentPage = `<!doctype html><meta property="og:title" content="MuscleBlaze Biozyme Whey Protein"><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"data":{"results":{"id":88093,"nm":"MuscleBlaze Biozyme Whey Protein 1 kg","brand":{"nm":"MuscleBlaze"},"offer_pr":2499,"oos":false,"images":[{"o_link":"https://cdn.example/muscleblaze-whey.jpg"}],"nut_info_grp":[{"val":"25 g","dis_nm":"Protein"},{"val":"120","dis_nm":"Kcal"},{"val":"74.0","dis_nm":"Protein % per Serving"}]}}}}}</script>`;
 
 describe("official brand sitemap discovery", () => {
   it("honors specific robots rules", () => {
@@ -39,6 +40,12 @@ describe("official brand sitemap discovery", () => {
     const product = stagedOfficialBrandProduct({ source: { ...source, id: "muscleblaze_india", name: "MuscleBlaze" }, pageUrl: "https://brand.example/products/whey", html: muscleBlazeHighlightsPage, observedAt: "2026-07-18T00:00:00.000Z" });
     expect(product).toMatchObject({ nutrition: { status: "unverified", basis: "per_serving", per100g: { calories: 140.08, proteinGrams: 26 } } });
     expect(product?.rawEvidence).toHaveProperty("muscleBlazeNutritionHighlights.0.val", "26 g");
+  });
+
+  it("parses current MuscleBlaze Next.js product payloads as first-party product evidence", () => {
+    const product = stagedOfficialBrandProduct({ source: { ...source, id: "muscleblaze_india", name: "MuscleBlaze" }, pageUrl: "https://brand.example/sv/biozyme-whey/SP-88093", html: muscleBlazeCurrentPage, observedAt: "2026-07-18T00:00:00.000Z" });
+    expect(product).toMatchObject({ name: "MuscleBlaze Biozyme Whey Protein 1 kg", brand: "MuscleBlaze", imageUrl: "https://cdn.example/muscleblaze-whey.jpg", offers: [{ sellingPrice: 2499, available: true }], nutrition: { basis: "per_serving", per100g: { calories: 120, proteinGrams: 25 } } });
+    expect(product?.rawEvidence).toHaveProperty("productMuscleBlazeNext.sku", "88093");
   });
 
   it("normalizes only configured first-party brand aliases to the configured display name", () => {
@@ -194,6 +201,14 @@ describe("official brand sitemap discovery", () => {
     const result = await discoverOfficialBrandCatalog({ source: { ...source, requiredNameTerms: ["protein", "whey"] }, outputDirectory: directory, fetcher: async (input) => new Response(urls.get(String(input)) ?? "missing", { status: urls.has(String(input)) ? 200 : 404 }) });
     expect(result.manifest).toMatchObject({ sourceComplete: true, stagedRecords: 0, invalidRecords: 1 });
     expect(await readFile(result.exclusionsPath, "utf8")).toContain("product_name_not_included");
+  });
+
+  it("fails closed when a source-specific minimum product contract is not met", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "protein-brand-minimum-"));
+    const urls = new Map<string, string>([["https://brand.example/robots.txt", "User-agent: *\nAllow: /"], ["https://brand.example/sitemap.xml", "<urlset><url><loc>https://brand.example/products/salt</loc></url></urlset>"], ["https://brand.example/products/salt", microdataPage.replace("Acme Whey Protein", "Acme Salt")]]);
+    const result = await discoverOfficialBrandCatalog({ source: { ...source, requiredNameTerms: ["protein", "whey"], minimumStagedProducts: 1 }, outputDirectory: directory, fetcher: async (input) => new Response(urls.get(String(input)) ?? "missing", { status: urls.has(String(input)) ? 200 : 404 }) });
+    expect(result.manifest).toMatchObject({ terminalEvidence: "error", sourceComplete: false, stagedRecords: 0 });
+    expect(await readFile(result.exclusionsPath, "utf8")).toContain("minimum_staged_products_not_met");
   });
 
   it("uses declared URL terms to avoid fetching out-of-scope sitemap products while retaining an auditable exclusion", async () => {

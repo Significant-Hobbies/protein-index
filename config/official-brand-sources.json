@@ -42,6 +42,7 @@
       "productPathPrefixes": ["/sv/"],
       "candidateUrlTerms": ["protein", "whey", "casein", "gainer"],
       "requiredNameTerms": ["protein", "whey", "casein", "gainer"],
+      "minimumStagedProducts": 1,
       "maxProductPages": 650,
       "maxSitemapDepth": 2,
       "minimumRequestIntervalMs": 1500,
