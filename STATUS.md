@@ -36,6 +36,17 @@ the rendered dashboard passes desktop/mobile verification.
   sources and scheduled discovery targets. The current 19-source local run
   stages their records but remains source-incomplete because official pages
   intermittently return 503 responses; nothing from it has been published.
+- Local validation now merges the complete Open Food Facts snapshot with the
+  16 complete first-party brand snapshots: 2,079 active products, 1,607
+  protein-branded products, and 255 calories-plus-protein comparisons render
+  correctly with default density sorting and product search. Machine-label v13
+  is processing the 307 eligible Open Food Facts label images locally; nothing
+  from this local work has been published.
+- A separate first-party official-label pass has completed locally: four
+  benchmarked Qwen v13 nutrition facts were applied to local D1, increasing
+  comparable protein-branded foods to 259. Seventy-three model timeouts and
+  eleven corroboration rejections remain unpublished; no result is represented
+  as human verified or production data.
 - Live dashboard audit is complete: the catalog is live, defaults to protein
   per 100 kcal, and no longer displays offers or cost metrics. Guarded release
   `127db2f` is live; coverage now repeatedly returns in 1.6–3.1 seconds and

@@ -83,24 +83,24 @@ function renderCatalog(item: CatalogProduct): string {
 }
 
 describe("catalog comparison surface", () => {
-  it("shows energy, protein, and protein density in the default table and mobile card", () => {
+  it("shows the five comparison macros and protein density directly in the table and mobile card", () => {
     const markup = renderCatalog(product({ calories: 360, proteinGrams: 52 }));
 
     expect(markup).toContain("Protein / 100 kcal");
-    expect(markup).toContain("Energy");
-    expect(markup).toContain("52 g protein · 360 kcal · per 100 g");
+    for (const label of ["Protein", "Carbs", "Fat", "Fibre", "Calories"]) expect(markup).toContain(label);
+    expect(markup).toContain("52 g");
     expect(markup.match(/360 kcal/g)).toHaveLength(2);
     expect(markup).not.toContain("Cost / 25 g");
     expect(markup).not.toContain("Current offer");
   });
 
-  it("shows separate nutrition and ingredient evidence on mobile cards", () => {
+  it("keeps mobile cards macro-first without ingredient or evidence drill-down copy", () => {
     const markup = renderCatalog(product({ calories: 360, proteinGrams: 52 }));
     const mobile = markup.slice(markup.indexOf('class="catalog-mobile"'));
 
-    expect(mobile).toContain("Nutrition");
-    expect(mobile).toContain("Ingredients");
-    expect(mobile.match(/status-verified/g)).toHaveLength(2);
+    expect(mobile).toContain("product-card-macros");
+    expect(mobile).not.toContain("Ingredients");
+    expect(mobile).not.toContain("status-verified");
   });
 
   it("labels machine nutrition as label-backed without presenting it as human-reviewed", () => {
@@ -113,20 +113,21 @@ describe("catalog comparison surface", () => {
     expect(markup).not.toContain("verified nutrition");
   });
 
-  it("shows terminal ingredient evidence instead of calling it missing", () => {
+  it("does not surface ingredient terminal evidence in the macro comparison surface", () => {
     const item = product({ calories: 360, proteinGrams: 52 });
     item.ingredientStatus = "missing";
     item.ingredientTerminalOutcome = "not_declared";
     const markup = renderCatalog(item);
 
-    expect(markup).toContain("ingredients: not declared");
-    expect(markup).toContain("not declared");
+    expect(markup).not.toContain("ingredients: not declared");
+    expect(markup).not.toContain("Ingredients");
   });
 
-  it("keeps absent energy explicit instead of synthesizing a value", () => {
+  it("keeps absent calories explicit instead of synthesizing a value", () => {
     const markup = renderCatalog(product({ calories: null, proteinGrams: 52 }));
 
-    expect(markup).toContain("Energy missing");
+    expect(markup).toContain("Calories");
+    expect(markup).toContain("— kcal");
     expect(markup).not.toMatch(/>0 kcal</);
   });
 

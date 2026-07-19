@@ -3,10 +3,24 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { downloadHttpsLabelImage, stableExtractionId } from "./adapters/label-image";
 import { extractMachineLabel, MACHINE_LABEL_ADAPTER_VERSION, type MachineLabelArtifact } from "./machine-label";
 import type { MachineLabelCandidate } from "./machine-label-discovery";
 import type { LabelEvidenceAsset } from "../shared/extraction-outcomes";
+
+const execFileAsync = promisify(execFile);
+
+async function recoverLocalModel(error: unknown): Promise<void> {
+  if (process.env.MACHINE_LABEL_RECOVER_OLLAMA !== "1") return;
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/aborted due to timeout/i.test(message)) return;
+  // Ollama can keep an aborted vision generation resident, causing subsequent
+  // requests to queue behind stale work. This opt-in recovery only unloads the
+  // local model; completed artifacts and source evidence are never changed.
+  try { await execFileAsync("ollama", ["stop", "qwen3-vl:32b-instruct"]); } catch { /* no local model to unload */ }
+}
 
 export interface MachineLabelRunOutcome {
   schemaVersion: 1;
@@ -115,6 +129,7 @@ export async function runMachineLabelCandidates(input: {
         await writeLine(outcomes, { schemaVersion: 1, candidate, labelAsset, imagePath, artifactPath, artifact, status, error: null, completedAt } satisfies MachineLabelRunOutcome);
         process.stdout.write(`${JSON.stringify({ candidateId: candidate.id, status, processed: totals.processed })}\n`);
       } catch (error) {
+        await recoverLocalModel(error);
         totals.failed += 1;
         totals.processed += 1;
         await writeLine(outcomes, { schemaVersion: 1, candidate, labelAsset: null, imagePath: null, artifactPath: null, artifact: null, status: "failed", error: error instanceof Error ? error.message : String(error), completedAt } satisfies MachineLabelRunOutcome);
