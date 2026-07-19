@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { emptyNutrition, hasNutritionErrors, validateNutrition } from "../shared/nutrition";
 import type { NutritionPer100g } from "../shared/types";
 
-export const MACHINE_LABEL_ADAPTER_VERSION = "machine-label-v10";
+export const MACHINE_LABEL_ADAPTER_VERSION = "machine-label-v15";
 export const MACHINE_LABEL_MODEL = "qwen3-vl:32b-instruct";
 export const MACHINE_LABEL_MODEL_TIMEOUT_MS = 120_000;
 
@@ -172,13 +172,33 @@ function spatialPer100Basis(lines: VisionLine[]): Basis {
   return "unknown";
 }
 
+function visionServingSize(lines: VisionLine[], text: string): number | null {
+  const direct = /\bserving\s*s(?:i|l|1)[z0o]e\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*g\b/i.exec(text);
+  if (direct?.[1]) return Number(direct[1]);
+  // Some compact Indian panels split "Serving size 1 bar" and "(45)" across
+  // OCR lines. Only accept an explicitly parenthesized value immediately next
+  // to a serving-size heading, never a bare pack-count such as "1".
+  for (const [index, line] of lines.entries()) {
+    if (!/\bserving\s*s(?:i|l|1)[z0o]e\b/i.test(line.text)) continue;
+    const nearby = lines.slice(index, index + 5).map(({ text: value }) => value).join(" ");
+    for (const match of nearby.matchAll(/\(\s*(\d+(?:\.\d+)?)\s*(?:g|gm|grams?)?\s*\)/gi)) {
+      const value = Number(match[1]);
+      if (Number.isFinite(value) && value > 0) return value;
+    }
+  }
+  return null;
+}
+
 /** Deterministic parser; it intentionally returns null rather than guessing a layout it cannot prove. */
 export function parseVisionNutrition(lines: VisionLine[]): { basis: DeclaredBasis; servingSizeGrams: number | null; nutrition: NutritionPer100g } {
   const text = textFor(lines);
   const output = emptyNutrition();
   const per100 = /\b(?:per|\/)[\s-]*100\s*(g|ml)\b/i.exec(text);
   const spatialBasis = spatialPer100Basis(lines);
-  const servingSize = /\bserving\s*size\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*g\b/i.exec(text);
+  // macOS Vision commonly reads the `z` in "size" as `o` on small Indian
+  // nutrition labels (for example, "Serving sioe: 40 g"). The helper keeps
+  // that narrow OCR recovery and supports a nearby parenthesized mass.
+  const servingSize = visionServingSize(lines, text);
   const parsedBasis: DeclaredBasis = per100?.[1]?.toLowerCase() === "ml" ? "per_100ml" : per100 ? "per_100g" : spatialBasis !== "unknown" ? spatialBasis : /\bper\s*(?:serve|serving)\b/i.test(text) ? "per_serving" : "unknown";
   output.calories = visionNumber(lines, /(?:energy|energy value)(?:[^\n]{0,100}?(\d+(?:\.\d+)?)\s*kcal\b|\s*\(\s*kcal\s*\)\s*(\d+(?:\.\d+)?))/i, /(?:energy|energy value)/i);
   output.proteinGrams = visionNumber(lines, /\bprotein(?:\s*\([^\n)]*\))?(?:[^\n]{0,36}?(\d+(?:\.\d+)?)\s*g\b|\s*\(\s*g\s*\)\s*(\d+(?:\.\d+)?))/i, /\bprotein\b/i);
@@ -188,7 +208,7 @@ export function parseVisionNutrition(lines: VisionLine[]): { basis: DeclaredBasi
   output.saturatedFatGrams = visionNumber(lines, /\bsaturat(?:ed|es)[^\n]{0,36}?(\d+(?:\.\d+)?)\s*g\b/i, /\bsaturat(?:ed|es)/i);
   output.fibreGrams = visionNumber(lines, /\bfib(?:er|re)[^\n]{0,36}?(\d+(?:\.\d+)?)\s*g\b/i, /\bfib(?:er|re)/i);
   output.sodiumMg = visionNumber(lines, /\bsodium[^\n]{0,36}?(\d+(?:\.\d+)?)\s*mg\b/i, /\bsodium/i);
-  return { basis: parsedBasis, servingSizeGrams: servingSize ? Number(servingSize[1]) : null, nutrition: output };
+  return { basis: parsedBasis, servingSizeGrams: servingSize, nutrition: output };
 }
 
 function modelNutrition(input: Record<string, unknown>): NutritionPer100g {
@@ -206,6 +226,13 @@ function modelNutrition(input: Record<string, unknown>): NutritionPer100g {
 
 function sameNumber(left: number | null, right: number | null): boolean {
   return left !== null && right !== null && Math.abs(left - right) < 0.000_001;
+}
+
+function sameNutritionNumber(left: number | null, right: number | null): boolean {
+  // Labels commonly round a per-serving value to two decimals before the
+  // extractor converts it to per 100 g. A 0.01 tolerance accepts that declared
+  // rounding without masking a materially different nutrition value.
+  return left !== null && right !== null && Math.abs(left - right) <= 0.01;
 }
 
 function normalizeComparableNutrition(input: { basis: DeclaredBasis; servingSizeGrams: number | null; nutrition: NutritionPer100g }): { basis: Basis; nutrition: NutritionPer100g } | null {
@@ -228,6 +255,24 @@ const FIELD_LABELS: Record<NutritionKey, RegExp> = {
   fibreGrams: /\bfib(?:er|re)/i,
   sodiumMg: /\bsodium\b/i,
 };
+
+function visionFieldContainsComparableValue(lines: VisionLine[], field: NutritionKey, expected: number | null): boolean {
+  if (expected === null) return false;
+  const numberPattern = field === "calories"
+    ? /(\d+(?:\.\d+)?)\s*kcal\b/gi
+    : /(\d+(?:\.\d+)?)\s*g\b/gi;
+  return lines.some((line, index) => {
+    if (!FIELD_LABELS[field].test(line.text)) return false;
+    // Table OCR may emit a nutrient label followed by its values on distinct
+    // lines. Restrict the window to the next row-sized fragment so a number
+    // elsewhere on a package cannot corroborate the model by accident.
+    const row = lines.slice(index, index + 5).map(({ text }) => text).join(" ");
+    for (const match of row.matchAll(numberPattern)) {
+      if (sameNutritionNumber(Number(match[1]), expected)) return true;
+    }
+    return false;
+  });
+}
 
 function visionFieldIsQualified(lines: VisionLine[], field: NutritionKey): boolean {
   return lines.some((line) => {
@@ -264,11 +309,20 @@ export function decideMachineLabelEvidence(input: { vision: VisionResult; model:
   const visionComparable = normalizeComparableNutrition(vision);
   const modelComparable = normalizeComparableNutrition({ basis: input.model.basis, servingSizeGrams: input.model.servingSizeGrams, nutrition: input.model.nutrition });
   const nutritionReasons: string[] = [];
-  if (vision.basis === "unknown" || input.model.basis !== vision.basis) nutritionReasons.push("basis_disagreement");
+  // A two-column panel can legitimately give Vision the per-100-g column and
+  // the model the per-serving column. Treat that as agreement only after both
+  // values normalize to the same physical basis; the core-value comparison
+  // below still has to agree within declared-label rounding.
+  if (vision.basis === "unknown" || (input.model.basis !== vision.basis
+    && (!visionComparable || !modelComparable || visionComparable.basis !== modelComparable.basis))) {
+    nutritionReasons.push("basis_disagreement");
+  }
   if (vision.basis === "per_serving" && !sameNumber(vision.servingSizeGrams, input.model.servingSizeGrams)) nutritionReasons.push("serving_size_disagreement");
   if (!visionComparable || !modelComparable || visionComparable.basis !== modelComparable.basis) nutritionReasons.push("basis_normalization_failed");
   for (const field of ["calories", "proteinGrams"] as const) {
-    if (!visionComparable || !modelComparable || !sameNumber(visionComparable.nutrition[field], modelComparable.nutrition[field])) nutritionReasons.push(`core_${field}_disagreement`);
+    const parsedAgreement = visionComparable && modelComparable && sameNutritionNumber(visionComparable.nutrition[field], modelComparable.nutrition[field]);
+    const visibleLabelAgreement = modelComparable && vision.basis !== "unknown" && visionFieldContainsComparableValue(input.vision.lines, field, modelComparable.nutrition[field]);
+    if (!parsedAgreement && !visibleLabelAgreement) nutritionReasons.push(`core_${field}_disagreement`);
     if (visionFieldIsQualified(input.vision.lines, field)) nutritionReasons.push(`core_${field}_qualified`);
   }
   if (!visibleBounds(input.vision.lines, /(?:energy|protein)/i)) nutritionReasons.push("nutrition_text_edge_clipped");
@@ -278,7 +332,9 @@ export function decideMachineLabelEvidence(input: { vision: VisionResult; model:
   const nutritionAccepted = nutritionReasons.length === 0;
   const agreedNutrition = emptyNutrition();
   for (const field of NUTRITION_FIELDS) {
-    if (visionComparable && modelComparable && sameNumber(visionComparable.nutrition[field], modelComparable.nutrition[field]) && !visionFieldIsQualified(input.vision.lines, field)) {
+    const parsedAgreement = visionComparable && modelComparable && sameNutritionNumber(visionComparable.nutrition[field], modelComparable.nutrition[field]);
+    const visibleLabelAgreement = modelComparable && vision.basis !== "unknown" && visionFieldContainsComparableValue(input.vision.lines, field, modelComparable.nutrition[field]);
+    if ((parsedAgreement || visibleLabelAgreement) && modelComparable && !visionFieldIsQualified(input.vision.lines, field)) {
       agreedNutrition[field] = modelComparable.nutrition[field];
     }
   }
@@ -356,7 +412,10 @@ export async function runQwenLabel(imageBytes: Uint8Array, endpoint = "http://12
     method: "POST",
     headers: { "content-type": "application/json" },
     signal: AbortSignal.timeout(timeoutMilliseconds),
-    body: JSON.stringify({ model: MACHINE_LABEL_MODEL, stream: false, format: MODEL_RESULT_SCHEMA, think: false, options: { temperature: 0, num_ctx: 8192 }, messages: [{ role: "user", content: MODEL_PROMPT, images: [Buffer.from(imageBytes).toString("base64")] }] }),
+    // A nutrition declaration is small, structured JSON. Bounding generation
+    // prevents one malformed label from monopolising the local 32B model after
+    // the visual input has already been read.
+    body: JSON.stringify({ model: MACHINE_LABEL_MODEL, stream: false, format: MODEL_RESULT_SCHEMA, think: false, options: { temperature: 0, num_ctx: 8192, num_predict: 512 }, messages: [{ role: "user", content: MODEL_PROMPT, images: [Buffer.from(imageBytes).toString("base64")] }] }),
   });
   if (!response.ok) throw new Error(`Ollama label extraction failed with ${response.status}.`);
   const body = record(await response.json());

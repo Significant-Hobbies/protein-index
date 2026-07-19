@@ -94,6 +94,40 @@ describe("machine label extraction acceptance", () => {
     expect(result.nutrition).toMatchObject({ accepted: true, basis: "per_100g", nutrition: { calories: 465, proteinGrams: 25 } });
   });
 
+  it("accepts matching per-100g and per-serving columns after normalization", () => {
+    const result = decideMachineLabelEvidence({
+      vision: vision(["Nutritional information per 100 g: Energy 359.34 kcal, Protein 68.57 g"]),
+      model: model({ basis: "per_serving", servingSizeGrams: 35, nutrition: { calories: 125.77, proteinGrams: 24, carbohydrateGrams: null, sugarGrams: null, fatGrams: null, saturatedFatGrams: null, fibreGrams: null, sodiumMg: null } }),
+    });
+    expect(result.nutrition).toMatchObject({ accepted: true, reasons: [], basis: "per_100g", nutrition: { calories: expect.closeTo(359.34), proteinGrams: expect.closeTo(68.57) } });
+  });
+
+  it("accepts a multi-column panel when the visible protein row corroborates the normalized model value", () => {
+    const result = decideMachineLabelEvidence({
+      vision: vision(["Nutritional values per 100 g", "Energy", "366.17 kcal", "128.16 kcal", "Protein", "0.00 g", "68.57 g", "24.00 g"]),
+      model: model({ basis: "per_serving", servingSizeGrams: 35, nutrition: { calories: 128.16, proteinGrams: 24, carbohydrateGrams: null, sugarGrams: null, fatGrams: null, saturatedFatGrams: null, fibreGrams: null, sodiumMg: null } }),
+    });
+    expect(result.nutrition).toMatchObject({ accepted: true, reasons: [], basis: "per_100g", nutrition: { calories: expect.closeTo(366.17), proteinGrams: expect.closeTo(68.57) } });
+  });
+
+  it("recovers the common OCR typo in a per-serving size declaration", () => {
+    const result = decideMachineLabelEvidence({
+      vision: vision(["Serving sioe: 40 g", "Nutrients per serving: Energy 146 kcal, Protein 10.0 g"]),
+      model: model({ basis: "per_serving", servingSizeGrams: 40, nutrition: { calories: 146, proteinGrams: 10, carbohydrateGrams: null, sugarGrams: null, fatGrams: null, saturatedFatGrams: null, fibreGrams: null, sodiumMg: null } }),
+    });
+    expect(result.nutrition).toMatchObject({ accepted: true, reasons: [], basis: "per_100g", nutrition: { calories: 365, proteinGrams: 25 } });
+  });
+
+  it("recovers a parenthesized serving mass split below the serving-size heading", () => {
+    const parsed = parseVisionNutrition(vision(["Serving size 1 bar", "Serving size per pack", "(45)", "1", "Nutrients per serving: Energy 198 kcal, Protein 10.1 g"]).lines);
+    expect(parsed).toMatchObject({ basis: "per_serving", servingSizeGrams: 45, nutrition: { calories: 198, proteinGrams: 10.1 } });
+  });
+
+  it("recovers the gram suffix from a parenthesized serving mass", () => {
+    const parsed = parseVisionNutrition(vision(["Serving Size: 1 heaping scoop (34g)", "Nutrients per serving: Energy 126 kcal, Protein 30.15 g"]).lines);
+    expect(parsed).toMatchObject({ basis: "per_serving", servingSizeGrams: 34, nutrition: { calories: 126, proteinGrams: 30.15 } });
+  });
+
   it("does not publish an optional field unless both extractors agree", () => {
     const result = decideMachineLabelEvidence({
       vision: vision(["NUTRITION Typical values per 100g:", "Energy 733kJ/173kcal • Fat 0.5g", "Protein 1.9g", "Saturated fat <0.1g"]),
