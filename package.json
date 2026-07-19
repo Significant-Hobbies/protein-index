@@ -54,7 +54,9 @@
     "release:startup": "wrangler deploy --dry-run --outfile .data/worker.bundle && wrangler check startup --worker .data/worker.bundle --outfile .data/worker-startup.cpuprofile",
     "release:dry-run": "wrangler deploy --dry-run --outdir .data/deploy-dry-run",
     "release:preflight": "pnpm check && pnpm release:startup && pnpm release:dry-run",
-    "deploy": "bash ../fleet-ops/scripts/fleet-deploy-guard.sh protein-index && pnpm release:preflight && wrangler deploy --strict"
+    "deploy": "bash ../fleet-ops/scripts/fleet-deploy-guard.sh protein-index && pnpm release:preflight && wrangler deploy --strict",
+    "knip": "knip --no-exit-code --reporter symbols",
+    "knip:strict": "knip --reporter symbols"
   },
   "dependencies": {
     "hono": "^4.12.30",
@@ -74,6 +76,7 @@
     "typescript": "^7.0.2",
     "vite": "^8.1.4",
     "vitest": "^4.1.10",
-    "wrangler": "^4.111.0"
+    "wrangler": "^4.111.0",
+    "knip": "^6.6.3"
   }
 }

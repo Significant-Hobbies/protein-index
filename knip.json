@@ -1,0 +1,64 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": [
+    "src/main.tsx",
+    "worker/index.ts"
+  ],
+  "project": ["**/*.{ts,tsx,js,jsx,mjs,cjs,mts}"],
+  "ignore": [
+    "**/dist/**",
+    "**/build/**",
+    "**/.next/**",
+    "**/.astro/**",
+    "**/.output/**",
+    "**/node_modules/**",
+    "**/coverage/**",
+    "**/public/**",
+    "**/*.config.{js,ts,mjs,cjs}",
+    "**/eslint.config.*",
+    "**/blume.config.*",
+    "**/docs-blume/**",
+    "scripts/**",
+    "tests/e2e/**",
+    "test/**",
+    "**/*.test.{ts,tsx,js,mjs}",
+    "**/*.spec.{ts,tsx,js,mjs}",
+    "**/*.d.mts",
+    "**/*.d.ts",
+    "**/__tests__/**",
+    "**/playground/**",
+    "**/examples/**"
+  ],
+  "ignoreDependencies": [
+    "typescript",
+    "@types/*",
+    "@cloudflare/vitest-pool-workers",
+    "lightningcss",
+    "tsx",
+    "wrangler",
+    "knip",
+    "blume",
+    "@blume/*"
+  ],
+  "ignoreBinaries": [
+    "vite",
+    "wrangler",
+    "tsx",
+    "vitest",
+    "knip",
+    "blume",
+    "swift"
+  ],
+  "ignoreIssues": {
+    "src/app/api/**/route.ts": ["exports", "types"],
+    "src/lib/actions/**": ["exports", "types"],
+    "lib/actions/**": ["exports", "types"],
+    "**/schema.ts": ["exports", "types"],
+    "**/db/schema*.ts": ["exports", "types"],
+    "**/commands/**": ["exports", "types"],
+    "**/agent-edge.*": ["exports", "types"],
+    "**/foundry-monitoring.ts": ["exports", "types"],
+    "**/analytics.ts": ["exports", "types"],
+    "**/api-timing.ts": ["exports", "types"]
+  }
+}
