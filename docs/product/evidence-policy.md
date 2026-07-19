@@ -21,7 +21,10 @@ Each of nutrition and ingredients is in exactly one of:
 
 A fifth nutrition-only state, `machine_verified`, exists for the offline
 automated label-verification lane. It must never claim human or brand
-verification. See
+verification. It is typed as `NutritionEvidenceStatus = EvidenceStatus |
+"machine_verified"` in [`shared/api.ts`](../../shared/api.ts) (the base
+four-state `EvidenceStatus` lives in
+[`shared/types.ts`](../../shared/types.ts)). See
 [automated-label-verification](../../openspec/changes/automated-label-verification/proposal.md).
 
 ## Trust boundaries

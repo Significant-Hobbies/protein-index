@@ -40,6 +40,8 @@ source-sync (cron Mon 02:23 UTC)
    publish-robotoff-candidates   (manual dispatch + confirm)  ◄── candidate artifact
    publish-guarded-reviewed-labels (manual dispatch + confirm) ◄── exact successor bundle
    publish-automatic-evidence    (manual dispatch + confirm)  ◄── successful producer run
+   publish-official-brand-discoveries (manual dispatch + confirm) ◄── official-brand-discovery run
+   publish-machine-evidence      (manual dispatch + confirm)  ◄── machine-evidence/ release bundle
 ```
 
 Per-job reference: [jobs/](jobs/README.md).

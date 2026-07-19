@@ -20,6 +20,7 @@ see [`STATUS.md`](../STATUS.md).
 | --- | --- |
 | Understand what the product is and is not | [Product overview](product/overview.md) |
 | See evidence states and trust boundaries | [Evidence policy](product/evidence-policy.md) |
+| Learn how the whole system works end to end | [How it works](architecture/how-it-works.md) |
 | Understand the system and data flow | [Architecture](architecture/overview.md) |
 | See why a design choice was made | [Decision log](architecture/decisions/README.md) |
 | Set up and run the project locally | [Development](development/README.md) |

@@ -14,8 +14,12 @@ exact conditions to avoid re-downloading thousands of label images.
 1. **Read the outcome ledger, not the workflow conclusion.** A run that the
    workflow marks failed may still have retained successful response and
    label-asset artifacts. The outcome ledger partitions every requested
-   barcode into exactly one of candidate, no-prediction, rejected, failed,
-   unattempted, or stale.
+   barcode into exactly one of candidate, no-prediction, rejected, or failed
+   (`ExtractionLabelOutcome` in [`shared/api.ts`](../../../shared/api.ts); the
+   status enum is `EXTRACTION_OUTCOME_STATUSES` in
+   [`shared/extraction-outcomes.ts`](../../../shared/extraction-outcomes.ts)).
+   The completion worklist additionally tracks unattempted and stale label
+   counts, but those are worklist state, not outcome-ledger partitions.
 2. **Check the residual set.** A publishable artifact retains at most 10 and
    at most 0.25% residual label failures, and only allow-listed post-response
    failures (e.g. `label_http_error`, `label_declared_size_exceeded`). If the
