@@ -4,18 +4,20 @@
 > [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Update this file each working
 > session; update `PROJECT_STATUS.md` when PR-sized work completes.
 
-Last updated: 2026-07-19
+Last updated: 2026-07-24
 
 ## Current objective
 
-Reach strict terminal-evidence completion: every active product has terminal
-verified identity, nutrition, and ingredient evidence (or a current
-label/authoritative source explicitly establishes a field as not applicable or
-not declared), every configured source reconciles without unexplained gaps, and
-the rendered dashboard passes desktop/mobile verification.
+Retired. Preserve the repository and existing evidence, but do not run
+scheduled producers, publication workflows, CI, or deployments without an
+explicit reactivation decision.
 
 ## Active work
 
+- None. GitHub Actions were removed on 2026-07-24 because the project was
+  dropped.
+
+## Archived work at retirement
 - Machine-verified label lane (`automated-label-verification` OpenSpec change):
   complete and published through protected workflow run `29653810942`. Three
   current first-party Protein Chef labels plus four serving-normalized Yoga Bar
@@ -70,20 +72,9 @@ the rendered dashboard passes desktop/mobile verification.
 
 ## Next steps
 
-1. Continue current-label and brand-owner enrichment for the products still
-   lacking a usable calories-plus-protein pair or an ingredient statement
-   (`PROJECT_STATUS.md` item 11).
-2. Run the machine verifier only against current, explicitly identified
-   first-party nutrition labels; keep rejected and incomplete labels out of
-   rankings.
-3. Apply for GS1 India DataKart access and map its commercial/licensing
-   constraints (`PROJECT_STATUS.md` item 3).
-4. Keep a lightweight live desktop/mobile and accessibility smoke check in the
-   release checklist as the catalog grows
-5. Install the local launchd template with the chosen local data directory,
-   then use the existing guarded publisher for any source-complete evidence
-   release selected for the hosted dashboard.
-   (`PROJECT_STATUS.md` item 2).
+None while retired. Any future work starts with an explicit reactivation
+decision that defines whether the existing evidence, workflows, and production
+surface should be restored or archived.
 
 ## Deferred
 

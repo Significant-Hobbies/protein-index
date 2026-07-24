@@ -12,14 +12,14 @@ Canonical GTIN products; separate marketed and nutrition-derived protein
 classification; source-aware nutrition, ingredients, offers, ratings; evidence-
 first comparisons with strict Trusted / Discovery boundaries.
 
+- **Lifecycle:** Retired. No GitHub Actions and no production deploy; explicit
+  reactivation is required before resuming work.
 - **Stack:** Vite + React + Cloudflare Workers + D1 + R2
 - **Package manager:** pnpm
 - **Local dev:** `pnpm dev`
 - **Checks:** `pnpm check` (cf-typegen + typecheck + tests + build)
 - **Docs checks:** `pnpm docs:validate` (broken links + frontmatter)
-- **Deploy:** `pnpm run deploy` after the reviewed data publication, clean-main,
-  synced-remote, green-CI, and release-preflight gates pass. Deployment is
-  manual; `main` is not an automatic production trigger.
+- **Deploy:** None while retired.
 
 ## Critical constraints
 

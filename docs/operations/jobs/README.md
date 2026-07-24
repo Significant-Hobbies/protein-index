@@ -5,10 +5,9 @@ description: Per-workflow reference for the scheduled and dispatch-only GitHub A
 
 # Job reference
 
-Each entry names the workflow file, the trigger, the authority boundary, and
-what it produces. The workflow YAML under
-[`.github/workflows/`](../../../.github/workflows/) is authoritative for
-inputs, timeouts, and steps; this page is an index.
+> **Retired 2026-07-24:** The workflow definitions described below were
+> removed when Protein Index was dropped. This page is retained as historical
+> architecture; none of these jobs currently runs.
 
 ## Scheduled producers
 
@@ -141,9 +140,8 @@ confirmation phrase. All refuse pending migrations except `publish-catalog`.
 
 - **Trigger:** push / pull_request on `main`.
 - **Runs:** `pnpm check`.
-- **Docs:** the `docs` job (see
-  [`.github/workflows/docs.yml`](../../../.github/workflows/docs.yml)) runs
-  `pnpm docs:validate` on the same triggers.
+- **Docs:** the retired `docs` job ran `pnpm docs:validate` on the same
+  triggers.
 
 ## See also
 

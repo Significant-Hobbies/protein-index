@@ -5,9 +5,9 @@ description: Scheduled jobs, publication gates, deployment, and the runbooks tha
 
 # Operations
 
-Production operations are deliberately manual and gated. Producers run on
-schedule or dispatch and never touch D1; publication is always a separate,
-explicitly confirmed workflow; deployment is manual after preflight gates.
+> **Retired 2026-07-24:** Protein Index has no active GitHub Actions,
+> publication jobs, or deployment automation. The material below documents the
+> retired operating model and must not be treated as an active runbook.
 
 ## Scheduled jobs
 
