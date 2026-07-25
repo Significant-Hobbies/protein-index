@@ -57,10 +57,10 @@ const LINK_RE = /(?<!`)\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
 // Match bare path references in backticks that look like repo paths, e.g.
 // `docs/foo.md`, `scripts/bar.ts`, `migrations/0001_*.sql`. We only validate
 // the ones that start with a known repo-relative prefix to avoid noise.
-const BARE_PATH_RE = /`((?:docs|scripts|shared|worker|src|test|migrations|public|config|openspec|review-decisions|benchmarks|data)(?:\/[^\s`]+)?)`/g;
+const BARE_PATH_RE = /`((?:docs|scripts|shared|worker|src|test|migrations|public|config|review-decisions|benchmarks|data)(?:\/[^\s`]+)?)`/g;
 
 // Skip bare paths that are clearly templates (contain <, >, {, }) rather than
-// real file references. These appear in prose like `openspec/changes/<slug>/`.
+// real file references. These appear in prose such as documented path templates.
 function isTemplatePath(p) {
   return /[<>{}]/.test(p);
 }

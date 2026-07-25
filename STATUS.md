@@ -17,9 +17,9 @@ explicit reactivation decision.
 - None. GitHub Actions were removed on 2026-07-24 because the project was
   dropped.
 
-## Archived work at retirement
-- Machine-verified label lane (`automated-label-verification` OpenSpec change):
-  complete and published through protected workflow run `29653810942`. Three
+## Completed work at retirement
+- Machine-verified label lane: complete and published through protected
+  workflow run `29653810942`. Three
   current first-party Protein Chef labels plus four serving-normalized Yoga Bar
   labels are live as `machine_verified` facts; they remain separate from
   human-reviewed Trusted evidence.

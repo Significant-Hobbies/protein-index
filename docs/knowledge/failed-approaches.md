@@ -7,9 +7,8 @@ description: Reusable record of approaches that did not work, the symptom that e
 
 A durable record of approaches that were tried and rejected, the symptom that
 exposed them, and the rule that now prevents them. Each entry is sourced from
-the durable timeline in [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md) or an
-OpenSpec change. Add new entries when a fix lands; do not delete historical
-ones.
+the durable timeline in [`PROJECT_STATUS.md`](../../PROJECT_STATUS.md). Add new
+entries when a fix lands; do not delete historical ones.
 
 ## Treating Open Food Facts parse success as verification
 

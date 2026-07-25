@@ -96,8 +96,8 @@ deployment. See [operations / deployment](../operations/README.md#deployment).
 - Do not add production dependencies without explicit approval.
 - Do not commit secrets, `.env*`, or local scratch under `.data/` or
   `.agent-*`.
-- For non-trivial feature work, use the `spec-driven` skill and write an
-  OpenSpec change proposal under `openspec/changes/`.
+- Do not start feature work while the project is retired. Reactivation must
+  first establish a fresh bounded plan.
 - Update `PROJECT_STATUS.md` when PR-sized work is completed, merged,
   superseded, or abandoned. Do not create extra status ledgers.
 

@@ -69,11 +69,10 @@ layer.
 | Operations and jobs | [docs/operations/README.md](docs/operations/README.md) |
 | Publication runbook | [docs/operations/runbooks/publication.md](docs/operations/runbooks/publication.md) |
 | Failed approaches | [docs/knowledge/failed-approaches.md](docs/knowledge/failed-approaches.md) |
-| OpenSpec change proposals | [`openspec/changes/`](openspec/changes/) |
 
-Implementation work is tracked in `openspec/changes/`; durable product status
-lives in `PROJECT_STATUS.md`. The README has the long-form product description
-and CLI usage examples.
+Durable product status lives in `PROJECT_STATUS.md`. The README has the
+long-form product description and CLI usage examples. The retired repository
+does not retain active planning artifacts.
 
 ## Documentation maintenance rules
 

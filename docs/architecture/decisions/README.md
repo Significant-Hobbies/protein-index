@@ -1,20 +1,14 @@
 ---
 title: Decision log
-description: Index of the architectural decisions that shape Protein Index, with pointers to the full OpenSpec proposals.
+description: Durable architectural decisions that shape Protein Index.
 ---
 
 # Decision log
 
-This is a distilled index of the architectural decisions (ADRs) that shape
-Protein Index. Each entry states the decision, the reason, and points to the
-full OpenSpec proposal under [`openspec/changes/`](../../../openspec/changes/)
-for the original context. Decisions are listed roughly in dependency order, not
-chronological order.
-
-The full proposal, design, and task breakdown for each change live in
-`openspec/changes/<slug>/{proposal,design,tasks}.md`. Archived changes live in
-`openspec/changes/archive/` and their distilled spec in
-`openspec/specs/<slug>/spec.md`.
+These architectural decision records state the durable decision and its reason.
+They are listed roughly in dependency order, not chronological order. The
+repository is retired, so historical planning artifacts have been removed;
+`PROJECT_STATUS.md`, these ADRs, and the implementation remain authoritative.
 
 ## ADR-001 — Canonical product is not a retailer listing
 
@@ -28,8 +22,6 @@ size, price, and ratings. A trustworthy normalization core must keep product
 identity separate from retailer observations or the product produces
 precise-looking but invalid comparisons.
 
-**Source:** [`openspec/changes/build-catalog-core/proposal.md`](../../../openspec/changes/build-catalog-core/proposal.md)
-
 ## ADR-002 — Four independent evidence states
 
 **Decision:** Nutrition and ingredients each have independent states:
@@ -38,8 +30,6 @@ excluded from trusted rankings by default.
 
 **Why:** Source completeness is not nutrition accuracy. Completing an import
 does not verify the contributed values.
-
-**Source:** [`openspec/changes/build-catalog-core/proposal.md`](../../../openspec/changes/build-catalog-core/proposal.md); see also [evidence policy](../../product/evidence-policy.md).
 
 ## ADR-003 — Producer and publication are strictly separated
 
@@ -51,7 +41,7 @@ dispatched workflow with hard confirmation input.
 publication path revalidates everything before any write. This prevents a
 runaway producer from promoting unverified data.
 
-**Source:** [`openspec/changes/automate-fresh-catalog-publication/proposal.md`](../../../openspec/changes/automate-fresh-catalog-publication/proposal.md); see also [publication runbook](../../operations/runbooks/publication.md).
+See also [publication runbook](../../operations/runbooks/publication.md).
 
 ## ADR-004 — Model output is review-only, never auto-verified
 
@@ -63,8 +53,6 @@ increases verified coverage.
 invent text. Verification requires a human reviewer (or, for the machine lane,
 an evidence-grade acceptance contract, not a confidence threshold).
 
-**Source:** [`openspec/changes/add-label-evidence-extraction/proposal.md`](../../../openspec/changes/add-label-evidence-extraction/proposal.md), [`openspec/changes/automated-label-verification/proposal.md`](../../../openspec/changes/automated-label-verification/proposal.md).
-
 ## ADR-005 — Append-only, source/hash-bound evidence decisions
 
 **Decision:** Evidence decisions are append-only, bound to exact source content
@@ -74,8 +62,6 @@ drift revokes trust; a legacy decision is never upgraded in place.
 **Why:** Auditability and replay safety. The same checksummed artifact must be
 replayable through the protected workflow after investigation without double-
 counting or silently changing decisions.
-
-**Source:** [`openspec/changes/add-reviewed-evidence-publication/proposal.md`](../../../openspec/changes/add-reviewed-evidence-publication/proposal.md), [`openspec/changes/exact-label-decision-reattestation/proposal.md`](../../../openspec/changes/exact-label-decision-reattestation/proposal.md).
 
 ## ADR-006 — Mass and volume are dimensionally separate
 
@@ -87,7 +73,7 @@ dimension. Millilitres are never converted to grams without density evidence.
 can encode a photographed per-100-mL column with `_100g` keys. Treating these as
 interchangeable produces physically impossible facts.
 
-**Source:** [`openspec/changes/support-volume-nutrition-evidence/proposal.md`](../../../openspec/changes/support-volume-nutrition-evidence/proposal.md); see also [failed approaches](../../knowledge/failed-approaches.md).
+See also [failed approaches](../../knowledge/failed-approaches.md).
 
 ## ADR-007 — Strict Trusted gate requires three-way agreement
 
@@ -98,8 +84,6 @@ Contradictions fail closed.
 **Why:** A product with verified nutrition but stale identity, or verified
 nutrition but missing terminal ingredients, is not a trustworthy comparison
 target. The gate is conjunctive, not best-effort.
-
-**Source:** [`openspec/changes/immutable-terminal-unavailable-evidence/proposal.md`](../../../openspec/changes/immutable-terminal-unavailable-evidence/proposal.md), [`openspec/changes/terminal-identity-evidence/proposal.md`](../../../openspec/changes/terminal-identity-evidence/proposal.md).
 
 ## ADR-008 — Bounded residual extraction, fail-closed accounting
 
@@ -113,8 +97,6 @@ completeness. A run that silently drops failures hides evidence gaps. The
 bounds are small enough to surface real problems and large enough to tolerate
 transient label-host errors.
 
-**Source:** [`openspec/changes/accounted-extraction-exceptions/proposal.md`](../../../openspec/changes/accounted-extraction-exceptions/proposal.md), [`openspec/changes/persist-extraction-outcome-ledger/proposal.md`](../../../openspec/changes/persist-extraction-outcome-ledger/proposal.md).
-
 ## ADR-009 — Cache key is source snapshot + request schema, not adapter version
 
 **Decision:** The reusable response cache key is the source snapshot plus
@@ -125,7 +107,7 @@ fetched again.
 **Why:** Lets us fix parser bugs without re-downloading the entire source,
 while preventing a schema change from silently serving stale responses.
 
-**Source:** [`openspec/changes/add-ingredient-label-extraction/proposal.md`](../../../openspec/changes/add-ingredient-label-extraction/proposal.md); see also [evidence pipeline](../evidence-pipeline.md).
+See also [evidence pipeline](../evidence-pipeline.md).
 
 ## ADR-010 — Official brand discovery is a no-cost, robots-respecting lane
 
@@ -137,13 +119,8 @@ traversal. Unmatched products become discovery records, not canonical facts.
 newer products. Broadening discovery must not treat a retailer page, inferred
 nutrition, or unverified market signal as canonical.
 
-**Source:** [`openspec/changes/official-brand-discovery/proposal.md`](../../../openspec/changes/official-brand-discovery/proposal.md), [`openspec/changes/protein-branded-discovery/proposal.md`](../../../openspec/changes/protein-branded-discovery/proposal.md).
-
 ## How to add an entry
 
-1. Write the proposal under `openspec/changes/<slug>/` using the `spec-driven`
-   skill.
-2. After the change ships and the spec is archived, add a distilled entry here
-   with the decision, the reason, and a link to the proposal.
-3. Keep entries to ~10 lines. The proposal is the source of truth; this log is
-   an index.
+Do not add entries while the project is retired. After explicit reactivation,
+record each durable architecture decision here with its reason and keep
+`PROJECT_STATUS.md` synchronized.

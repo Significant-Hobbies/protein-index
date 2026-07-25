@@ -25,7 +25,7 @@ verification. It is typed as `NutritionEvidenceStatus = EvidenceStatus |
 "machine_verified"` in [`shared/api.ts`](../../shared/api.ts) (the base
 four-state `EvidenceStatus` lives in
 [`shared/types.ts`](../../shared/types.ts)). See
-[automated-label-verification](../../openspec/changes/automated-label-verification/proposal.md).
+[the architecture decision log](../architecture/decisions/README.md).
 
 ## Trust boundaries
 
