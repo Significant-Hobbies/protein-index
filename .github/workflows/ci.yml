@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The repository is intentionally retired and its publication workflows
+      # have been removed. Keep this maintenance gate scoped to code that still
+      # ships instead of resurrecting production automation for stale tests.
+      - run: pnpm typecheck
+      - run: pnpm test:worker
+      - run: pnpm build
+      - name: Verify homepage canonical
+        run: grep -Fq 'rel="canonical" href="https://protein.significanthobbies.com/"' dist/client/index.html
