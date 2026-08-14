@@ -1,6 +1,6 @@
 # Protein Index — PROJECT STATUS
 
-Last updated: 2026-07-24
+Last updated: 2026-08-15
 
 ## Why / What
 
@@ -53,6 +53,14 @@ the strict terminal-evidence gate above is actually satisfied.
 
 ## Timeline
 
+- 2026-08-15 — The retained public surface was repaired and reverified after
+  retirement: the homepage now publishes an exact self-canonical and matching
+  Open Graph URL, CI retains a safe SEO/build gate, and exact-main release
+  `54927ef9d7e2a31165a1ba9e06bfcbabcfe3c7c6` was deployed to the existing
+  Worker. All six sitemap URLs returned direct 200 responses with exact
+  self-canonicals, and Google Search Console accepted the sitemap with six
+  discovered pages. This narrowly scoped maintenance does not reactivate data
+  producers, scheduled publication, migrations, or product development.
 - 2026-07-24 — Protein Index was retired. All GitHub Actions workflows were
   removed; scheduled producers, publication jobs, CI, and deploy automation
   require an explicit reactivation decision.
@@ -226,6 +234,9 @@ the strict terminal-evidence gate above is actually satisfied.
 
 ## Features (shipped)
 
+- Retained live discovery surface with a six-URL sitemap, robots policy, exact
+  self-canonicals, matching Open Graph URLs, and a safe retired-repository SEO
+  verification gate
 - Canonical GTIN-first product schema with source-specific offers and ratings
 - Explicit missing, unverified, verified, and conflict states for nutrition and ingredients
 - Generic macro/micronutrient observations and extensible product kinds
