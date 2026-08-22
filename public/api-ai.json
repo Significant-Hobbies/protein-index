@@ -6,6 +6,7 @@
   "llmsFull": "https://protein.significanthobbies.com/llms-full.txt",
   "sitemap": "https://protein.significanthobbies.com/sitemap.xml",
   "robots": "https://protein.significanthobbies.com/robots.txt",
+  "openapi": "https://protein.significanthobbies.com/openapi.json",
   "markdown": {
     "suffix": ".md",
     "negotiation": true

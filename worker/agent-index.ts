@@ -18,11 +18,20 @@ export const LLMS_TXT = `# Protein Index
 The human UI is a React SPA. Agents should use the API and markdown surfaces
 below — do not scrape the empty client shell.
 
+## When to use this
+
+- Looking up Indian food products by GTIN, brand, or protein content with source-aware evidence
+- Comparing protein foods with verified label evidence separated from discovery-only data
+- Querying product nutrition, ingredients, offers, and ratings with explicit confidence levels
+- Checking catalog coverage and evidence completion status for the Indian protein product market
+- Accessing product detail as JSON or markdown for agent consumption
+
 ## Product
 
 - [Catalog UI](${ORIGIN}/): Human browse / compare experience (SPA)
 - [This index](${ORIGIN}/llms.txt): Agent entrypoint
 - [Agent catalog](${ORIGIN}/api/ai): Machine-readable surface list
+- [OpenAPI spec](${ORIGIN}/openapi.json): Machine-readable API contract
 - [Homepage markdown](${ORIGIN}/index.md): Product brief without JS
 
 ## API (JSON)
@@ -83,6 +92,7 @@ export function buildApiAiCatalog(origin = ORIGIN) {
     llms: `${origin}/llms.txt`,
     llmsFull: null,
     sitemap: `${origin}/sitemap.xml`,
+    openapi: `${origin}/openapi.json`,
     markdown: { suffix: ".md", negotiation: true },
     surfaces: [
       {
@@ -188,4 +198,54 @@ export function productToMarkdown(product: Record<string, unknown>): string {
   );
 
   return lines.join("\n");
+}
+
+export function buildOpenApiSpec(origin = ORIGIN) {
+  return {
+    openapi: "3.1.0",
+    info: {
+      title: "Protein Index public API",
+      version: "1.0.0",
+      description:
+        "Source-aware catalog of Indian food products. Separates verified label evidence from broader discovery data.",
+      contact: { name: "Protein Index", url: origin },
+    },
+    servers: [{ url: origin }],
+    tags: [{ name: "agent-surfaces", description: "Machine-readable public surfaces" }],
+    paths: {
+      "/api/ai": {
+        get: {
+          operationId: "getAgentCatalog",
+          tags: ["agent-surfaces"],
+          summary: "Agent catalog",
+          responses: { "200": { description: "Agent catalog JSON", content: { "application/json": {} } } },
+        },
+      },
+      "/llms.txt": {
+        get: {
+          operationId: "getLlmsTxt",
+          tags: ["agent-surfaces"],
+          summary: "llms.txt index",
+          responses: { "200": { description: "Markdown index", content: { "text/plain": {} } } },
+        },
+      },
+      "/sitemap.xml": {
+        get: {
+          operationId: "getSitemap",
+          tags: ["agent-surfaces"],
+          summary: "Sitemap",
+          responses: { "200": { description: "XML sitemap", content: { "application/xml": {} } } },
+        },
+      },
+      "/openapi.json": {
+        get: {
+          operationId: "getOpenApiSpec",
+          tags: ["agent-surfaces"],
+          summary: "OpenAPI specification",
+          description: "This document.",
+          responses: { "200": { description: "OpenAPI 3.1 spec", content: { "application/json": {} } } },
+        },
+      },
+    },
+  };
 }

@@ -5,6 +5,7 @@ import {
   LLMS_TXT,
   SITEMAP_XML,
   buildApiAiCatalog,
+  buildOpenApiSpec,
   productToMarkdown,
 } from "./agent-index";
 import { getProductDetail, searchProducts, validateSearch } from "./catalog";
@@ -46,6 +47,10 @@ app.get("/sitemap.xml", (c) => text(SITEMAP_XML, "application/xml; charset=utf-8
 app.get("/api/ai", (c) => {
   const origin = new URL(c.req.url).origin;
   return c.json(buildApiAiCatalog(origin));
+});
+app.get("/openapi.json", (c) => {
+  const origin = new URL(c.req.url).origin;
+  return c.json(buildOpenApiSpec(origin));
 });
 app.get("/api/products/:id{[^/]+\\.md}", async (c) => {
   const pathId = c.req.param("id") ?? "";
@@ -321,7 +326,48 @@ app.post("/api/reviews/:id/resolve", async (c) => {
   return c.json({ status: "resolved", id: c.req.param("id"), decision: input.decision });
 });
 
-app.notFound((c) => c.json(errorBody("not_found", "Route not found"), 404));
+// Add Vary: Accept to HTML responses that have markdown alternates.
+// This runs for all worker-first paths; non-worker-first paths are served
+// directly by the assets binding and cannot be intercepted here.
+app.all("*", async (c, next) => {
+  await next();
+  const resp = c.res;
+  const contentType = resp.headers.get("content-type") || "";
+  if (contentType.includes("text/html")) {
+    const headers = new Headers(resp.headers);
+    const vary = headers.get("vary");
+    headers.set("vary", vary ? `${vary}, Accept, Accept-Encoding` : "Accept, Accept-Encoding");
+    c.res = new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
+  }
+});
+
+app.notFound((c) => {
+  const path = new URL(c.req.url).pathname;
+  const accept = (c.req.header("accept") || "").toLowerCase();
+  const wantsMarkdown = accept.includes("text/markdown") &&
+    (!accept.includes("text/html") || accept.indexOf("text/markdown") < accept.indexOf("text/html"));
+
+  // JSON error for unknown /api/* paths
+  if (path.startsWith("/api/")) {
+    return c.json(errorBody("not_found", `Unknown API path: ${path}`, { path }), 404);
+  }
+
+  // Agent-friendly 404: markdown body for Accept: text/markdown
+  if (wantsMarkdown && !path.includes(".")) {
+    const origin = new URL(c.req.url).origin;
+    const body = `# 404 — Not Found\n\n\`${path}\` does not exist on this site.\n\n## Where to look next\n\n- [Home](${origin}/)\n- [Sitemap](${origin}/sitemap.xml)\n- [Agent index](${origin}/llms.txt)\n- [Agent catalog (JSON)](${origin}/api/ai)\n- [OpenAPI spec](${origin}/openapi.json)\n`;
+    return new Response(body, {
+      status: 404,
+      headers: {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "Cache-Control": "no-store",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }
+
+  return c.json(errorBody("not_found", "Route not found"), 404);
+});
 
 app.onError((error, c) => {
   console.error(JSON.stringify({ message: "request_failed", error: error.message, path: c.req.path }));
