@@ -4,18 +4,21 @@
 > [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Update this file each working
 > session; update `PROJECT_STATUS.md` when PR-sized work completes.
 
-Last updated: 2026-07-24
+Last updated: 2026-08-23
 
 ## Current objective
 
-Retired. Preserve the repository and existing evidence, but do not run
-scheduled producers, publication workflows, CI, or deployments without an
-explicit reactivation decision.
+Retired as a data-production program. Preserve the repository and existing
+evidence. The owner explicitly authorized one narrow public loading,
+performance, and deployment maintenance pass on 2026-08-23; this does not
+reactivate scheduled producers, publication workflows, migrations, or catalog
+expansion.
 
 ## Active work
 
-- None. GitHub Actions were removed on 2026-07-24 because the project was
-  dropped.
+- Release issue #10: product-shaped asynchronous states, stable background
+  refresh, and bounded public coverage caching. No evidence or data workflows
+  are in scope.
 
 ## Completed work at retirement
 - Machine-verified label lane: complete and published through protected

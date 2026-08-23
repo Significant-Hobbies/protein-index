@@ -189,7 +189,10 @@ app.post("/api/products/:productId/identity-evidence", async (c) => {
   return c.json(result, result.idempotent ? 200 : 201);
 });
 
-app.get("/api/coverage", async (c) => c.json(await getCoverage(c.env.DB)));
+app.get("/api/coverage", async (c) => {
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+  return c.json(await getCoverage(c.env.DB));
+});
 
 app.get("/api/completion-ledger", async (c) => {
   const parsed = validateCompletionLedger(new URL(c.req.url).searchParams);

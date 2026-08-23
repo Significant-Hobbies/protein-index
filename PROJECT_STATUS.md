@@ -1,6 +1,6 @@
 # Protein Index — PROJECT STATUS
 
-Last updated: 2026-08-15
+Last updated: 2026-08-23
 
 ## Why / What
 
@@ -53,6 +53,14 @@ the strict terminal-evidence gate above is actually satisfied.
 
 ## Timeline
 
+- 2026-08-23 — The owner explicitly authorized a narrow maintenance release
+  for the retained public product. Catalog, lookup, drawer, and coverage flows
+  now distinguish structural initial loading from stable background refresh,
+  abort stale lookup/detail requests, and avoid unresolved metric dashes. The
+  public coverage aggregation is browser-cached for 60 seconds and edge-cached
+  for five minutes, with cache reuse disabled across Worker versions. This does
+  not reactivate data producers, publication workflows, migrations, or evidence
+  rules.
 - 2026-08-15 — The retained public surface was repaired and reverified after
   retirement: the homepage now publishes an exact self-canonical and matching
   Open Graph URL, CI retains a safe SEO/build gate, and exact-main release

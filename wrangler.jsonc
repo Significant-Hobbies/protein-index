@@ -17,6 +17,10 @@
       "/openapi.json"
     ]
   },
+  "cache": {
+    "enabled": true,
+    "cross_version_cache": false
+  },
   "d1_databases": [
     {
       "binding": "DB",

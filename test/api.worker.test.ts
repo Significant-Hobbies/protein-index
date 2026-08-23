@@ -464,6 +464,7 @@ describe("Worker catalog API", () => {
 
     const coverageResponse = await worker.fetch("http://localhost/api/coverage");
     expect(coverageResponse.status).toBe(200);
+    expect(coverageResponse.headers.get("Cache-Control")).toBe("public, max-age=60, s-maxage=300");
     const coverage = await json<CoverageResponse>(coverageResponse);
     expect(coverage.claim).toBe("configured_sources_only");
     expect(coverage.catalog).toMatchObject({ products: 5, validGtin: 5, structuredNutrition: 5, nutritionLabelImages: 0, extractionCandidates: 0 });

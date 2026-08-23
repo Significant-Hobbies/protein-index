@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { CatalogTable, HeaderProductLookup, lookupDestination } from "../src/App";
+import { CatalogLoadingState, CatalogTable, CoverageLoadingState, HeaderProductLookup, lookupDestination } from "../src/App";
 import type { CatalogProduct, CatalogResponse } from "../shared/api";
 import { calculateMetrics } from "../shared/metrics";
 
@@ -154,5 +154,32 @@ describe("catalog comparison surface", () => {
     const item = product({ calories: 360, proteinGrams: 52 });
     expect(lookupDestination("atlas protein", [item])).toEqual({ kind: "open", productId: item.id });
     expect(lookupDestination("protein", [item, { ...item, id: "prd_second" }])).toEqual({ kind: "catalog", query: "protein" });
+  });
+
+  it("renders product-shaped initial states without unresolved metric dashes", () => {
+    const catalog = renderToStaticMarkup(createElement(CatalogLoadingState));
+    const coverage = renderToStaticMarkup(createElement(CoverageLoadingState));
+
+    expect(catalog).toContain('aria-label="Loading catalog products"');
+    expect(catalog).toContain("catalog-loading-row");
+    expect(coverage).toContain('aria-label="Loading coverage ledger"');
+    expect(coverage).toContain("coverage-loading-grid");
+    expect(`${catalog}${coverage}`).not.toContain("—");
+  });
+
+  it("reserves lookup-result geometry while a new query is pending", () => {
+    const markup = renderToStaticMarkup(createElement(HeaderProductLookup, {
+      query: "whey",
+      products: [],
+      loading: true,
+      error: null,
+      onQuery: () => undefined,
+      onSelect: () => undefined,
+      onSubmit: () => undefined,
+    }));
+
+    expect(markup).toContain('aria-label="Checking the index"');
+    expect(markup.match(/lookup-skeleton/g)).toHaveLength(1);
+    expect(markup).not.toContain("No exact catalog match yet");
   });
 });

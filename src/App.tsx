@@ -314,13 +314,50 @@ export function HeaderProductLookup({ query, products, loading, error, onQuery, 
       <label htmlFor="header-product-lookup"><span className="sr-only">Quick product lookup</span><input id="header-product-lookup" name="productLookup" type="search" role="combobox" aria-autocomplete="list" aria-expanded={active} aria-controls="header-product-lookup-results" value={query} onChange={(event) => onQuery(event.target.value)} placeholder="Check a product, brand, or barcode" /></label>
       <button type="submit" aria-label="Search products">Search</button>
       {active && <div id="header-product-lookup-results" className="header-lookup-results" role="listbox" aria-label="Product matches">
-        {loading && <span className="header-lookup-note" role="status">Checking the index…</span>}
+        {loading && <div className="lookup-skeleton" role="status" aria-label="Checking the index"><span /><span /><span /></div>}
         {error && <span className="header-lookup-note header-lookup-error" role="alert">{error}</span>}
         {!loading && !error && products.length === 0 && <span className="header-lookup-note">No exact catalog match yet. Search all results.</span>}
         {!loading && !error && products.map((product) => <button type="button" key={product.id} role="option" aria-selected="false" onClick={() => onSelect(product)}><span><strong>{product.name}</strong><small>{product.brand}{product.flavour ? ` · ${product.flavour}` : ""}</small></span><em>{metricEvidenceLabel(product.nutritionStatus)}</em></button>)}
         {!loading && !error && products.length > 1 && <span className="header-lookup-note">Multiple matches — search all results for the full list.</span>}
       </div>}
     </form>
+  );
+}
+
+export function CatalogLoadingState() {
+  return (
+    <div className="catalog-loading" role="status" aria-label="Loading catalog products">
+      <div className="catalog-loading-desktop" aria-hidden="true">
+        <div className="catalog-loading-head" />
+        {[0, 1, 2, 3, 4].map((row) => <div className="catalog-loading-row" key={row}><span /><span /><span /><span /><span /></div>)}
+      </div>
+      <div className="catalog-loading-mobile" aria-hidden="true">
+        {[0, 1, 2].map((row) => <div className="catalog-loading-card" key={row}><span /><strong /><i /></div>)}
+      </div>
+      <span className="sr-only">Loading catalog products</span>
+    </div>
+  );
+}
+
+export function CoverageLoadingState() {
+  return (
+    <div className="coverage-loading" role="status" aria-label="Loading coverage ledger">
+      <div className="coverage-loading-gate" aria-hidden="true"><span /><strong /></div>
+      <div className="coverage-loading-grid" aria-hidden="true">
+        {[0, 1, 2, 3, 4, 5].map((item) => <span key={item} />)}
+      </div>
+      <span className="sr-only">Loading coverage ledger</span>
+    </div>
+  );
+}
+
+function DrawerLoadingState() {
+  return (
+    <div className="drawer-loading" role="status" aria-label="Loading product evidence">
+      <div className="drawer-loading-head" aria-hidden="true"><span /><div><strong /><i /><i /></div></div>
+      <div className="drawer-loading-grid" aria-hidden="true">{[0, 1, 2, 3, 4].map((item) => <span key={item} />)}</div>
+      <span className="sr-only">Loading product evidence</span>
+    </div>
   );
 }
 
@@ -471,7 +508,7 @@ function ProductDrawer({ detail, loading, error, onClose }: {
     <div className="drawer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <aside ref={drawerRef} className="drawer" role="dialog" aria-modal="true" aria-label="Product evidence detail">
         <button ref={closeRef} className="close" onClick={onClose} aria-label="Close product detail">×</button>
-        {loading && <div className="loading" role="status">Loading product evidence…</div>}
+        {loading && !detail && <DrawerLoadingState />}
         {error && <div className="error-state" role="alert">{error}</div>}
         {detail && (
           <>
@@ -1567,7 +1604,7 @@ function Coverage({ data, loading, error, completion, completionLoading, complet
   onEvidenceCommitted: () => Promise<void>;
   readOnly: boolean;
 }) {
-  if (loading) return <div className="loading" role="status">Reconciling coverage…</div>;
+  if (loading && !data) return <CoverageLoadingState />;
   if (error) return <div className="error-state" role="alert">{error}</div>;
   if (!data) return null;
   const cards = [
@@ -1583,7 +1620,8 @@ function Coverage({ data, loading, error, completion, completionLoading, complet
     { label: "Outstanding ingredients", value: data.completion.outstandingIngredients, action: () => onCompletionDrillDown("ingredients", "outstanding") },
   ];
   return (
-    <div className="coverage-page">
+    <div className="coverage-page" aria-busy={loading}>
+      {loading && <div className="refresh-notice" role="status"><span className="loader" />Refreshing coverage without clearing the current ledger…</div>}
       <div className={`coverage-gate coverage-gate-${data.completion.status}`}><div><span>Data completion gate</span><strong>{data.completion.status}</strong></div><p>{data.completion.status === "complete" ? "Every active product has terminal verified evidence." : `${data.completion.outstandingNutrition.toLocaleString("en-IN")} nutrition, ${data.completion.outstandingIngredients.toLocaleString("en-IN")} ingredient, and ${data.completion.outstandingIdentity.toLocaleString("en-IN")} identity records still need terminal evidence.`}</p></div>
       <div className="coverage-warning"><strong>Coverage claim: configured sources only.</strong><span>Source exhaustion and verified product completeness are separate gates.</span></div>
       <div className="coverage-grid">{cards.map(({ label, value, action }) => action ? <button key={label} onClick={action}><span>{label}</span><strong>{value.toLocaleString("en-IN")}</strong><small>View product worklist →</small></button> : <div key={label}><span>{label}</span><strong>{value.toLocaleString("en-IN")}</strong></div>)}</div>
@@ -1662,8 +1700,9 @@ export function App() {
       return;
     }
     const controller = new AbortController();
+    setLookupProducts([]);
+    setLookupState({ loading: true, error: null });
     const timeout = window.setTimeout(() => {
-      setLookupState({ loading: true, error: null });
       const params = new URLSearchParams({ q: query, scope: "all", trust: "all", verification: "all", ingredientVerification: "all", page: "1", pageSize: "6" });
       api.catalog(params, controller.signal)
         .then((result) => { setLookupProducts(result.products); setLookupState({ loading: false, error: null }); })
@@ -1730,6 +1769,7 @@ export function App() {
   useEffect(() => {
     if (!selectedId) { setDetail(null); return; }
     const controller = new AbortController();
+    setDetail(null);
     setDetailState({ loading: true, error: null });
     api.product(selectedId, controller.signal).then((result) => { setDetail(result); setDetailState({ loading: false, error: null }); }).catch((error: unknown) => { if (error instanceof DOMException && error.name === "AbortError") return; setDetailState({ loading: false, error: error instanceof Error ? error.message : String(error) }); });
     return () => controller.abort();
@@ -1847,17 +1887,17 @@ export function App() {
           <>
             <section className="hero-row">
               <div><p className="eyebrow">A living index of Indian food labels</p><h1>What’s in the pack<br /><em>before</em> the promise.</h1><p>Search canonical products, inspect where each value came from, and compare protein with the evidence state attached.</p></div>
-              <div className="hero-orbit" aria-hidden="true"><span>{coverage?.catalog.products.toLocaleString("en-IN") ?? "—"}</span><small>foods indexed</small><i /></div>
+              <div className="hero-orbit" aria-label={coverage ? `${coverage.catalog.products.toLocaleString("en-IN")} foods indexed` : "Loading indexed food count"}><span>{coverage ? coverage.catalog.products.toLocaleString("en-IN") : <b className="value-skeleton" />}</span><small>foods indexed</small><i /></div>
             </section>
             <section className="catalog-overview" aria-label="Catalog overview">
-              <div><span>Catalog</span><strong>{coverage?.catalog.products.toLocaleString("en-IN") ?? "—"}</strong><small>canonical food records</small></div>
-              <div><span>Protein discovery</span><strong>{coverage?.catalog.marketedProtein.toLocaleString("en-IN") ?? "—"}</strong><small>marketed protein products</small></div>
-              <div><span>Protein-branded</span><strong>{coverage?.catalog.proteinBranded.toLocaleString("en-IN") ?? "—"}</strong><small>default discovery set</small></div>
-              <div><span>Comparable macros</span><strong>{coverage?.catalog.proteinBrandedWithUsableNutrition.toLocaleString("en-IN") ?? "—"}</strong><small>protein-branded with calories + protein</small></div>
-              <div><span>Machine labels</span><strong>{coverage?.catalog.machineVerifiedNutrition.toLocaleString("en-IN") ?? "—"}</strong><small>machine-verified nutrition</small></div>
-              <div><span>Nutrition evidence</span><strong>{coverage ? (coverage.catalog.verifiedNutrition + coverage.catalog.unverifiedNutrition).toLocaleString("en-IN") : "—"}</strong><small>{coverage?.catalog.verifiedNutrition.toLocaleString("en-IN") ?? "—"} label verified</small></div>
-              <div><span>Ingredients</span><strong>{coverage ? (coverage.catalog.verifiedIngredients + coverage.catalog.unverifiedIngredients).toLocaleString("en-IN") : "—"}</strong><small>statements captured</small></div>
-              <button onClick={() => setTab("coverage")}><span>Source state</span><strong>{coverage?.completion.sourceCoverageComplete ? "Source-complete" : "Checking"}</strong><small>loaded free sources →</small></button>
+              <div><span>Catalog</span><strong>{coverage ? coverage.catalog.products.toLocaleString("en-IN") : <i className="value-skeleton" />}</strong><small>canonical food records</small></div>
+              <div><span>Protein discovery</span><strong>{coverage ? coverage.catalog.marketedProtein.toLocaleString("en-IN") : <i className="value-skeleton" />}</strong><small>marketed protein products</small></div>
+              <div><span>Protein-branded</span><strong>{coverage ? coverage.catalog.proteinBranded.toLocaleString("en-IN") : <i className="value-skeleton" />}</strong><small>default discovery set</small></div>
+              <div><span>Comparable macros</span><strong>{coverage ? coverage.catalog.proteinBrandedWithUsableNutrition.toLocaleString("en-IN") : <i className="value-skeleton" />}</strong><small>protein-branded with calories + protein</small></div>
+              <div><span>Machine labels</span><strong>{coverage ? coverage.catalog.machineVerifiedNutrition.toLocaleString("en-IN") : <i className="value-skeleton" />}</strong><small>machine-verified nutrition</small></div>
+              <div><span>Nutrition evidence</span><strong>{coverage ? (coverage.catalog.verifiedNutrition + coverage.catalog.unverifiedNutrition).toLocaleString("en-IN") : <i className="value-skeleton" />}</strong><small>{coverage ? `${coverage.catalog.verifiedNutrition.toLocaleString("en-IN")} label verified` : "Loading label evidence"}</small></div>
+              <div><span>Ingredients</span><strong>{coverage ? (coverage.catalog.verifiedIngredients + coverage.catalog.unverifiedIngredients).toLocaleString("en-IN") : <i className="value-skeleton" />}</strong><small>statements captured</small></div>
+              <button onClick={() => setTab("coverage")}><span>Source state</span><strong>{coverage ? (coverage.completion.sourceCoverageComplete ? "Source-complete" : "Source incomplete") : "Loading source state"}</strong><small>loaded free sources →</small></button>
             </section>
             <section className="trust-switch" aria-label="Comparison trust mode">
               <div><p className="eyebrow">Choose your evidence boundary</p><strong>{catalog?.trustedDefault ? "Trusted comparisons" : "Discovery catalog"}</strong><span>{catalog?.trustedDefault ? "Exact current identity, verified nutrition, and terminal ingredient evidence are required." : "Validation-passing community values can rank here with an unverified label; use Scope to explore every retained food."}</span></div>
@@ -1871,10 +1911,10 @@ export function App() {
               <label htmlFor="catalog-scope">Scope<select id="catalog-scope" name="scope" value={filters.scope} onChange={(event) => updateFilters({ scope: event.target.value })}><option value="protein_branded">Protein-branded discovery</option><option value="protein">Protein cohorts</option><option value="all">All ingested foods</option></select></label>
               <label htmlFor="catalog-sort">Sort<select id="catalog-sort" name="sort" value={filters.sort} onChange={(event) => updateFilters({ sort: event.target.value })}><option value="protein_density">Protein / 100 kcal</option><option value="completeness">Field coverage</option><option value="name">Name</option></select></label>
             </section>
-            <div className="result-meta" aria-live="polite"><span>{catalog?.pagination.total.toLocaleString("en-IN") ?? "—"} results</span><small>Missing values stay missing. Unverified values never enter trusted metrics.</small></div>
-            {catalogState.loading && <div className="loading" role="status"><span className="loader" />Querying canonical catalog…</div>}
+            <div className="result-meta" aria-live="polite"><span>{catalog ? `${catalog.pagination.total.toLocaleString("en-IN")} results` : "Loading results"}</span><small>Missing values stay missing. Unverified values never enter trusted metrics.</small></div>
+            {catalogState.loading && !catalog && <CatalogLoadingState />}
             {catalogState.error && <div className="error-state" role="alert"><strong>Catalog unavailable</strong><span>{catalogState.error}</span><button onClick={loadCatalog}>Try again</button></div>}
-            {catalog && !catalogState.loading && !catalogState.error && <CatalogTable data={catalog} onOpen={setSelectedId} onExplore={showDiscovery} page={page} onPage={setPage} />}
+            {catalog && !catalogState.error && <div className="catalog-results" aria-busy={catalogState.loading}>{catalogState.loading && <div className="refresh-notice" role="status"><span className="loader" />Refreshing results without clearing the current comparison…</div>}<CatalogTable data={catalog} onOpen={setSelectedId} onExplore={showDiscovery} page={page} onPage={setPage} /></div>}
           </>
         )}
         {tab === "reviews" && <><section className="page-head"><p className="eyebrow">Human verification gate</p><h1>Evidence review queue</h1><p>{isPublic ? "Inspect unresolved evidence and decision history. Production decisions remain read-only until operator authentication is in place." : "Resolve conflicts without discarding the original source record."}</p></section>{reviewId && <div className="read-only-notice"><strong>Focused review</strong><span>Showing the exact ledger-linked evidence item.</span><button className="ghost" onClick={() => setReviewId(null)}>Return to full queue</button></div>}<Reviews data={reviews} loading={reviewState.loading} error={reviewState.error} onResolve={resolve} onOpenProduct={setSelectedId} typeFilter={reviewType} statusFilter={reviewStatus} page={reviewPage} onType={(type) => { setReviewId(null); setReviewPage(1); setReviewType(type); }} onStatus={(status) => { setReviewId(null); setReviewPage(1); setReviewStatus(status); }} onPage={setReviewPage} readOnly={isPublic} /></>}

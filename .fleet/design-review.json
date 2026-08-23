@@ -1,0 +1,61 @@
+{
+  "$schema": "fleet.design-review.v1",
+  "version": 1,
+  "project": "protein-index",
+  "target": "public catalog loading and refresh states",
+  "mode": "preserve",
+  "register": "product",
+  "context": {
+    "product": "docs/product/overview.md",
+    "design": "src/styles.css"
+  },
+  "direction": {
+    "references": [],
+    "probes": [],
+    "selected": "existing-design",
+    "approval": "not-required",
+    "before": "artifacts/design/before-loading-1440.png"
+  },
+  "evidence": {
+    "screenshots": [
+      {
+        "width": 390,
+        "path": "artifacts/design/after-loading-390.png"
+      },
+      {
+        "width": 768,
+        "path": "artifacts/design/after-loading-768.png"
+      },
+      {
+        "width": 1440,
+        "path": "artifacts/design/after-loading-1440.png"
+      }
+    ],
+    "projectCheck": {
+      "command": "pnpm typecheck && pnpm exec vitest run test/catalog-dashboard.test.ts && pnpm test:worker -- test/api.worker.test.ts && pnpm build",
+      "status": "pass"
+    },
+    "critique": {
+      "score": 36,
+      "maximum": 40
+    },
+    "audit": {
+      "score": 18,
+      "maximum": 20
+    },
+    "unresolved": {
+      "p0": 0,
+      "p1": 0
+    },
+    "detector": {
+      "posture": "advisory",
+      "findings": [
+        "The advisory detector reports incumbent side-accent borders and Inter usage outside this narrow loading and performance pass."
+      ]
+    }
+  },
+  "ownerFeedback": {
+    "decision": "delegated",
+    "note": "Owner explicitly approved fixing and releasing the public loading and performance pass."
+  }
+}
