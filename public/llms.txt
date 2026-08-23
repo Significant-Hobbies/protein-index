@@ -2,12 +2,21 @@
 
 > A searchable index of proteins.
 
+## When to use this
+
+- Looking up Indian food products by GTIN, brand, or protein content with source-aware evidence
+- Comparing protein foods with verified label evidence separated from discovery-only data
+- Querying product nutrition, ingredients, offers, and ratings with explicit confidence levels
+- Checking catalog coverage and evidence completion status for the Indian protein product market
+- Accessing product detail as JSON or markdown for agent consumption
+
 ## Product
 
 
 ## Machine surfaces
 
 - [Agent catalog](https://protein.significanthobbies.com/api/ai): JSON inventory of public surfaces
+- [OpenAPI spec](https://protein.significanthobbies.com/openapi.json): Machine-readable API contract
 - [Homepage markdown](https://protein.significanthobbies.com/index.md): Product brief without JS
 - [This index](https://protein.significanthobbies.com/llms.txt)
 

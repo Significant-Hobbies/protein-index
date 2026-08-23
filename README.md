@@ -245,5 +245,5 @@ See [docs/product/sources.md](docs/product/sources.md) for trust states, coverag
 semantics, and the DataKart integration checklist. The full repository knowledge
 system lives under [docs/](docs/index.md).
 
-Implementation work is tracked in `openspec/changes/` and durable product status
-lives in `PROJECT_STATUS.md`.
+Durable product status and the shipped-feature history live in
+`PROJECT_STATUS.md`. The retired repository has no active planning backlog.

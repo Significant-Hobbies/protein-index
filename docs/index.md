@@ -37,7 +37,7 @@ docs/
   index.md                      this file
   product/                      what the product is, scope, sources, evidence
   architecture/                 system, data model, pipeline, decisions
-  architecture/decisions/       distilled ADRs (full proposals live in openspec/)
+  architecture/decisions/       durable architecture decision records
   development/                  local dev, tests, data scripts, contributing
   operations/                   workflows, jobs, runbooks, publication gates
   operations/jobs/              per-scheduled-job reference
