@@ -6,8 +6,7 @@ description: Repository knowledge system for the Protein Index project.
 # Protein Index docs
 
 This is the canonical, local-first knowledge system for the Protein Index
-repository. The Markdown files in `docs/` are the source of truth; the
-[Blume config](../blume.config.ts) is only the presentation and search layer.
+repository. The Markdown files in `docs/` are the source of truth.
 
 For the always-loaded agent bootloader, see [`AGENTS.md`](../AGENTS.md). For the
 durable, append-only product timeline, see

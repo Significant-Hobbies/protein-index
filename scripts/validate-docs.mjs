@@ -5,10 +5,10 @@
 //   1. Every .md file under docs/ has YAML frontmatter with a non-empty `title`.
 //   2. Every Markdown link and every relative path link resolves to a file
 //      that exists in the repository (or is an allowed external/anchor link).
-//   3. No link points into gitignored generated dirs (.blume/, dist-docs/).
+//   3. No link points into generated build directories.
 //
 // Markdown in docs/ is the source of truth; this script keeps it internally
-// consistent. It does not require Blume or any dependency — just Node.
+// consistent. It does not require any dependency — just Node.
 //
 // Usage: node scripts/validate-docs.mjs
 //        pnpm docs:validate
@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DOCS = join(ROOT, "docs");
-const IGNORED_DIRS = new Set([".blume", ".blume-verify", "dist-docs", "node_modules"]);
+const IGNORED_DIRS = new Set(["node_modules"]);
 
 const exit = (code) => process.exit(code);
 

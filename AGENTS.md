@@ -50,8 +50,7 @@ first comparisons with strict Trusted / Discovery boundaries.
 ## Documentation navigation
 
 The repository knowledge system lives in [`docs/`](docs/index.md). Markdown in
-`docs/` is the source of truth; the Blume config is only the presentation
-layer.
+`docs/` is the source of truth.
 
 | You need | Read |
 | --- | --- |
@@ -92,5 +91,3 @@ does not retain active planning artifacts.
 8. Update `PROJECT_STATUS.md` when PR-sized work completes, merges, is
    superseded, or is abandoned. Update `STATUS.md` each working session. Do not
    create extra status ledgers.
-9. Blume (`blume.config.ts`) is only the presentation and search layer. Never
-   edit generated files under `.blume/` or `dist-docs/`; they are gitignored.
