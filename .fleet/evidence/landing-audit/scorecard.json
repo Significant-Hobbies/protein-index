@@ -1,0 +1,53 @@
+{
+  "$schema": "fleet.landing-audit.v1",
+  "project": "protein-index",
+  "priority": "P4",
+  "decision": "Hold",
+  "auditedAt": "2026-08-29",
+  "candidateUrl": "https://varieties-threatened-carb-attacked.trycloudflare.com/",
+  "productionUrl": "https://protein.significanthobbies.com/",
+  "releaseState": "Latest-source candidate qualified through a temporary Cloudflare tunnel backed by the production read API. Metadata, no-script purpose copy, agent documents, catalog classification, and dual footer composition are not deployed by this audit.",
+  "implementationAction": "preserve",
+  "migrationCandidate": false,
+  "gates": {
+    "contentPurpose": {
+      "score": 96,
+      "status": "pass",
+      "evidence": "The interface clearly presents a source-aware Indian food-label catalog, gives search and comparison as the immediate loop, exposes coverage totals and evidence states, and repeatedly warns that unverified values do not become trusted facts. The revised machine and no-script copy also states that configured-source coverage is not the whole Indian market and that the catalog is a reference rather than medical advice."
+    },
+    "designQuality": {
+      "score": 94,
+      "status": "pass",
+      "evidence": "The existing editorial green-and-paper visual system is polished, data-dense, coherent, and much better suited to the evidence catalog than a generic landing template. Exact 390 and 1440 pixel checks found zero overflow, console errors, or failed resources. The latest candidate renders one project strip and one Ask AI footer while retaining the useful in-product footer. No migration is warranted."
+    },
+    "seo": {
+      "score": 96,
+      "status": "pass-with-advisory",
+      "evidence": "The candidate passes all critical checks with a 47-character title, 153-character description, canonical, complete Open Graph and Twitter metadata, JSON-LD, crawlable no-script H1 and purpose copy, and no broken internal links. The remaining advisories are that the static fallback has no H2 and approximately 197 words; the hydrated product UI itself contains a direct H1 and extensive useful content."
+    },
+    "geo": {
+      "score": 100,
+      "status": "pass",
+      "evidence": "The latest-source candidate qualifies at Fleet S-tier 100 after API endpoints were correctly modeled as dataResources instead of pretending they were Markdown page surfaces, and the sitemap was limited to indexable pages. The public Markdown brief and agent indexes now describe the product and its market-coverage limits accurately."
+    },
+    "performance": {
+      "score": 94,
+      "status": "pass-with-advisory",
+      "evidence": "PSI Swarm completed 4/4 candidate profiles with weighted LCP 1.03 s, CLS 0.003, and TBT 1 ms. LCP was 2.99 s on slow mobile, 1.33 s on mid mobile, 694 ms on fast mobile, and 396 ms on desktop. The slowest profile remains slightly above the 2.5-second ideal, largely due to the hydrated data application bundle."
+    }
+  },
+  "verification": {
+    "passed": [
+      "TypeScript typecheck",
+      "focused agent-index tests (4/4)",
+      "production build",
+      "documentation validation",
+      "latest-candidate browser checks at 390 and 1440 pixels",
+      "latest-candidate SEO audit",
+      "latest-candidate GEO audit",
+      "latest-candidate PSI Swarm coverage profile"
+    ],
+    "knownBaselineFailure": "The broad unit suite passes 323 tests and fails 13 workflow-contract tests because the retired checkout no longer contains the publication workflows those tests still read. None of those failures touches the landing, metadata, or agent-index changes in this audit."
+  },
+  "minimumObserved": 94
+}
