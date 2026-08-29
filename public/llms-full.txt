@@ -1,15 +1,23 @@
 # Protein Index — full agent brief
 
-A searchable index of proteins.
+A source-aware reference for comparing packaged protein foods from configured
+Indian data sources. It keeps verified label evidence separate from broader
+discovery data and does not claim complete market coverage.
 
 ## Index
 
 # Protein Index
 
-Searchable protein index.
+Use the catalog to search canonical products, compare declared macros and
+protein density, inspect provenance, and understand which evidence remains
+incomplete. Missing nutrition is not invented and conflicts are withheld from
+trusted comparisons.
 
 ## Product links
 
+- Catalog: https://protein.significanthobbies.com/
+- Coverage: https://protein.significanthobbies.com/api/coverage
+- Health: https://protein.significanthobbies.com/api/health
 
 ## Machine surfaces
 

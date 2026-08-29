@@ -102,38 +102,31 @@ export function buildApiAiCatalog(origin = ORIGIN) {
         kind: "spa",
         description: "Human SPA shell — use markdown/API instead",
       },
+    ],
+    dataResources: [
       {
-        id: "llms",
-        url: `${origin}/llms.txt`,
-        md: null,
-        kind: "static",
-        description: "Agent index",
+        id: "agent_catalog",
+        url: `${origin}/api/ai`,
+        kind: "json",
+        description: "Inventory of public agent and data surfaces",
       },
       {
         id: "health",
         url: `${origin}/api/health`,
-        md: null,
-        kind: "api",
+        kind: "json",
+        description: "Catalog publication and runtime status",
       },
       {
         id: "coverage",
         url: `${origin}/api/coverage`,
-        md: null,
-        kind: "api",
+        kind: "json",
+        description: "Current source and evidence coverage ledger",
       },
       {
         id: "products_search",
         url: `${origin}/api/products`,
-        md: null,
-        kind: "api",
+        kind: "json",
         description: "Search/list products as JSON",
-      },
-      {
-        id: "product_detail",
-        url: `${origin}/api/products/:id`,
-        md: `${origin}/api/products/:id.md`,
-        kind: "dynamic",
-        description: "Single product JSON or markdown",
       },
     ],
     auth: {
@@ -149,9 +142,6 @@ export const SITEMAP_XML = `<?xml version="1.0" encoding="UTF-8"?>
   <url><loc>${ORIGIN}/</loc></url>
   <url><loc>${ORIGIN}/index.md</loc></url>
   <url><loc>${ORIGIN}/llms.txt</loc></url>
-  <url><loc>${ORIGIN}/api/ai</loc></url>
-  <url><loc>${ORIGIN}/api/health</loc></url>
-  <url><loc>${ORIGIN}/api/coverage</loc></url>
 </urlset>
 `;
 

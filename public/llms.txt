@@ -1,17 +1,20 @@
 # Protein Index
 
-> A searchable index of proteins.
+> Source-aware catalog of Indian packaged protein products. Verified label
+> evidence is kept separate from broader discovery data.
 
 ## When to use this
 
 - Looking up Indian food products by GTIN, brand, or protein content with source-aware evidence
 - Comparing protein foods with verified label evidence separated from discovery-only data
 - Querying product nutrition, ingredients, offers, and ratings with explicit confidence levels
-- Checking catalog coverage and evidence completion status for the Indian protein product market
+- Checking configured-source coverage and evidence completion status
 - Accessing product detail as JSON or markdown for agent consumption
 
 ## Product
 
+- [Catalog UI](https://protein.significanthobbies.com/): Human browse and compare experience
+- [Coverage](https://protein.significanthobbies.com/api/coverage): Current evidence completion ledger
 
 ## Machine surfaces
 
@@ -19,6 +22,12 @@
 - [OpenAPI spec](https://protein.significanthobbies.com/openapi.json): Machine-readable API contract
 - [Homepage markdown](https://protein.significanthobbies.com/index.md): Product brief without JS
 - [This index](https://protein.significanthobbies.com/llms.txt)
+
+## Limits
+
+- The catalog does not claim complete Indian-market coverage.
+- Missing values are not inferred.
+- Discovery-only values are not equivalent to verified label evidence.
 
 ## Optional
 

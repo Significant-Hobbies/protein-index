@@ -20,6 +20,32 @@
       "description": "Product home"
     }
   ],
+  "dataResources": [
+    {
+      "id": "agent-catalog",
+      "url": "https://protein.significanthobbies.com/api/ai",
+      "kind": "json",
+      "description": "Inventory of public agent and data surfaces"
+    },
+    {
+      "id": "coverage",
+      "url": "https://protein.significanthobbies.com/api/coverage",
+      "kind": "json",
+      "description": "Current source and evidence coverage ledger"
+    },
+    {
+      "id": "health",
+      "url": "https://protein.significanthobbies.com/api/health",
+      "kind": "json",
+      "description": "Catalog publication and runtime status"
+    },
+    {
+      "id": "products",
+      "url": "https://protein.significanthobbies.com/api/products",
+      "kind": "json",
+      "description": "Search and filter the public product catalog"
+    }
+  ],
   "auth": {
     "public": true,
     "notes": "Auth-walled app routes are not agent-indexed unless listed here."
