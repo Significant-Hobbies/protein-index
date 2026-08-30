@@ -461,10 +461,12 @@ function familySql(family: CompletionFamily, includeSources = true, includeDetai
   const identityDecisionCte = family === "identity" ? `, current_identity_decision_summary AS (
     SELECT decision.product_id, COUNT(*) AS current_identity_decision_count
     FROM current_identity_evidence_decisions decision
+    -- d1-scan: reviewed-unbounded owner=completion-ledger reason=one current row per active product
     GROUP BY decision.product_id
   ), identity_decision_history_summary AS (
     SELECT product_id, COUNT(*) AS historical_identity_decision_count
     FROM identity_evidence_decisions
+    -- d1-scan: reviewed-unbounded owner=completion-ledger reason=full history is required for contradiction detection
     GROUP BY product_id
   )` : "";
   const sourceCtes = includeSources ? `, source_ranked AS (
